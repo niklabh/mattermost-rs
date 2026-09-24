@@ -12,13 +12,13 @@
 //!
 //! # What is forwarded
 //!
-//! Only the `force` sweep can forward, and only **before** the move writes anything: a member
-//! whose removal this port cannot reproduce — a guest (whose last channel on the team evicts
-//! them from it), a group-constrained channel swept by somebody else, a shared channel; see
-//! [`mm_app::App::remove_user_from_channel`] — makes the sweep a [`MemberWrite::Forward`], and
-//! the request is handed to Go whole. All three are public Go code this port owes, not private
-//! code ([D-1130]). The deactivated-member sweep may already have run by then; it is a plain
-//! `DELETE` Go repeats without effect. `App::move_channel` itself never forwards.
+//! Only the `force` sweep can forward, and only **before** the move writes anything: a shared
+//! channel while Go's shared-channel sync service runs, whose `NotifyMembershipChanged` is state
+//! in the Go process — see [`mm_app::App::remove_user_from_channel`] and [D-1170] — makes the
+//! sweep a [`MemberWrite::Forward`], and the request is handed to Go whole. The
+//! deactivated-member sweep may already have run by then; it is a plain `DELETE` Go repeats
+//! without effect. `App::move_channel` itself never forwards. Guests and group-constrained
+//! channels are swept here.
 //!
 //! # The audit
 //!

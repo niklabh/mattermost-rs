@@ -14754,3 +14754,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `net/http`'s `HEAD` framing through the Strangler proxy | `mm_api::proxy::forward` | DONE, closes [D-903] | `parity::web_client::a_forwarded_head_keeps_gos_content_length`, 1 unit (8 framing cases over real sockets) | A `HEAD` keeps Go's `Content-Length` verbatim and gets none when Go sent none; `204`/`304` already matched (Go suppresses the header, hyper writes none). |
 | `ServiceSettings.TrustedProxyIPHeader`, `utils.GetIPAddress` (utils.go:94), its `web.Handler.ServeHTTP` call | `mm_app::config`, `mm_api::client_ip` (a middleware on both routers), `plugin_context` | DONE, closes [D-930] | `go_parity` (70 rows, `behaviour_ip_address.json`) + 3 unit + 2 config; `parity::plugin_hooks` walks two trusted headers | The address is returned as written, not re-formatted; the plugin hook context is the only reader this server has (audit rows, session attributes and rate limiting are unported). |
+
+## Tech-debt payoff: `removeUserFromChannel`'s guest, group and shared branches — D-1130 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `removeUserFromChannel` guest arm (app/channel.go:3036), `FilterNonGroupChannelMembers` (user.go:2666), `User().GetChannelGroupUsers` | `App::remove_user_from_channel_inner`, `App::filter_non_group_channel_members`, `UserStore::get_channel_group_user_ids` | DONE, closes [D-1130], opens [D-1170] | `parity::channel_member_removal` (5), 1 unit | A guest's eviction reuses `LeaveTeam`'s `remove_team_member`/`post_process_team_member_leave` but writes no team-leave post; a shared channel forwards only while Go's sync service runs. |

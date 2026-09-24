@@ -546,8 +546,8 @@ async fn local_patch_channel(
 /// `moveChannel`'s order without its two user steps: channel (404), `team_id` (400), `force`
 /// (400), team (404), DM/GM (**403** `api.channel.move_channel.type.invalid`), then the
 /// deactivated-member sweep, the forced sweep with a **nil remover**, and `MoveChannel(team,
-/// channel, nil)` — which posts nothing. A member the sweep cannot remove here (a guest, a shared
-/// channel) forwards the whole request over the socket.
+/// channel, nil)` — which posts nothing. A shared channel while Go's shared-channel service runs
+/// forwards the whole request over the socket.
 async fn local_move_channel(
     State(state): State<AppState>,
     Extension(go): Extension<GoLocalSocket>,

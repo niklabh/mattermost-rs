@@ -490,12 +490,10 @@ pub async fn can_user_direct_message(
         Err(err) => return ApiError::from(err).into_response(),
     }
 
-    let licence = match state.app.license().await {
-        Ok(licence) => licence,
+    let service_would_exist = match state.app.shared_channel_service_running().await {
+        Ok(running) => running,
         Err(err) => return ApiError::from(*err).into_response(),
     };
-    let service_would_exist = licence.is_some_and(|l| l.has_shared_channels())
-        && state.app.config().enable_shared_channels;
     if service_would_exist {
         tracing::Span::current().record("forwarded", true);
         tracing::debug!("handing a shared-channel DM check to Go's sync service");

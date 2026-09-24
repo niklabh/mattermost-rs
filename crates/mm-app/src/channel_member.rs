@@ -35,9 +35,9 @@
 //! Every branch that needs machinery this server does not have is refused as
 //! [`MemberWrite::Forward`] and the handler hands the whole request to Go, so the answer is Go's
 //! own. The reasons are enumerated on each function; the recurring ones are group-constrained
-//! channels (the group store's `FilterNonGroupChannelMembers`), attribute-based access control,
-//! shared channels, guest sessions, `post_root_id` (a `ThreadMemberships` write) and a channel
-//! carrying a `default_category_name` (a `SidebarChannels` write).
+//! channels on the add paths, attribute-based access control, shared channels (on removal only
+//! while Go's shared-channel service runs), guest sessions, `post_root_id` (a `ThreadMemberships`
+//! write) and a channel carrying a `default_category_name` (a `SidebarChannels` write).
 
 use mm_model::channel::Channel;
 use mm_model::channel_member::{ChannelMember, get_default_channel_notify_props};
@@ -939,14 +939,33 @@ impl App {
         Ok(MemberWrite::Done(saved))
     }
 
-    /// Port of `app.App.RemoveUserFromChannel` (app/channel.go:3113) and the
-    /// `removeUserFromChannel` (:2999) it wraps.
+    /// Port of the inner `app.App.removeUserFromChannel` (app/channel.go:2999): everything
+    /// [`App::remove_user_from_channel`] does **except** the leave or removal post — the
+    /// membership, the history row, a guest's team eviction, the two `user_removed` events.
+    /// Called on its own by the team-membership sweep a channel move runs
+    /// (`RemoveUsersFromChannelNotMemberOfTeam`), which is why a member swept off a moved channel
+    /// gets no "removed" post. Returns the user it loaded so the wrapper can write that post
+    /// without a second read.
     ///
     /// # Town Square is not leavable, unless you are a guest
     ///
     /// `channel.Name == "town-square"` and the user is not a guest → `api.channel.remove.default`
     /// at 400. A guest *may* be removed from the default channel, because that is how a guest
     /// leaves a team.
+    ///
+    /// # A group-constrained channel refuses a member its groups still vouch for
+    ///
+    /// Somebody else removing a non-bot from a group-constrained channel runs
+    /// [`App::filter_non_group_channel_members`] on that one user; an **empty** answer — a linked
+    /// group still holds them — is 400 `api.channel.remove_members.denied`. The REST routes refuse
+    /// the same case earlier with their own id, so this branch is reached by a channel move's
+    /// `force` sweep.
+    ///
+    /// # A guest's last channel on the team takes them off the team
+    ///
+    /// After the membership is gone, a guest with no other channel on the team (space channels
+    /// counted separately, since `GetChannelMembersForUser` cannot see them) is removed from it:
+    /// see [`App::remove_guest_without_channels_from_team`].
     ///
     /// # Two `user_removed` events with **different** payload keys
     ///
@@ -957,16 +976,12 @@ impl App {
     ///
     /// # What is forwarded
     ///
-    /// - a **guest** being removed, whose last channel membership evicts them from the team
-    ///   (`teamService.RemoveTeamMember`, a `TeamMembers` write plus its own posts and events),
-    /// - a **group-constrained** channel when somebody else is doing the removing,
-    /// - a **shared** channel.
-    /// Port of the inner `app.App.removeUserFromChannel` (app/channel.go:2999): everything
-    /// [`App::remove_user_from_channel`] does **except** the leave or removal post — the
-    /// membership, the history row, the two `user_removed` events. Called on its own by the
-    /// team-membership sweep a channel move runs (`RemoveUsersFromChannelNotMemberOfTeam`),
-    /// which is why a member swept off a moved channel gets no "removed" post. Returns the user
-    /// it loaded so the wrapper can write that post without a second read.
+    /// Only a **shared** channel while Go's shared-channel sync service is running (see
+    /// [`App::shared_channel_service_running`]): `NotifyMembershipChanged` queues a sync task in
+    /// that service, inside the Go process, and nothing here can reach it. Decided before any
+    /// write, so Go does the whole removal. With the service off — every unlicensed server, and
+    /// a licensed one without `EnableSharedChannels` — Go's `if scs != nil` skips the call and a
+    /// shared channel is removed here like any other ([D-1170]).
     #[tracing::instrument(skip(self, channel), fields(channel_id = %channel.id, user_id = %user_id_to_remove))]
     pub(crate) async fn remove_user_from_channel_inner(
         &self,
@@ -997,22 +1012,37 @@ impl App {
             ));
         }
 
+        // Only somebody else's removal is screened, and a bot never is: leaving a group-synced
+        // channel yourself is always allowed. The one user asked about is refused when the
+        // filter finds **no** non-member — that is, when a linked group still vouches for them —
+        // and the params carry that empty list, so Go's sentence ends in a literal `[]`.
         if channel.is_group_constrained() && user_id_to_remove != remover_user_id && !user.is_bot {
-            return Ok(MemberWrite::Forward(
-                "FilterNonGroupChannelMembers needs the group syncable store",
-            ));
-        }
-
-        if is_guest {
-            return Ok(MemberWrite::Forward(
-                "a guest's last channel evicts them from the team, which is a TeamMembers write",
-            ));
-        }
-
-        if channel.is_shared() {
-            return Ok(MemberWrite::Forward(
-                "a shared channel's membership change has to reach the remote cluster",
-            ));
+            let non_members = self
+                .filter_non_group_channel_members(&[user_id_to_remove.to_owned()], channel)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "the group filter failed");
+                    AppError::boxed(
+                        "removeUserFromChannel",
+                        "api.channel.remove_user_from_channel.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                })?;
+            if non_members.is_empty() {
+                let params = std::collections::HashMap::from([(
+                    "UserIDs".to_owned(),
+                    serde_json::Value::Array(Vec::new()),
+                )]);
+                return Err(AppError::boxed(
+                    "removeUserFromChannel",
+                    "api.channel.remove_members.denied",
+                    Some(params),
+                    String::new(),
+                    400,
+                ));
+            }
         }
 
         // Go loads the member here only to hand it to the `UserHasLeftChannel` plugin hook, but
@@ -1022,6 +1052,27 @@ impl App {
         let member = self
             .get_channel_member(&channel.id, user_id_to_remove)
             .await?;
+
+        // The last thing Go does is `NotifyMembershipChanged`; with the service running that is
+        // Go's own state, so the whole removal is handed over here, before the first write. A
+        // licence that cannot be read is handed over too: Go holds its licence in memory and
+        // would not fail on it.
+        if channel.is_shared() {
+            match self.shared_channel_service_running().await {
+                Ok(false) => {}
+                Ok(true) => {
+                    return Ok(MemberWrite::Forward(
+                        "NotifyMembershipChanged queues a sync task on Go's shared-channel service",
+                    ));
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "the licence could not be read; Go decides");
+                    return Ok(MemberWrite::Forward(
+                        "whether the shared-channel service runs needs the licence",
+                    ));
+                }
+            }
+        }
 
         self.remove_channel_membership(user_id_to_remove, &channel.id)
             .await?;
@@ -1040,6 +1091,16 @@ impl App {
                     500,
                 )
             })?;
+
+        if is_guest {
+            self.remove_guest_without_channels_from_team(
+                &channel.team_id,
+                user_id_to_remove,
+                remover_user_id,
+                hook_ctx,
+            )
+            .await?;
+        }
 
         // `InvalidateChannelCacheForUser` (channel.go:3069): the leaver's connections stop
         // hearing the channel, its own leave post included.
@@ -1087,6 +1148,83 @@ impl App {
         Ok(MemberWrite::Done(user))
     }
 
+    /// The guest arm of `removeUserFromChannel` (app/channel.go:3036-3066): a guest who has just
+    /// left their last channel on `team_id` is taken off the team.
+    ///
+    /// # "Last channel" is two reads, and the second is the one a reader drops
+    ///
+    /// `GetChannelMembersForUser` excludes space backing channels, so an empty answer is followed
+    /// by `GetTeamSpaceChannelsForUser`; a guest still in a space stays on the team. Either read
+    /// failing fails the removal — the first with its own 500, the second with
+    /// `app.channel.get_channels.get.app_error` — **after** the channel membership is already
+    /// gone, as in Go.
+    ///
+    /// # Every failure of the eviction itself is the same 400
+    ///
+    /// `GetTeamMember`'s 404 or 500 and `RemoveTeamMember`'s write failure are all replaced by
+    /// `api.team.remove_user_from_team.missing.app_error` at **400**; only
+    /// `postProcessTeamMemberLeave`'s own errors pass through. There is no team-leave post: that
+    /// belongs to `LeaveTeam`, which this does not call. The `leave_team` events, the sidebar and
+    /// preference clean-up and the `UserHasLeftTeam` hook are [`App::leave_team`]'s own two
+    /// steps, shared rather than repeated.
+    async fn remove_guest_without_channels_from_team(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        remover_user_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+    ) -> AppResult<()> {
+        if !self
+            .get_channel_members_for_user(team_id, user_id)
+            .await?
+            .is_empty()
+        {
+            return Ok(());
+        }
+
+        let spaces = self
+            .store()
+            .channel()
+            .get_team_space_channels_for_user(team_id, user_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "space channel listing failed");
+                AppError::boxed(
+                    "removeUserFromChannel",
+                    "app.channel.get_channels.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        if !spaces.0.is_empty() {
+            return Ok(());
+        }
+
+        let not_on_team = |err: Box<AppError>| {
+            tracing::debug!(error = %err, "the guest's team membership could not be removed");
+            AppError::boxed(
+                "removeUserFromChannel",
+                "api.team.remove_user_from_team.missing.app_error",
+                None,
+                String::new(),
+                400,
+            )
+        };
+        let mut member = self
+            .get_team_member(team_id, user_id)
+            .await
+            .map_err(not_on_team)?;
+        self.remove_team_member(&mut member)
+            .await
+            .map_err(not_on_team)?;
+        self.post_process_team_member_leave(&member, remover_user_id, hook_ctx)
+            .await
+    }
+
+    /// Port of `app.App.RemoveUserFromChannel` (app/channel.go:3113): the inner
+    /// [`App::remove_user_from_channel_inner`], then the leave post for a self-removal or the
+    /// removal post for anyone else's. Forwards exactly when the inner function does.
     #[tracing::instrument(skip(self, channel), fields(channel_id = %channel.id, user_id = %user_id_to_remove))]
     pub async fn remove_user_from_channel(
         &self,
@@ -1138,8 +1276,8 @@ impl App {
     /// here before answering and its failure is likewise only logged; the hooks and the
     /// `posted` event are the same, and neither server promises their timing against the
     /// answer. The post is skipped for town-square with
-    /// `ExperimentalEnableDefaultChannelLeaveJoinMessages` off — reachable only by a guest, whose
-    /// removal is forwarded before this point.
+    /// `ExperimentalEnableDefaultChannelLeaveJoinMessages` off — reachable only by a guest, the
+    /// one user the inner removal lets out of town-square.
     #[tracing::instrument(skip(self, hook_ctx), fields(channel_id = %channel_id, user_id = %user_id))]
     pub async fn leave_channel(
         &self,

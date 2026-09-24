@@ -117,10 +117,12 @@ impl App {
     ///
     /// Every channel member without a `TeamMembers` row on `team` is removed through the
     /// **inner** `removeUserFromChannel` — the membership, the history row and the two
-    /// `user_removed` events, but **no** leave or removal post. A member whose removal this port
-    /// cannot reproduce (a guest, a shared channel) is a [`MemberWrite::Forward`], reported
-    /// before anything of that member's is written; members earlier in the list stay removed,
-    /// which is what Go's own partial failure leaves behind too.
+    /// `user_removed` events, but **no** leave or removal post — and, for a guest leaving their
+    /// last channel on the channel's team, that team. A shared channel while Go's shared-channel
+    /// service runs is a [`MemberWrite::Forward`], reported at the first member swept and before
+    /// anything is written. A member a group-constrained channel's groups still vouch for fails
+    /// the sweep with `api.channel.remove_members.denied`; members earlier in the list stay
+    /// removed, which is what Go's own partial failure leaves behind too.
     ///
     /// `GetTeamMembersByIds` returns only the ids with a **live** row — the store filters
     /// `TeamMembers.DeleteAt = 0` (team_store.go:1164), so a member who once left the target team

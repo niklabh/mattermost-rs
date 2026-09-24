@@ -10057,17 +10057,24 @@ to `[]` — its doc comment states the comma rule as Go's. The other two slice s
 
 ---
 
-## D-1130 · Removing a guest, a group-constrained or a shared-channel member forwards the whole request
+## D-1130 · Removing a guest, a group-constrained or a shared-channel member forwards the whole request — CLOSED 2026-09-24
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-24 (D-480, channel move)
+**Status** CLOSED 2026-09-24 · **Severity** coverage · **Raised** 2026-09-24 (D-480, channel move)
 
-`App::remove_user_from_channel_inner` answers `MemberWrite::Forward` for three branches of Go's
-`removeUserFromChannel` (app/channel.go:2999), all of them public code: a **guest** (whose last
-channel on the team evicts them from it — `teamService.RemoveTeamMember` and
-`postProcessTeamMemberLeave`), a **group-constrained** channel swept by someone else
-(`FilterNonGroupChannelMembers`; `App::channel_members_minus_group_members` is already here), and a
-**shared** channel (`NotifyMembershipChanged` to the shared-channel service — the one that may
-genuinely need Go's state). Every caller forwards the whole request for it: `DELETE
-/channels/{id}/members/{user}`, the leave routes, and `moveChannel`'s `force` sweep, which is its
-only forward. **What is owed:** the first two ported; the third decided (port or permanent forward
-naming the service).
+Guest team eviction and the group-constrained filter are ported in `App::remove_user_from_channel_inner`
+(`parity::channel_member_removal`); a shared channel is served while Go's sync service is off and
+forwarded while it runs, which is [D-1170].
+
+---
+
+## D-1170 · A shared-channel member removal is forwarded while Go's shared-channel service runs
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-24 (D-1130)
+
+`removeUserFromChannel` ends in `scs.NotifyMembershipChanged` (platform/services/sharedchannel,
+public code), which queues a sync task in the **Go process's** shared-channel service. That service
+starts only under a `HasSharedChannels` licence with `EnableSharedChannels` on
+(`App::shared_channel_service_running`), and then every removal from a shared channel — `DELETE
+/channels/{id}/members/{user}`, `LeaveChannel`, `moveChannel`'s `force` sweep — is handed to Go whole
+before any write. **What is owed:** a port of the shared-channel sync service (task queue, remote
+cluster sends), after which the removal calls it here.
