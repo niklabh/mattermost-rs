@@ -14765,5 +14765,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `Context.SessionRequired` (web/context.go:138) | `mm_api::auth::session_required` | DONE | 5 unit + `parity::session_expiry::a_humans_token_session_is_refused_while_tokens_are_off` | Was missing: a non-bot token session with `EnableUserAccessTokens` off got a 200 here and a 401 from Go. |
 | `net/http` `Cookie.String` domain and value rules | `mm_api::sessions::{valid_cookie_domain, cookie_value}` | DONE | `behaviour_session_write.json` (+28 rows) | An invalid `Domain` (an IPv6 SiteURL's hostname) is dropped, a leading dot stripped, a value with a space or comma quoted. |
 
+## Configuration load: `fixConfig` and the feature-flag reads (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
 | `fixConfig`, `fixInvalidLocales` (config/utils.go:135, :151), both passes of `Store.Load` | `mm_app::config` (`Config::fix_config`, `fix_config_document`) | DONE, closes [D-1160] | `fix_config_go_parity` (48 rows, `behaviour_fix_config.json`, Go's own `Store.Load` after `TranslationsPreInit`) + 3 unit | Runs twice — on the document and after the overlay — and two rows only a two-pass port answers; `AvailableLocales` is fixed only in the whole-config path, since the narrow config does not hold it. |
 | Six `FeatureFlags` reads (`EnableSharedChannelsDMs`, `EnableDocs`, `MmBlocksEnabled`, `TeamMembershipAccessControl`, `EnableConcurrentReact`, `CJKSearch`) | `mm_app::channel_create`, `mention` (`App::explicit_mentions`), `post`, `post_write`, `team`; `mm_store::post_store::term_clause`; `mm_api::web_static` | DONE, closes [D-1161] | 9 unit (flag flipped each way, offline app) | Flags are settable only by environment at start, so there is no two-server parity test; with `EnableSharedChannelsDMs` on, a shared DM/GM is created with `ShareChannel`'s failure logged, and forwarded when the sync service would run. |
