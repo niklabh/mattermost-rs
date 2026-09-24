@@ -770,7 +770,7 @@ func main() {
 	rustOutMarkdown := flag.String("rust-out-markdown", "../../crates/mm-markdown/src", "directory to write mm-markdown's generated Rust into")
 	// -only=imaging writes just the image-pipeline fixtures and exits. The full run takes minutes;
 	// iterating on one oracle should not.
-	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet, plugin_requests, html2text, mail) and exit")
+	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet, plugin_requests, html2text, mail, gotemplate) and exit")
 	flag.Parse()
 
 	if *only == "imaging" {
@@ -792,6 +792,12 @@ func main() {
 	} else if *only == "i18n" {
 		if err := writeI18nBehaviourFixture(*out); err != nil {
 			fmt.Fprintf(os.Stderr, "FAIL: i18n behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "gotemplate" {
+		if err := writeGotemplateBehaviourFixture(*out, filepath.Join(*out, "..", "crates", "gotemplate", "src")); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: gotemplate behaviour fixture: %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -1308,6 +1314,11 @@ func main() {
 
 	if err := writeHTML2TextBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: html2text behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeGotemplateBehaviourFixture(*out, filepath.Join(*out, "..", "crates", "gotemplate", "src")); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: gotemplate behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
 

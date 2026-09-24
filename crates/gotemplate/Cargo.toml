@@ -8,6 +8,7 @@ rust-version.workspace = true
 license = "BSD-3-Clause"
 repository.workspace = true
 description = "Byte-exact port of Go's text/template and html/template contextual escaper"
+include = ["src/**/*.rs", "LICENSE*"]
 
 [dependencies]
 thiserror.workspace = true

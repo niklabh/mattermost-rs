@@ -162,23 +162,7 @@ static TEMPLATES: tokio::sync::OnceCell<Option<HtmlTemplates>> = tokio::sync::On
 /// Port of `templates.New(dir)` (platform/shared/templates/templates.go:41): `ParseGlob` over
 /// `*.html`, whose `filepath.Glob` hands `ParseFiles` the names **sorted**.
 pub fn load_templates(dir: &std::path::Path) -> Result<HtmlTemplates, EmailError> {
-    let mut names: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
-        .map_err(|_| EmailError::NoTemplates)?
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "html"))
-        .collect();
-    names.sort();
-    let mut files = Vec::with_capacity(names.len());
-    for path in names {
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let source = std::fs::read_to_string(&path).map_err(|_| EmailError::NoTemplates)?;
-        files.push((name, source));
-    }
-    Ok(HtmlTemplates::parse_files(&files)?)
+    Ok(HtmlTemplates::parse_glob_html(dir)?)
 }
 
 async fn templates() -> Result<&'static HtmlTemplates, EmailError> {
@@ -274,10 +258,13 @@ impl TemplateData {
     }
 
     fn into_value(self) -> Value {
-        Value::Struct(vec![
-            ("Props".to_owned(), Value::Map(self.props)),
-            ("HTML".to_owned(), Value::Map(self.html)),
-        ])
+        Value::Struct(
+            "templates.Data".to_owned(),
+            vec![
+                ("Props".to_owned(), Value::Map(self.props)),
+                ("HTML".to_owned(), Value::Map(self.html)),
+            ],
+        )
     }
 }
 

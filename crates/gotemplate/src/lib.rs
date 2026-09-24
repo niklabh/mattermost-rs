@@ -1,52 +1,53 @@
-//! Port of Go's `text/template` and `html/template` (SKELETON — API contract only).
+//! Byte-exact port of Go's `text/template` and `html/template` (Go 1.26).
+//!
+//! Mattermost renders every e-mail through `html/template` (`platform/shared/templates`), and the
+//! bytes it produces are what recipients' mail clients see — including the escaper's choices in
+//! every context (text, attributes, URLs, CSS, JavaScript) and its silent stripping of HTML
+//! comments. A different template engine produces *an* e-mail, not *the* e-mail, so this crate
+//! ports the Go packages line by line:
+//!
+//! * [`parse`](crate::parse): `text/template/parse` — lexer, parse tree, parser.
+//! * `exec`, `funcs`, `fmt`, `strconv`: `text/template`'s executor and builtins, with the parts
+//!   of `fmt` and `strconv` they print through.
+//! * `html`: `html/template`'s contextual autoescaper — contexts, transitions, the escaper that
+//!   rewrites pipelines, and every escaping function.
+//!
+//! The oracle is `reference/dump/behaviour_gotemplate.go` (fixture
+//! `fixtures/behaviour_gotemplate.json`), which runs the real Go packages — including every
+//! template Mattermost ships, through Mattermost's own `templates.New` — and the `go_parity` test
+//! module asserts byte equality against it.
+//!
+//! This crate contains no Mattermost code and never depends on an `mm-*` crate.
 
-use std::collections::BTreeMap;
+mod exec;
+mod fmt;
+mod funcs;
+mod html;
+pub(crate) mod parse;
+mod rv;
+mod strconv;
+mod text;
+mod unicode_tables;
+mod value;
 
-/// A value a template executes against: the Go data graph, reduced to what templates can see.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    /// A nil interface, nil pointer or absent map key.
-    Nil,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    /// A plain Go `string` — escaped by `html/template` for the context it lands in.
-    String(String),
-    /// `template.HTML` — trusted markup, not escaped in an HTML text context.
-    Html(String),
-    /// `template.URL`.
-    Url(String),
-    /// A Go slice or array.
-    List(Vec<Value>),
-    /// A Go `map[string]T`. `range` visits it in sorted key order, as Go does.
-    Map(BTreeMap<String, Value>),
-    /// A Go struct: field name to value, in declaration order.
-    Struct(Vec<(String, Value)>),
-}
+#[cfg(test)]
+mod go_parity;
 
-#[derive(Debug, thiserror::Error)]
+pub use exec::MissingKey;
+pub use html::template::HtmlTemplates;
+pub use text::TextTemplates;
+pub use value::Value;
+
+/// A template error. Its `Display` is exactly Go's `err.Error()`.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    #[error("template: {0}")]
+    /// A parse error (`template: <name>:<line>: ...`).
+    #[error("{0}")]
     Parse(String),
-    #[error("template: {0}")]
+    /// An execution error (`template: <name>:<line>:<col>: executing ...`), or a lookup failure.
+    #[error("{0}")]
     Exec(String),
-    #[error("html/template: {0}")]
+    /// An `html/template` escaping error (`html/template:...`).
+    #[error("{0}")]
     Escape(String),
-}
-
-/// A set of named `html/template` templates, as `template.ParseGlob` builds them.
-#[derive(Debug, Default)]
-pub struct HtmlTemplates {}
-
-impl HtmlTemplates {
-    /// `template.New("").ParseFiles(...)`-style: each `(file name, source)` is parsed in order;
-    /// the file's own name becomes a template, and every `{{define}}` inside it another.
-    pub fn parse_files(_files: &[(String, String)]) -> Result<Self, Error> {
-        Err(Error::Parse("not implemented".into()))
-    }
-
-    /// `ExecuteTemplate(w, name, data)`, returning what Go would have written.
-    pub fn execute(&self, _name: &str, _data: &Value) -> Result<String, Error> {
-        Err(Error::Exec("not implemented".into()))
-    }
 }
