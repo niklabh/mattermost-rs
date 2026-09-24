@@ -9497,7 +9497,9 @@ serves whatever is on disk. **What is owed:** the rewrite, once mm-api can be th
 
 ## D-903 · A forwarded `HEAD` loses its `Content-Length`
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-19 (web client)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-19 (web client)
+**Closed** 2026-09-24 — `proxy::forward` carries Go's `Content-Length` on a `HEAD` answer and, where Go sent
+none, hides the empty body's size so none is invented; `parity::web_client::a_forwarded_head_keeps_gos_content_length`.
 
 `proxy::forward` drops the upstream `Content-Length` as hop-by-hop and rebuilds the body from the
 bytes it read — which for a `HEAD` is none, so hyper writes `Content-Length: 0` where Go sent the
@@ -10033,3 +10035,17 @@ Two arms of `sendNotificationEmail` are not ported (`mm_app::notification_email`
   the mail goes without the embedded photo. It needs the initials renderer (the `gofont` port) in
   `mm-app`. Once Go has written the file, both servers embed the same bytes.
 
+
+---
+
+## D-1140 · A `HEAD` on a served `GET`-only api4 route is answered, where Go says 404
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-903's forwarded-`HEAD` probe)
+
+axum's `get` answers `HEAD` too, dispatching to the `GET` handler with the body removed. Go's api4
+routes are registered `Methods("GET")` only, so gorilla's method mismatch reaches `Handle404`:
+`HEAD /api/v4/system/ping` is Go 404, this server 200; `HEAD /api/v4/users/me` with no token is
+Go 404, this server 401. It holds for every served `GET` pair whose Go registration omits `HEAD`
+(the file routes and the web client register both, and are right). **What is owed:** route a
+`HEAD` on those pairs to the JSON 404 — one router-level guard keyed on which pairs Go registers
+with `HEAD`, and a parity sweep over `scripts/routes.py`'s `GET` list.

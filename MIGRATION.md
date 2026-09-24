@@ -14739,3 +14739,8 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `yuin/goldmark` v1.8.2 + GFM, `channels/utils/markdown.go` | `gogoldmark`, `mm_app::markdown_utils` | DONE | ~71,500 HTML comparisons, 11,924 inputs; 49 + 17 mutations, all non-equivalent caught | Push text and notification HTML. |
 | `app/notification_email.go`, `userAllowsEmail`, `GetMessageForNotification`, `ProcessMessageAttachments`, `GetFormattedPostTime` | `mm_app::notification_email` | DONE | `parity::email_send::a_mentions_notification_email_matches_gos` (mention + reply) | The e-mail pass is boxed: inlined, its future overflowed a debug worker's stack. Batching and the generated avatar: [D-1072]. |
 
+## Tech-debt payoff: the proxy's `HEAD` framing and `TrustedProxyIPHeader` (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `net/http`'s `HEAD` framing through the Strangler proxy | `mm_api::proxy::forward` | DONE, closes [D-903] | `parity::web_client::a_forwarded_head_keeps_gos_content_length`, 1 unit (8 framing cases over real sockets) | A `HEAD` keeps Go's `Content-Length` verbatim and gets none when Go sent none; `204`/`304` already matched (Go suppresses the header, hyper writes none). |
