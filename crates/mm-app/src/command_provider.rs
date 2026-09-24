@@ -72,6 +72,15 @@ pub(crate) const EN: &[(&str, &str)] = &[
     ),
     ("api.command_expand.name", "expand"),
     (
+        "api.command_exportlink.desc",
+        "Generate a link to download a export.",
+    ),
+    (
+        "api.command_exportlink.hint",
+        "[job-id|zip filename|{{.LatestMsg}}]",
+    ),
+    ("api.command_exportlink.name", "exportlink"),
+    (
         "api.command_collapse.desc",
         "Turn on auto-collapsing of image previews",
     ),
@@ -267,6 +276,10 @@ fn t_actions(id: &'static str, actions: &str) -> String {
     t(id).replace("{{.Actions}}", actions)
 }
 
+/// `slashcommands.LatestExportMessage` (command_exportlink.go:24), the one template variable of
+/// `api.command_exportlink.hint`.
+const LATEST_EXPORT_MESSAGE: &str = "latest";
+
 /// `slashcommands.AvailableRemoteActions` (command_remote.go:19).
 const AVAILABLE_REMOTE_ACTIONS: &str = "create, accept, remove, status";
 /// `slashcommands.AvailableShareActions` (command_share.go:25).
@@ -324,9 +337,6 @@ pub enum ProviderCommand {
     /// Registered, and `GetCommand` returned nil — `tryExecuteBuiltInCommand` treats that as no
     /// command, and the list skips it.
     Nil,
-    /// `GetCommand` depends on something this server cannot evaluate. Only `/exportlink` with
-    /// `DedicatedExportStore` on, where it asks the export backend whether it can generate links.
-    Undecidable,
     Command(Box<Command>),
 }
 
@@ -467,7 +477,11 @@ fn share_command() -> Command {
 
 /// Port of `GetCommandProvider(trigger)` followed by its `GetCommand(a, T)`, for an English
 /// request — the registry of `app/slashcommands/`, one arm per provider file.
-pub fn provider_command(config: &Config, trigger: &str) -> ProviderCommand {
+///
+/// `export_links` is whether `App.ExportFileBackend()` is a `FileBackendWithLinkGenerator` —
+/// [`crate::filestore::FileBackend::generates_links`] of [`App::export_file_backend`], which, as
+/// in Go, is the backend built once at boot and not rebuilt when the configuration changes.
+pub fn provider_command(config: &Config, export_links: bool, trigger: &str) -> ProviderCommand {
     let join = || {
         builtin(
             "join",
@@ -560,13 +574,22 @@ pub fn provider_command(config: &Config, trigger: &str) -> ProviderCommand {
             t("api.command_collapse.name"),
         ),
         // command_exportlink.go:35 — nil unless the direct-download flag, a dedicated export
-        // store and a link-generating backend all hold. The first is the only one readable here
-        // on a stock server, and it is enough to say nil.
+        // store (read from the *current* config) and a link-generating export backend (the one
+        // built at boot) all hold, in that order.
         "exportlink" => {
-            if !config.dedicated_export_store {
+            if !config.feature_flags.enable_export_direct_download
+                || !config.dedicated_export_store
+                || !export_links
+            {
                 return ProviderCommand::Nil;
             }
-            return ProviderCommand::Undecidable;
+            builtin(
+                "exportlink",
+                true,
+                t("api.command_exportlink.desc"),
+                &t("api.command_exportlink.hint").replace("{{.LatestMsg}}", LATEST_EXPORT_MESSAGE),
+                t("api.command_exportlink.name"),
+            )
         }
         "groupmsg" => builtin(
             "groupmsg",
@@ -761,8 +784,6 @@ pub enum CommandDispatch {
     Custom,
     /// A built-in provider with a non-nil `GetCommand` matches.
     BuiltIn,
-    /// [`ProviderCommand::Undecidable`].
-    Undecidable,
     /// Nothing matches: the 404 `api.command.execute_command.not_found.app_error`.
     NotFound(Box<AppError>),
 }
@@ -791,14 +812,11 @@ impl App {
     /// Precedence is by trigger, first come: `EnableCustomUserStatuses` off reserves `status`
     /// before anything is listed, then the plugins' commands — **not** sanitised, and listed
     /// whatever `EnableCommands` says — then the team's custom commands, sanitised, then the
-    /// built-ins. So a plugin's or a custom `/shrug` hides the built-in one. `Ok(None)` is
-    /// [`ProviderCommand::Undecidable`], for the handler to forward.
+    /// built-ins. So a plugin's or a custom `/shrug` hides the built-in one.
     #[tracing::instrument(skip(self), fields(count))]
-    pub async fn list_autocomplete_commands(
-        &self,
-        team_id: &str,
-    ) -> AppResult<Option<Vec<Command>>> {
+    pub async fn list_autocomplete_commands(&self, team_id: &str) -> AppResult<Vec<Command>> {
         let config = self.config();
+        let export_links = self.export_file_backend().generates_links();
         let mut commands: Vec<Command> = Vec::with_capacity(32);
         let mut seen = std::collections::HashSet::new();
 
@@ -837,19 +855,17 @@ impl App {
         }
 
         for trigger in BUILTIN_TRIGGERS {
-            match provider_command(&config, trigger) {
-                ProviderCommand::Command(command) => {
-                    if command.auto_complete && seen.insert(command.trigger.clone()) {
-                        commands.push(*command);
-                    }
-                }
-                ProviderCommand::Undecidable => return Ok(None),
-                ProviderCommand::Nil | ProviderCommand::Unregistered => {}
+            if let ProviderCommand::Command(command) =
+                provider_command(&config, export_links, trigger)
+                && command.auto_complete
+                && seen.insert(command.trigger.clone())
+            {
+                commands.push(*command);
             }
         }
 
         tracing::Span::current().record("count", commands.len());
-        Ok(Some(commands))
+        Ok(commands)
     }
 
     /// The part of `ExecuteCommand` (app/command.go:219) that decides *where* a command goes,
@@ -920,12 +936,15 @@ impl App {
             return Ok(CommandDispatch::Custom);
         }
 
-        match provider_command(&config, trigger) {
+        match provider_command(
+            &config,
+            self.export_file_backend().generates_links(),
+            trigger,
+        ) {
             ProviderCommand::Command(_) => {
                 tracing::Span::current().record("dispatch", "built_in");
                 Ok(CommandDispatch::BuiltIn)
             }
-            ProviderCommand::Undecidable => Ok(CommandDispatch::Undecidable),
             ProviderCommand::Nil | ProviderCommand::Unregistered => {
                 tracing::Span::current().record("dispatch", "not_found");
                 Ok(CommandDispatch::NotFound(not_found(trigger)))
@@ -982,9 +1001,16 @@ mod tests {
     /// Every id a `GetCommand` reads is in the table — a missing one would silently be the id.
     #[test]
     fn every_registered_command_translates() {
-        let config = Config::default();
+        let mut config = Config::default();
+        // Every provider non-nil, `exportlink` and `test` included.
+        config.feature_flags.enable_export_direct_download = true;
+        config.dedicated_export_store = true;
+        config.enable_testing = true;
         for trigger in BUILTIN_TRIGGERS {
-            if let ProviderCommand::Command(command) = provider_command(&config, trigger) {
+            let ProviderCommand::Command(command) = provider_command(&config, true, trigger) else {
+                panic!("{trigger} is nil under a configuration that registers everything")
+            };
+            {
                 for text in [
                     &command.auto_complete_desc,
                     &command.auto_complete_hint,
@@ -995,9 +1021,51 @@ mod tests {
             }
         }
         assert_eq!(
-            provider_command(&config, "nope"),
+            provider_command(&config, false, "nope"),
             ProviderCommand::Unregistered
         );
+    }
+
+    /// `ExportLinkProvider.GetCommand`'s three conditions (command_exportlink.go:35-48): the
+    /// command exists only when every one holds, and each alone is enough to make it nil.
+    #[test]
+    fn exportlink_is_registered_only_when_all_three_conditions_hold() {
+        let config = |flag: bool, dedicated: bool| {
+            let mut config = Config {
+                dedicated_export_store: dedicated,
+                ..Config::default()
+            };
+            config.feature_flags.enable_export_direct_download = flag;
+            config
+        };
+        for (flag, dedicated, links) in [
+            (false, false, false),
+            (false, true, true),
+            (true, false, true),
+            (true, true, false),
+            (false, false, true),
+            (true, false, false),
+            (false, true, false),
+        ] {
+            assert_eq!(
+                provider_command(&config(flag, dedicated), links, "exportlink"),
+                ProviderCommand::Nil,
+                "flag {flag}, dedicated {dedicated}, link backend {links}"
+            );
+        }
+        let ProviderCommand::Command(command) =
+            provider_command(&config(true, true), true, "exportlink")
+        else {
+            panic!("all three hold")
+        };
+        assert_eq!(command.trigger, "exportlink");
+        assert!(command.auto_complete);
+        assert_eq!(
+            command.auto_complete_desc,
+            "Generate a link to download a export."
+        );
+        assert_eq!(command.auto_complete_hint, "[job-id|zip filename|latest]");
+        assert_eq!(command.display_name, "exportlink");
     }
 
     /// The config-dependent providers: `exportlink` and `test` are nil on a stock server,
@@ -1006,22 +1074,20 @@ mod tests {
     fn the_conditional_providers_follow_their_settings() {
         let mut config = Config::default();
         assert_eq!(
-            provider_command(&config, "exportlink"),
+            provider_command(&config, false, "exportlink"),
             ProviderCommand::Nil
         );
-        assert_eq!(provider_command(&config, "test"), ProviderCommand::Nil);
-        config.dedicated_export_store = true;
         assert_eq!(
-            provider_command(&config, "exportlink"),
-            ProviderCommand::Undecidable
+            provider_command(&config, false, "test"),
+            ProviderCommand::Nil
         );
         config.enable_testing = true;
-        let ProviderCommand::Command(test) = provider_command(&config, "test") else {
+        let ProviderCommand::Command(test) = provider_command(&config, false, "test") else {
             panic!("test is registered")
         };
         assert!(!test.auto_complete);
 
-        let auto = |config: &Config, trigger| match provider_command(config, trigger) {
+        let auto = |config: &Config, trigger| match provider_command(config, false, trigger) {
             ProviderCommand::Command(command) => command.auto_complete,
             other => panic!("{trigger}: {other:?}"),
         };
@@ -1052,7 +1118,7 @@ mod tests {
     #[test]
     fn the_aliases_share_their_originals_text() {
         let config = Config::default();
-        let get = |trigger| match provider_command(&config, trigger) {
+        let get = |trigger| match provider_command(&config, false, trigger) {
             ProviderCommand::Command(command) => *command,
             other => panic!("{other:?}"),
         };

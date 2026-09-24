@@ -48,7 +48,7 @@ pub async fn create_board(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         tracing::Span::current().record("forwarded", true);
         return proxy::forward_to_go(State(state), request).await;
     }

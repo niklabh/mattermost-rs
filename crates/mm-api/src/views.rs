@@ -41,7 +41,7 @@
 //!
 //! It lived here as a private `OnceLock` while this module was its only consumer. That day came:
 //! `api4/properties.go` reads the same flag in its registration `if`, so it is now
-//! [`mm_app::config::Config::feature_flag_integrated_boards`] — one env lookup at startup, beside
+//! [`mm_app::config::Config::feature_flags`] — one env lookup at startup, beside
 //! the other four `FeatureFlags` this server has to know about, instead of a second copy of the
 //! `strconv.ParseBool` spellings that could drift from `mm_app::config`'s.
 //!
@@ -291,7 +291,7 @@ pub async fn create_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -392,7 +392,7 @@ pub async fn get_views_for_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);
@@ -480,7 +480,7 @@ pub async fn get_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     serve_get(&state, &channel_id, &view_id, &session)
@@ -561,7 +561,7 @@ pub async fn update_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -675,7 +675,7 @@ pub async fn delete_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -768,7 +768,7 @@ pub async fn update_view_sort_order(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -888,7 +888,7 @@ pub async fn get_posts_for_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);

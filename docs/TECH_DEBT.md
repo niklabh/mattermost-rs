@@ -6875,7 +6875,10 @@ local while these two are not, which is visible as `x-mmrs-served-by` on an othe
 path family.
 ## D-260 · `/exportlink` is never reserved as a built-in trigger
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, command writes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-11 (phase 2, command writes)
+**Closed** 2026-09-24 — `Config::feature_flags` models the whole `FeatureFlags` block, and `provider_command` returns
+`/exportlink` when the flag, `DedicatedExportStore` and an S3/Azure export backend built at boot all hold (Go oracle
+`behaviour_export_link.json`); the uniqueness check now asks the providers, so it is reserved exactly then.
 
 `ExportLinkProvider.GetCommand` (app/slashcommands/command_exportlink.go:32) returns `nil` — and
 so frees the trigger `exportlink` for a custom slash command — unless all three of:
@@ -10087,3 +10090,18 @@ and an unsupported `DefaultServerLocale`/`DefaultClientLocale`/`AvailableLocales
 `MM_SERVICESETTINGS_SITEURL=http://x/` is `http://x` in Go and `http://x/` here (the Go oracle
 `behaviour_env_override.go` avoids trailing slashes for that reason). **What is owed:** port
 `fixConfig` into both load paths and add a trailing-slash and a bad-locale row to the oracle.
+
+---
+
+## D-1161 · Six feature-flag reads are still constants now that `Config::feature_flags` exists
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-260, `FeatureFlags` block)
+
+Each is Go's default and so right on a stock server, and wrong under the matching
+`MM_FEATUREFLAGS_*` variable: `channel_create.rs`'s `FEATURE_FLAG_ENABLE_SHARED_CHANNELS_DMS` and
+`FEATURE_FLAG_ENABLE_DOCS`; `thread_read.rs`'s `MM_BLOCKS_ENABLED` and the same literal in
+`post.rs` and `post_write.rs` (the config field is read elsewhere); `team.rs`'s
+`TeamMembershipAccessControl` (`true`); `mm_api::web_static`'s `EnableConcurrentReact` script
+hashes; and in `mm-store`, `CJKSearch` (always on) and `channel_store`'s `EnableDocs` cascade,
+which have no config in reach. **What is owed:** read `Config::feature_flags` at each site (the
+store ones through a parameter), with a test that moves each flag.

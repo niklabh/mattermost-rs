@@ -184,7 +184,7 @@ pub(crate) async fn v2_group(state: &AppState, group_name: &str, where_: &'stati
     // shut and the route is a 501. Go's comment says this mirrors the dedicated manifest
     // endpoint's gate so the generic API cannot expose the schema when the feature is off.
     if group.name == SESSION_ATTRIBUTES_PROPERTY_GROUP_NAME {
-        let enabled = state.app.config().feature_flag_session_attributes;
+        let enabled = state.app.config().feature_flags.session_attributes;
         tracing::Span::current().record("session_attributes", enabled);
         if !enabled {
             return Group::Failed(refusal(

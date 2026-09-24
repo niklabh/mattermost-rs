@@ -32,11 +32,10 @@
 //! `MM_SERVICESETTINGS_SITEURL=http://localhost:8065`. Hence [`Config::apply_env`], and hence its
 //! being applied after the document rather than as a fallback for it.
 //!
-//! **`FeatureFlags` is not in the document at all.** Go clears the section before persisting when
-//! `readOnlyFF` is set, which is the default (store.go:306-310) — confirmed against the live row,
-//! which has no `FeatureFlags` key. So [`Config::feature_flag_burn_on_read`] can only ever come
-//! from the environment or from the compiled-in default, and a future flag must not be given a
-//! database source it does not have.
+//! **`FeatureFlags` is not in this stack's document.** Go clears the section before persisting
+//! when `readOnlyFF` is set, which is the default (store.go:306-310) — confirmed against the live
+//! row. Go still *reads* one when a row carries it, and so does [`Config::from_document`]; see
+//! [`Config::feature_flags`].
 //!
 //! # Which direction each default fails
 //!
@@ -56,6 +55,8 @@
 //! consulting the licence, even though every compliance *feature* is licence-gated
 //! (`app/compliance.go:18`). So "Team Edition cannot enable compliance" is not a proof that this
 //! branch is unreachable — the setting alone moves it.
+
+use mm_model::feature_flags::FeatureFlags;
 
 /// Port of `model.Config` (config.go), restricted to the fields a migrated code path reads.
 ///
@@ -484,43 +485,6 @@ pub struct Config {
     /// is why being wrong about the default would be silent: every post would be accepted.
     pub experimental_enable_hardened_mode: bool,
 
-    /// `FeatureFlags.BurnOnRead` (feature_flags.go:90). Go default **`true`**.
-    ///
-    /// Kept apart from the setting above because `isBurnOnReadEnabled` (app/post_helpers.go:270)
-    /// ands the two, and either one alone turns the feature off. Folding them into a single
-    /// field here would make a deployment that disables only the flag indistinguishable from one
-    /// that disables only the setting — the same value, reached two ways, is exactly the sort of
-    /// coincidence that hides a wrong read.
-    pub feature_flag_burn_on_read: bool,
-
-    /// `FeatureFlags.MobileSSOCodeExchange` (feature_flags.go:74), **`false`** by default and
-    /// environment-only like [`Config::feature_flag_burn_on_read`]. Off, the deprecated
-    /// `POST /users/login/sso/code-exchange` is the 410; on, it is forwarded.
-    pub feature_flag_mobile_sso_code_exchange: bool,
-
-    /// `FeatureFlags.MoveThreadsEnabled` (feature_flags.go:35), defaulted **`false`** at :169
-    /// and environment-only like [`Config::feature_flag_burn_on_read`]. Off, `moveThread` is
-    /// the 501 `api.post.move_thread.disabled.app_error` ahead of everything but the post id —
-    /// and so is a licence-less server with the flag on.
-    pub feature_flag_move_threads_enabled: bool,
-
-    /// `FeatureFlags.MmBlocksEnabled` (feature_flags.go:138), defaulted **`true`** at :214,
-    /// environment-only. Off, `doPostAction` refuses an `mm_block`/`block`/`card` integration
-    /// format and any mm_blocks cookie with the 400 `api.post.do_action.action_integration`.
-    pub feature_flag_mm_blocks_enabled: bool,
-
-    /// `FeatureFlags.AppsEnabled` (feature_flags.go:26), defaulted **`false`** at :165,
-    /// environment-only. Off, the Apps plugin (`com.mattermost.apps`) is disabled whatever its
-    /// `PluginStates` entry says (app/plugin.go, `getPluginStateOverride`).
-    pub feature_flag_apps_enabled: bool,
-
-    /// `FeatureFlags.RecurringScheduledPosts` (feature_flags.go:156), defaulted **`false`** at
-    /// :222, environment-only. Off, `SaveScheduledPost` refuses any `repeat_type` and
-    /// `UpdateScheduledPost` refuses turning one **on** — both with
-    /// `app.scheduled_post.recurring_disabled.app_error` at 400 — while an existing series can
-    /// still be edited or ended.
-    pub feature_flag_recurring_scheduled_posts: bool,
-
     /// `FileSettings.DriverName` (config.go:1814). Go default **`"local"`**
     /// (`model.ImageDriverLocal`, config.go:1900).
     ///
@@ -637,11 +601,6 @@ pub struct Config {
     /// keys `verifyPlugin` accepts. Go's environment decoder splits a `[]string` on **spaces**
     /// (config/environment.go:80).
     pub plugin_signature_public_key_files: Vec<String>,
-
-    /// `FeatureFlags.EnableMFIPluginSignaturePublicKey` (feature_flags.go:153, defaulted **`true`**
-    /// at :220): whether `verifyPlugin` also tries the compiled-in MFI key. Environment-only, like
-    /// every feature flag.
-    pub feature_flag_enable_mfi_plugin_signature_public_key: bool,
 
     /// `EmailSettings.SendEmailNotifications` (config.go:2143, defaulted **`true`** at :2186,
     /// unconditionally — not from `isUpdate`).
@@ -819,65 +778,6 @@ pub struct Config {
     /// `mm_api::jobs::download_job`.
     pub message_export_download_export_results: bool,
 
-    /// `FeatureFlags.SessionAttributes` (feature_flags.go:116, defaulted **`false`** at :204).
-    ///
-    /// Gates `GET /api/v4/users/sessions/attributes/manifest` through
-    /// `App.sessionAttributesEnabled` (app/session_attributes.go:24), which is this flag **and**
-    /// an Enterprise Advanced licence. Closed, the route is
-    /// `api.user.session_attributes.disabled.app_error` at 501.
-    ///
-    /// Like [`Config::feature_flag_burn_on_read`], it can only come from the environment or the
-    /// compiled-in default — `FeatureFlags` is cleared before the document is persisted, so there
-    /// is no database source to read and giving it one would be inventing a value.
-    pub feature_flag_session_attributes: bool,
-
-    /// The four other flags of the five-way `if` that registers `api4/properties.go`
-    /// (properties.go:23), alongside [`Config::feature_flag_session_attributes`]:
-    /// `IntegratedBoards`, `ManagedChannelCategories`, `ClassificationMarkings` and
-    /// `PostAttributes`.
-    ///
-    /// **`ClassificationMarkings` defaults to `true`** (feature_flags.go:185) and the other three
-    /// to `false`, so on a stock server the nine property routes *are* registered and the `if` is
-    /// satisfied by that one flag alone. A port that assumed the whole family was dark — which
-    /// every other flag in this block would suggest — would forward nine live routes.
-    ///
-    /// All four are environment-or-default like [`Config::feature_flag_burn_on_read`].
-    pub feature_flag_integrated_boards: bool,
-    /// See [`Config::feature_flag_integrated_boards`].
-    pub feature_flag_managed_channel_categories: bool,
-    /// See [`Config::feature_flag_integrated_boards`]. **Defaults to `true`.**
-    pub feature_flag_classification_markings: bool,
-    /// See [`Config::feature_flag_integrated_boards`].
-    pub feature_flag_post_attributes: bool,
-
-    /// `FeatureFlags.DiscoverableChannels` (feature_flags.go:208, defaulted **`false`** at :208).
-    ///
-    /// The registration `if` of `initChannelJoinRequestRoutes` (api4/channel_join_request.go:18):
-    /// with it off, gorilla/mux has never heard of any of the seven join-request routes and
-    /// answers `api.context.404.app_error`. It also turns on `serveDiscoverableNonMember` in
-    /// `getChannel` and the `discoverable` arms of `createChannel`/`patchChannel`, which are
-    /// [D-153]'s pin — so a deployment that sets it needs those three ported too.
-    ///
-    /// Environment-or-default like [`Config::feature_flag_burn_on_read`]: `FeatureFlags` never
-    /// reaches the persisted document, which is exactly what [D-153] records.
-    pub feature_flag_discoverable_channels: bool,
-
-    /// `FeatureFlags.PermissionPolicies` (feature_flags.go:51), defaulted **`true`** at :172 —
-    /// the umbrella over the two below. Read by `createAccessControlPolicy` and
-    /// `searchAccessControlPolicies` (api4/access_control.go): off, a `permission`-type policy
-    /// is the 501 `api.access_control_policy.permission_policies.feature_disabled`, and a
-    /// type-less search drops permission policies from its page. Environment-or-default like
-    /// [`Config::feature_flag_burn_on_read`].
-    pub feature_flag_permission_policies: bool,
-    /// `FeatureFlags.ChannelPermissionPolicies` (feature_flags.go:59), defaulted **`true`** at
-    /// :174. Only meaningful through [`Config::channel_permission_policies_enabled`], which
-    /// `and`s it with the umbrella as Go's `IsChannelPermissionPoliciesEnabled` does.
-    pub feature_flag_channel_permission_policies: bool,
-    /// `FeatureFlags.PolicySimulation` (feature_flags.go:65), defaulted **`true`** at :175. Read
-    /// through [`Config::policy_simulation_enabled`] by `simulatePolicyForUsers`, whose first
-    /// line is the 501 `api.access_control_policy.policy_simulation.feature_disabled`.
-    pub feature_flag_policy_simulation: bool,
-
     /// `ServiceSettings.CollapsedThreads` (config.go:485, defaulted **`"always_on"`** at :982).
     ///
     /// **The default short-circuits the preference lookup entirely.**
@@ -904,17 +804,6 @@ pub struct Config {
     /// off a channel is still marked read and the client is simply not told. Nothing on the HTTP
     /// response body changes either way.
     pub enable_channel_viewed_messages: bool,
-
-    /// `FeatureFlags.EnableShiftEscapeToMarkAllRead` (feature_flags.go:77, defaulted **`false`**
-    /// at :181).
-    ///
-    /// Gates `PUT /channels/members/{user_id}/direct/read` and
-    /// `PUT /users/{user_id}/teams/{team_id}/read`, both of which answer **501**
-    /// `api.mark_all_as_read.disabled.app_error` when it is off — and the check is the *first*
-    /// line of each handler, ahead of `RequireUserId`, so a malformed id gets the 501 too.
-    ///
-    /// Environment-or-default only, like [`Config::feature_flag_burn_on_read`].
-    pub feature_flag_enable_shift_escape_to_mark_all_read: bool,
 
     /// `ServiceSettings.EnableDynamicClientRegistration` (config.go:386, defaulted **`false`** at
     /// :599).
@@ -1173,23 +1062,6 @@ pub struct Config {
     /// is the reachable one.
     pub scheduled_posts: bool,
 
-    /// `FeatureFlags.EnableAIRecaps` (feature_flags.go:96, defaulted **`false`** at :192).
-    ///
-    /// Half of `Config.AIRecapsEnabled()` (ai_recap_settings.go:143), which gates all fifteen
-    /// `/recaps` and `/scheduled_recaps` routes. Like [`Config::feature_flag_burn_on_read`] it is
-    /// deliberately **not** read from the persisted document: Go strips `FeatureFlags` before
-    /// writing (config/store.go:306), so the environment is its only source.
-    ///
-    /// The Go comment beside it reads `FEATURE_FLAG_REMOVAL: EnableAIRecaps — Remove this when GA
-    /// is released`, so this field has a shelf life; when it goes, the gate becomes the setting
-    /// below alone.
-    pub feature_flag_enable_ai_recaps: bool,
-
-    /// `FeatureFlags.PropertyFieldRank` (feature_flags.go:133), **`true`** by default
-    /// (feature_flags.go:212). Off, `rankPropertyFieldGate` (app/property_field.go:80) refuses to
-    /// create a `rank` user field or to convert one. Environment-only, like every feature flag.
-    pub feature_flag_property_field_rank: bool,
-
     /// `AIRecapSettings.Enable` (ai_recap_settings.go:88).
     ///
     /// The other half of `AIRecapsEnabled()`, and it is `Option<bool>` for a reason that changes
@@ -1260,15 +1132,6 @@ pub struct Config {
     /// Go's exact conjunction rather than on "any licence".
     pub use_anonymous_urls: bool,
 
-    /// `FeatureFlags.TestFeature` (feature_flags.go:14, defaulted `"off"` at :160).
-    ///
-    /// `getSystemPing` adds a `TestFeatureFlag` key **only** when this is not `"off"`, so it is a
-    /// key that appears and disappears rather than a value that changes. Like
-    /// [`Config::feature_flag_burn_on_read`] it is deliberately not read from the persisted
-    /// document — Go strips `FeatureFlags` before writing (config/store.go:306) — so the
-    /// environment is its only source.
-    pub feature_flag_test_feature: String,
-
     /// The `MM_LICENSE` environment variable (`platform.LicenseEnv`, platform/license.go:26).
     ///
     /// Not an `MM_<SECTION>_<SETTING>` config overlay — it is its own variable, holding a whole
@@ -1324,6 +1187,175 @@ pub struct Config {
     pub notices_skip_cache: bool,
 
     pub license_public_key: Option<String>,
+
+    /// `Config.FeatureFlags` (config.go:4226): every flag of `model.FeatureFlags`
+    /// (feature_flags.go:11), as `mm_model::feature_flags::FeatureFlags`.
+    ///
+    /// # Where the flags come from
+    ///
+    /// The document **when it has the section**, else `FeatureFlags.SetDefaults` — never both:
+    /// `Config.SetDefaults` fills the section only when it is nil (config.go:4345), so a partial
+    /// section leaves every flag it omits at Go's zero value, not its default. Go never *writes*
+    /// the section while `readOnlyFF` holds (store.go:306-310, the default whenever
+    /// `ServiceSettings.SplitKey` is empty — app/platform/feature_flags.go:24), so on this stack
+    /// the row has none and the defaults apply; but a row that carries one (a cloud cache
+    /// written with a split key) is read, as Go reads it. Then the `MM_FEATUREFLAGS_<FLAG>`
+    /// overlay, flag by flag ([`feature_flags_from_env`]). The Split synchroniser that rewrites
+    /// the flags at run time needs `SplitKey` and the Split SaaS, and is not ported.
+    ///
+    /// What each flag this server reads decides, by flag:
+    ///
+    /// ## `EnableExportDirectDownload`
+    ///
+    /// `FeatureFlags.EnableExportDirectDownload` (feature_flags.go:33), defaulted **`false`** at
+    /// :168. The first condition of both `ExportLinkProvider.GetCommand` (which reserves the
+    /// `exportlink` trigger — see [`crate::command_provider::provider_command`]) and
+    /// `GeneratePresignURLForExport`.
+    ///
+    /// ## `BurnOnRead`
+    ///
+    /// `FeatureFlags.BurnOnRead` (feature_flags.go:90). Go default **`true`**.
+    ///
+    /// Kept apart from `ServiceSettings.EnableBurnOnRead` because `isBurnOnReadEnabled` (app/post_helpers.go:270)
+    /// ands the two, and either one alone turns the feature off. Folding them into a single
+    /// field here would make a deployment that disables only the flag indistinguishable from one
+    /// that disables only the setting — the same value, reached two ways, is exactly the sort of
+    /// coincidence that hides a wrong read.
+    ///
+    /// ## `MobileSSOCodeExchange`
+    ///
+    /// `FeatureFlags.MobileSSOCodeExchange` (feature_flags.go:74), **`false`** by default. Off, the deprecated
+    /// `POST /users/login/sso/code-exchange` is the 410; on, it is forwarded.
+    ///
+    /// ## `MoveThreadsEnabled`
+    ///
+    /// `FeatureFlags.MoveThreadsEnabled` (feature_flags.go:35), defaulted **`false`** at :169.
+    /// Off, `moveThread` is
+    /// the 501 `api.post.move_thread.disabled.app_error` ahead of everything but the post id —
+    /// and so is a licence-less server with the flag on.
+    ///
+    /// ## `MmBlocksEnabled`
+    ///
+    /// `FeatureFlags.MmBlocksEnabled` (feature_flags.go:138), defaulted **`true`** at :214.
+    /// Off, `doPostAction` refuses an `mm_block`/`block`/`card` integration
+    /// format and any mm_blocks cookie with the 400 `api.post.do_action.action_integration`.
+    ///
+    /// ## `AppsEnabled`
+    ///
+    /// `FeatureFlags.AppsEnabled` (feature_flags.go:26), defaulted **`false`** at :165.
+    /// Off, the Apps plugin (`com.mattermost.apps`) is disabled whatever its
+    /// `PluginStates` entry says (app/plugin.go, `getPluginStateOverride`).
+    ///
+    /// ## `RecurringScheduledPosts`
+    ///
+    /// `FeatureFlags.RecurringScheduledPosts` (feature_flags.go:156), defaulted **`false`** at
+    /// :222. Off, `SaveScheduledPost` refuses any `repeat_type` and
+    /// `UpdateScheduledPost` refuses turning one **on** — both with
+    /// `app.scheduled_post.recurring_disabled.app_error` at 400 — while an existing series can
+    /// still be edited or ended.
+    ///
+    /// ## `EnableMFIPluginSignaturePublicKey`
+    ///
+    /// `FeatureFlags.EnableMFIPluginSignaturePublicKey` (feature_flags.go:153, defaulted **`true`**
+    /// at :220): whether `verifyPlugin` also tries the compiled-in MFI key.
+    ///
+    /// ## `SessionAttributes`
+    ///
+    /// `FeatureFlags.SessionAttributes` (feature_flags.go:116, defaulted **`false`** at :204).
+    ///
+    /// Gates `GET /api/v4/users/sessions/attributes/manifest` through
+    /// `App.sessionAttributesEnabled` (app/session_attributes.go:24), which is this flag **and**
+    /// an Enterprise Advanced licence. Closed, the route is
+    /// `api.user.session_attributes.disabled.app_error` at 501.
+    ///
+    /// ## `IntegratedBoards`
+    ///
+    /// The four other flags of the five-way `if` that registers `api4/properties.go`
+    /// (properties.go:23), alongside `SessionAttributes`:
+    /// `IntegratedBoards`, `ManagedChannelCategories`, `ClassificationMarkings` and
+    /// `PostAttributes`.
+    ///
+    /// **`ClassificationMarkings` defaults to `true`** (feature_flags.go:185) and the other three
+    /// to `false`, so on a stock server the nine property routes *are* registered and the `if` is
+    /// satisfied by that one flag alone. A port that assumed the whole family was dark — which
+    /// every other flag in this block would suggest — would forward nine live routes.
+    ///
+    /// ## `ManagedChannelCategories`
+    ///
+    /// See `IntegratedBoards`.
+    ///
+    /// ## `ClassificationMarkings`
+    ///
+    /// See `IntegratedBoards`. **Defaults to `true`.**
+    ///
+    /// ## `PostAttributes`
+    ///
+    /// See `IntegratedBoards`.
+    ///
+    /// ## `DiscoverableChannels`
+    ///
+    /// `FeatureFlags.DiscoverableChannels` (feature_flags.go:208, defaulted **`false`** at :208).
+    ///
+    /// The registration `if` of `initChannelJoinRequestRoutes` (api4/channel_join_request.go:18):
+    /// with it off, gorilla/mux has never heard of any of the seven join-request routes and
+    /// answers `api.context.404.app_error`. It also turns on `serveDiscoverableNonMember` in
+    /// `getChannel` and the `discoverable` arms of `createChannel`/`patchChannel`, which are
+    /// [D-153]'s pin — so a deployment that sets it needs those three ported too.
+    ///
+    /// ## `PermissionPolicies`
+    ///
+    /// `FeatureFlags.PermissionPolicies` (feature_flags.go:51), defaulted **`true`** at :172 —
+    /// the umbrella over the two below. Read by `createAccessControlPolicy` and
+    /// `searchAccessControlPolicies` (api4/access_control.go): off, a `permission`-type policy
+    /// is the 501 `api.access_control_policy.permission_policies.feature_disabled`, and a
+    /// type-less search drops permission policies from its page.
+    ///
+    /// ## `ChannelPermissionPolicies`
+    ///
+    /// `FeatureFlags.ChannelPermissionPolicies` (feature_flags.go:59), defaulted **`true`** at
+    /// :174. Only meaningful through [`Config::channel_permission_policies_enabled`], which
+    /// `and`s it with the umbrella as Go's `IsChannelPermissionPoliciesEnabled` does.
+    ///
+    /// ## `PolicySimulation`
+    ///
+    /// `FeatureFlags.PolicySimulation` (feature_flags.go:65), defaulted **`true`** at :175. Read
+    /// through [`Config::policy_simulation_enabled`] by `simulatePolicyForUsers`, whose first
+    /// line is the 501 `api.access_control_policy.policy_simulation.feature_disabled`.
+    ///
+    /// ## `EnableShiftEscapeToMarkAllRead`
+    ///
+    /// `FeatureFlags.EnableShiftEscapeToMarkAllRead` (feature_flags.go:77, defaulted **`false`**
+    /// at :181).
+    ///
+    /// Gates `PUT /channels/members/{user_id}/direct/read` and
+    /// `PUT /users/{user_id}/teams/{team_id}/read`, both of which answer **501**
+    /// `api.mark_all_as_read.disabled.app_error` when it is off — and the check is the *first*
+    /// line of each handler, ahead of `RequireUserId`, so a malformed id gets the 501 too.
+    ///
+    /// ## `EnableAIRecaps`
+    ///
+    /// `FeatureFlags.EnableAIRecaps` (feature_flags.go:96, defaulted **`false`** at :192).
+    ///
+    /// Half of `Config.AIRecapsEnabled()` (ai_recap_settings.go:143), which gates all fifteen
+    /// `/recaps` and `/scheduled_recaps` routes.
+    ///
+    /// The Go comment beside it reads `FEATURE_FLAG_REMOVAL: EnableAIRecaps — Remove this when GA
+    /// is released`, so this field has a shelf life; when it goes, the gate becomes the setting
+    /// below alone.
+    ///
+    /// ## `PropertyFieldRank`
+    ///
+    /// `FeatureFlags.PropertyFieldRank` (feature_flags.go:133), **`true`** by default
+    /// (feature_flags.go:212). Off, `rankPropertyFieldGate` (app/property_field.go:80) refuses to
+    /// create a `rank` user field or to convert one.
+    ///
+    /// ## `TestFeature`
+    ///
+    /// `FeatureFlags.TestFeature` (feature_flags.go:14, defaulted `"off"` at :160).
+    ///
+    /// `getSystemPing` adds a `TestFeatureFlag` key **only** when this is not `"off"`, so it is a
+    /// key that appears and disappears rather than a value that changes.
+    pub feature_flags: FeatureFlags,
 }
 
 impl Config {
@@ -1337,7 +1369,7 @@ impl Config {
     /// Fifteen routes are gated on this. It is a *configuration* gate, not a licence one: an
     /// operator can turn it on, at which point this server must stop answering and forward.
     pub fn ai_recaps_enabled(&self) -> bool {
-        self.feature_flag_enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(true)
+        self.feature_flags.enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(true)
     }
 
     /// Port of `utils.GetSubpathFromConfig` (channels/utils/subpath.go:242).
@@ -1412,19 +1444,19 @@ impl Config {
     /// **Both halves default to true**, so on a stock server this is on — which is why
     /// `getCursorPostId` reaches the read-receipt-aware cursor query rather than the plain one.
     pub fn burn_on_read(&self) -> bool {
-        self.feature_flag_burn_on_read && self.enable_burn_on_read
+        self.feature_flags.burn_on_read && self.enable_burn_on_read
     }
 
     /// Port of `FeatureFlags.IsChannelPermissionPoliciesEnabled` (feature_flags.go:232): the
     /// sub-flag **and** the `PermissionPolicies` umbrella.
     pub fn channel_permission_policies_enabled(&self) -> bool {
-        self.feature_flag_permission_policies && self.feature_flag_channel_permission_policies
+        self.feature_flags.permission_policies && self.feature_flags.channel_permission_policies
     }
 
     /// Port of `FeatureFlags.IsPolicySimulationEnabled` (feature_flags.go:242): the sub-flag
     /// **and** the umbrella.
     pub fn policy_simulation_enabled(&self) -> bool {
-        self.feature_flag_permission_policies && self.feature_flag_policy_simulation
+        self.feature_flags.permission_policies && self.feature_flags.policy_simulation
     }
 
     /// `InitProperties`' five-way registration `if` (api4/properties.go:23).
@@ -1434,11 +1466,11 @@ impl Config {
     /// server: `ClassificationMarkings` defaults to `true`, so this is `true` unless an operator
     /// explicitly turns that one off.
     pub fn properties_api_enabled(&self) -> bool {
-        self.feature_flag_integrated_boards
-            || self.feature_flag_managed_channel_categories
-            || self.feature_flag_classification_markings
-            || self.feature_flag_session_attributes
-            || self.feature_flag_post_attributes
+        self.feature_flags.integrated_boards
+            || self.feature_flags.managed_channel_categories
+            || self.feature_flags.classification_markings
+            || self.feature_flags.session_attributes
+            || self.feature_flags.post_attributes
     }
 }
 
@@ -1528,12 +1560,8 @@ impl Default for Config {
             post_edit_time_limit: -1,
             // config.go:906 — `new(false)`.
             experimental_enable_hardened_mode: false,
-            feature_flag_burn_on_read: true,
-            feature_flag_mobile_sso_code_exchange: false,
-            feature_flag_move_threads_enabled: false,
-            feature_flag_mm_blocks_enabled: true,
-            feature_flag_apps_enabled: false,
-            feature_flag_recurring_scheduled_posts: false,
+            // `Config.SetDefaults` on a nil section (config.go:4345).
+            feature_flags: default_feature_flags(),
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
@@ -1557,7 +1585,6 @@ impl Default for Config {
             plugin_marketplace_url: DEFAULT_MARKETPLACE_URL.to_owned(),
             plugin_allow_insecure_download_url: false,
             plugin_signature_public_key_files: Vec::new(),
-            feature_flag_enable_mfi_plugin_signature_public_key: true,
             send_email_notifications: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
@@ -1582,19 +1609,6 @@ impl Default for Config {
             maximum_personal_access_token_lifetime_days: 0,
             enable_user_access_tokens: false,
             message_export_download_export_results: false,
-            feature_flag_session_attributes: false,
-            // feature_flags.go:194, :202, :206 — all three `false`.
-            feature_flag_integrated_boards: false,
-            feature_flag_managed_channel_categories: false,
-            feature_flag_post_attributes: false,
-            // feature_flags.go:208 — `false`, like the other four.
-            feature_flag_discoverable_channels: false,
-            // feature_flags.go:172-175 — all three **`true`**.
-            feature_flag_permission_policies: true,
-            feature_flag_channel_permission_policies: true,
-            feature_flag_policy_simulation: true,
-            // feature_flags.go:185 — **`true`**, and the only one of the five that is.
-            feature_flag_classification_markings: true,
             // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
             collapsed_threads: mm_model::config::COLLAPSED_THREADS_ALWAYS_ON.to_owned(),
             // config.go:978 — `new(true)`.
@@ -1602,7 +1616,6 @@ impl Default for Config {
             // config.go:708 — `new(true)`.
             enable_channel_viewed_messages: true,
             // feature_flags.go:181 — `false`.
-            feature_flag_enable_shift_escape_to_mark_all_read: false,
             show_full_name: true,
             show_email_address: true,
             // Absent, not empty: `SetDefaults` never fills `SiteURL`, and this constructor
@@ -1657,8 +1670,6 @@ impl Default for Config {
             // the licence arm of the scheduled-post gate the reachable one.
             scheduled_posts: true,
             // `f.EnableAIRecaps = false` (feature_flags.go:192).
-            feature_flag_enable_ai_recaps: false,
-            feature_flag_property_field_rank: true,
             // Absent, and absent means **enabled** — see the field's note.
             ai_recap_settings_enable: None,
             // `ClientRequirements` has no `SetDefaults`; the zero value is the default.
@@ -1674,7 +1685,6 @@ impl Default for Config {
             elasticsearch_enable_indexing: false,
             experimental_enable_authentication_transfer: true,
             use_anonymous_urls: false,
-            feature_flag_test_feature: "off".to_owned(),
             license: String::new(),
             license_public_key: None,
             max_users_for_statistics: 2500,
@@ -1995,36 +2005,7 @@ impl Config {
                 "MM_SERVICESETTINGS_EXPERIMENTALENABLEHARDENEDMODE",
                 default.experimental_enable_hardened_mode,
             ),
-            feature_flag_burn_on_read: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_BURNONREAD",
-                default.feature_flag_burn_on_read,
-            ),
-            feature_flag_mobile_sso_code_exchange: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_MOBILESSOCODEEXCHANGE",
-                default.feature_flag_mobile_sso_code_exchange,
-            ),
-            feature_flag_move_threads_enabled: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_MOVETHREADSENABLED",
-                default.feature_flag_move_threads_enabled,
-            ),
-            feature_flag_mm_blocks_enabled: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_MMBLOCKSENABLED",
-                default.feature_flag_mm_blocks_enabled,
-            ),
-            feature_flag_apps_enabled: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_APPSENABLED",
-                default.feature_flag_apps_enabled,
-            ),
-            feature_flag_recurring_scheduled_posts: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_RECURRINGSCHEDULEDPOSTS",
-                default.feature_flag_recurring_scheduled_posts,
-            ),
+            feature_flags: feature_flags_from_env(default.feature_flags, lookup),
             // Not `env_bool`'s fallback rule: a string setting has no unparseable value, so an
             // override of `""` is a deliberate empty driver and must survive as one.
             file_driver_name: lookup("MM_FILESETTINGS_DRIVERNAME")
@@ -2102,11 +2083,6 @@ impl Config {
             plugin_signature_public_key_files: lookup("MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES")
                 .map(|raw| split_env_list(&raw))
                 .unwrap_or(default.plugin_signature_public_key_files),
-            feature_flag_enable_mfi_plugin_signature_public_key: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_ENABLEMFIPLUGINSIGNATUREPUBLICKEY",
-                default.feature_flag_enable_mfi_plugin_signature_public_key,
-            ),
             send_email_notifications: lookup_bool(
                 lookup,
                 "MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS",
@@ -2151,8 +2127,6 @@ impl Config {
                 .unwrap_or(default.ios_latest_version),
             ios_min_version: lookup("MM_CLIENTREQUIREMENTS_IOSMINVERSION")
                 .unwrap_or(default.ios_min_version),
-            feature_flag_test_feature: lookup("MM_FEATUREFLAGS_TESTFEATURE")
-                .unwrap_or(default.feature_flag_test_feature),
             enable_testing: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLETESTING",
@@ -2162,16 +2136,6 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_SCHEDULEDPOSTS",
                 default.scheduled_posts,
-            ),
-            feature_flag_enable_ai_recaps: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_ENABLEAIRECAPS",
-                default.feature_flag_enable_ai_recaps,
-            ),
-            feature_flag_property_field_rank: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_PROPERTYFIELDRANK",
-                default.feature_flag_property_field_rank,
             ),
             // An overlay can only ever *set* this, never restore it to absent — which matches
             // Go, whose environment layer writes a pointer to the parsed value.
@@ -2255,51 +2219,6 @@ impl Config {
                 "MM_MESSAGEEXPORTSETTINGS_DOWNLOADEXPORTRESULTS",
                 default.message_export_download_export_results,
             ),
-            feature_flag_session_attributes: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_SESSIONATTRIBUTES",
-                default.feature_flag_session_attributes,
-            ),
-            feature_flag_integrated_boards: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_INTEGRATEDBOARDS",
-                default.feature_flag_integrated_boards,
-            ),
-            feature_flag_managed_channel_categories: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES",
-                default.feature_flag_managed_channel_categories,
-            ),
-            feature_flag_classification_markings: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_CLASSIFICATIONMARKINGS",
-                default.feature_flag_classification_markings,
-            ),
-            feature_flag_post_attributes: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_POSTATTRIBUTES",
-                default.feature_flag_post_attributes,
-            ),
-            feature_flag_discoverable_channels: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_DISCOVERABLECHANNELS",
-                default.feature_flag_discoverable_channels,
-            ),
-            feature_flag_permission_policies: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_PERMISSIONPOLICIES",
-                default.feature_flag_permission_policies,
-            ),
-            feature_flag_channel_permission_policies: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_CHANNELPERMISSIONPOLICIES",
-                default.feature_flag_channel_permission_policies,
-            ),
-            feature_flag_policy_simulation: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_POLICYSIMULATION",
-                default.feature_flag_policy_simulation,
-            ),
             collapsed_threads: lookup("MM_SERVICESETTINGS_COLLAPSEDTHREADS")
                 .unwrap_or(default.collapsed_threads),
             thread_auto_follow: lookup_bool(
@@ -2311,11 +2230,6 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLECHANNELVIEWEDMESSAGES",
                 default.enable_channel_viewed_messages,
-            ),
-            feature_flag_enable_shift_escape_to_mark_all_read: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD",
-                default.feature_flag_enable_shift_escape_to_mark_all_read,
             ),
             show_full_name: lookup_bool(
                 lookup,
@@ -2606,19 +2520,7 @@ impl Config {
                 .unwrap_or_default()
                 .download_export_results
                 .unwrap_or(default.message_export_download_export_results),
-            // The same rule as `feature_flag_burn_on_read` above: `FeatureFlags` never reaches the
-            // persisted document, so there is nothing here to read.
-            feature_flag_session_attributes: default.feature_flag_session_attributes,
-            feature_flag_integrated_boards: default.feature_flag_integrated_boards,
-            feature_flag_managed_channel_categories: default
-                .feature_flag_managed_channel_categories,
-            feature_flag_classification_markings: default.feature_flag_classification_markings,
-            feature_flag_post_attributes: default.feature_flag_post_attributes,
-            feature_flag_discoverable_channels: default.feature_flag_discoverable_channels,
-            feature_flag_permission_policies: default.feature_flag_permission_policies,
-            feature_flag_channel_permission_policies: default
-                .feature_flag_channel_permission_policies,
-            feature_flag_policy_simulation: default.feature_flag_policy_simulation,
+            feature_flags: feature_flags_from_document(parsed.feature_flags),
             collapsed_threads: service
                 .collapsed_threads
                 .unwrap_or(default.collapsed_threads),
@@ -2629,8 +2531,6 @@ impl Config {
                 .enable_channel_viewed_messages
                 .unwrap_or(default.enable_channel_viewed_messages),
             // `FeatureFlags` is stripped before the document is persisted; see the field docs.
-            feature_flag_enable_shift_escape_to_mark_all_read: default
-                .feature_flag_enable_shift_escape_to_mark_all_read,
             enable_post_username_override: service
                 .enable_post_username_override
                 .unwrap_or(default.enable_post_username_override),
@@ -2810,15 +2710,6 @@ impl Config {
             experimental_enable_hardened_mode: service
                 .experimental_enable_hardened_mode
                 .unwrap_or(default.experimental_enable_hardened_mode),
-            // Deliberately NOT read from the document: Go clears `FeatureFlags` before persisting
-            // (store.go:306-310), so the section is absent from every row it writes. Sourcing it
-            // here would read an absence as a deliberate `false` on the next `readOnlyFF` change.
-            feature_flag_burn_on_read: default.feature_flag_burn_on_read,
-            feature_flag_mobile_sso_code_exchange: default.feature_flag_mobile_sso_code_exchange,
-            feature_flag_move_threads_enabled: default.feature_flag_move_threads_enabled,
-            feature_flag_mm_blocks_enabled: default.feature_flag_mm_blocks_enabled,
-            feature_flag_apps_enabled: default.feature_flag_apps_enabled,
-            feature_flag_recurring_scheduled_posts: default.feature_flag_recurring_scheduled_posts,
             file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),
@@ -2870,8 +2761,6 @@ impl Config {
             plugin_signature_public_key_files: plugin_settings
                 .signature_public_key_files
                 .unwrap_or(default.plugin_signature_public_key_files),
-            feature_flag_enable_mfi_plugin_signature_public_key: default
-                .feature_flag_enable_mfi_plugin_signature_public_key,
             send_email_notifications: email_settings
                 .send_email_notifications
                 .unwrap_or(default.send_email_notifications),
@@ -3072,11 +2961,6 @@ impl Config {
                 .as_ref()
                 .and_then(|p| p.use_anonymous_urls)
                 .unwrap_or(default.use_anonymous_urls),
-            // Same rule as `feature_flag_burn_on_read` above: `FeatureFlags` is cleared before
-            // the document is persisted, so reading it here would turn an absence into a value.
-            feature_flag_test_feature: default.feature_flag_test_feature,
-            feature_flag_enable_ai_recaps: default.feature_flag_enable_ai_recaps,
-            feature_flag_property_field_rank: default.feature_flag_property_field_rank,
             // **Not** `unwrap_or(default)`: the field is `Option` on purpose and an absent
             // `Enable` is a different input from `false`. Carried through as it arrived.
             ai_recap_settings_enable: parsed.ai_recap_settings.unwrap_or_default().enable,
@@ -3177,6 +3061,9 @@ pub enum ConfigError {
 /// Confirmed against the live row rather than assumed.
 #[derive(Debug, serde::Deserialize)]
 struct Document {
+    /// See [`Config::feature_flags`]: read when present, as `json.Unmarshal` reads it.
+    #[serde(rename = "FeatureFlags")]
+    feature_flags: Option<FeatureFlags>,
     #[serde(rename = "ServiceSettings")]
     service_settings: Option<ServiceSettingsDocument>,
     #[serde(rename = "ComplianceSettings")]
@@ -3836,6 +3723,55 @@ fn lookup_int(lookup: &impl Fn(&str) -> Option<String>, key: &str, default: i64)
         .unwrap_or(default)
 }
 
+/// `&FeatureFlags{}` with `SetDefaults` applied — what `Config.SetDefaults` plants in a nil
+/// section (config.go:4345).
+fn default_feature_flags() -> FeatureFlags {
+    let mut flags = FeatureFlags::default();
+    flags.set_defaults();
+    flags
+}
+
+/// The document's `FeatureFlags` section, or the defaults when it has none.
+///
+/// **Present means no defaults at all.** `SetDefaults` only acts on a nil section, so a row
+/// carrying `{"BurnOnRead": false}` leaves every other flag at Go's zero value — `false`, and `""`
+/// for `TestFeature` — which is what `#[serde(default)]` on the derived `Default` gives too. A
+/// JSON `null` is Go's nil pointer and takes the defaults.
+fn feature_flags_from_document(section: Option<FeatureFlags>) -> FeatureFlags {
+    section.unwrap_or_else(default_feature_flags)
+}
+
+/// The `MM_FEATUREFLAGS_<FLAG>` overlay: `applyEnvKey` descends through the `*FeatureFlags`
+/// pointer like any section, so every flag is reachable, a bool through `strconv.ParseBool` and
+/// `TestFeature` as the raw string. A value that does not parse leaves the flag alone.
+///
+/// The flags are walked through their JSON form so that a flag added to
+/// `mm_model::feature_flags::FeatureFlags` is overlaid without a line here — the key *is* the Go
+/// field name (feature_flags.rs), and upper-casing it gives the variable name.
+fn feature_flags_from_env(
+    flags: FeatureFlags,
+    lookup: &impl Fn(&str) -> Option<String>,
+) -> FeatureFlags {
+    let Ok(serde_json::Value::Object(mut fields)) = serde_json::to_value(&flags) else {
+        return flags;
+    };
+    for (name, value) in &mut fields {
+        let Some(raw) = lookup(&format!("MM_FEATUREFLAGS_{}", name.to_uppercase())) else {
+            continue;
+        };
+        match value {
+            serde_json::Value::Bool(current) => {
+                if let Some(parsed) = parse_bool(&raw) {
+                    *current = parsed;
+                }
+            }
+            serde_json::Value::String(current) => *current = raw,
+            _ => {}
+        }
+    }
+    serde_json::from_value(serde_json::Value::Object(fields)).unwrap_or(flags)
+}
+
 /// The slice arm of `applyEnvKey` (config/environment.go:80): `strings.Split(value, " ")`.
 ///
 /// **A single ASCII space, not a comma** and not any whitespace: `"a,b"` is one element, a tab
@@ -3981,7 +3917,7 @@ mod tests {
         assert!(config.post_priority, "config.go:993 — new(true)");
         assert!(config.enable_burn_on_read, "config.go:1034 — new(true)");
         assert!(
-            config.feature_flag_burn_on_read,
+            config.feature_flags.burn_on_read,
             "feature_flags.go:187 — f.BurnOnRead = true"
         );
         // And therefore the conjunction, which is what decides which cursor query runs.
@@ -4014,10 +3950,8 @@ mod tests {
         };
         assert!(!config.burn_on_read(), "the setting alone disables it");
 
-        let config = Config {
-            feature_flag_burn_on_read: false,
-            ..Config::default()
-        };
+        let mut config = Config::default();
+        config.feature_flags.burn_on_read = false;
         assert!(!config.burn_on_read(), "the flag alone disables it");
     }
 
@@ -4233,11 +4167,11 @@ mod tests {
             "config.go:266"
         );
         assert!(
-            !default.feature_flag_move_threads_enabled,
+            !default.feature_flags.move_threads_enabled,
             "feature_flags.go:169"
         );
         assert!(
-            default.feature_flag_mm_blocks_enabled,
+            default.feature_flags.mm_blocks_enabled,
             "feature_flags.go:214"
         );
 
@@ -4259,8 +4193,12 @@ mod tests {
         assert_eq!(moved.burn_on_read_duration_seconds, 7);
         assert_eq!(moved.outgoing_integration_requests_timeout, 9);
         assert!(
-            !moved.feature_flag_move_threads_enabled,
-            "FeatureFlags is never read from the document"
+            moved.feature_flags.move_threads_enabled,
+            "a FeatureFlags section in the document is read, as json.Unmarshal reads it"
+        );
+        assert!(
+            !moved.feature_flags.mm_blocks_enabled,
+            "and a flag it omits is Go's zero value: SetDefaults skips a non-nil section"
         );
 
         let env = |key: &str| -> Option<String> {
@@ -4275,8 +4213,8 @@ mod tests {
         let overridden = Config::default().apply_env_from(&env);
         assert_eq!(overridden.burn_on_read_duration_seconds, 11);
         assert_eq!(overridden.outgoing_integration_requests_timeout, 13);
-        assert!(overridden.feature_flag_move_threads_enabled);
-        assert!(!overridden.feature_flag_mm_blocks_enabled);
+        assert!(overridden.feature_flags.move_threads_enabled);
+        assert!(!overridden.feature_flags.mm_blocks_enabled);
     }
 }
 
@@ -4295,12 +4233,12 @@ mod go_parity {
     #[test]
     fn an_absent_recap_setting_means_enabled_not_disabled() {
         let gate = |flag: bool, enable: Option<bool>| {
-            Config {
-                feature_flag_enable_ai_recaps: flag,
+            let mut config = Config {
                 ai_recap_settings_enable: enable,
                 ..Config::default()
-            }
-            .ai_recaps_enabled()
+            };
+            config.feature_flags.enable_ai_recaps = flag;
+            config.ai_recaps_enabled()
         };
 
         assert!(!gate(false, None), "the feature flag is off by default");
@@ -4321,7 +4259,7 @@ mod go_parity {
     #[test]
     fn recaps_are_off_on_a_stock_server() {
         assert!(!Config::default().ai_recaps_enabled());
-        assert!(!Config::default().feature_flag_enable_ai_recaps);
+        assert!(!Config::default().feature_flags.enable_ai_recaps);
         assert_eq!(Config::default().ai_recap_settings_enable, None);
     }
 
@@ -5155,17 +5093,86 @@ mod go_parity {
         assert!(config.enable_custom_emoji);
     }
 
-    /// `FeatureFlags` is never persisted (config/store.go:306-310), so it must not be sourced from
-    /// the document even when something puts one there — a stray section must not be able to turn
-    /// a flag off. `scripts/dump-config-fixture.sh` fails loudly if the live row ever grows one.
+    /// Every flag against the values the stack's Go server is running on, read from its client
+    /// config by `scripts/dump-config-fixture.sh` — Go's own `ToMap` over `SetDefaults` plus the
+    /// one `MM_FEATUREFLAGS_*` variable `scripts/go-server.sh` starts it with.
     #[test]
-    fn feature_flags_are_not_read_from_the_document() {
-        let config = Config::from_document(r#"{"FeatureFlags":{"BurnOnRead":false}}"#)
-            .expect("valid document");
-        assert!(
-            config.feature_flag_burn_on_read,
-            "the flag comes from the environment or the compiled-in default, never the row"
+    fn the_flags_match_what_the_stacks_go_server_runs_on() {
+        let go: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(include_str!("../../../fixtures/config_feature_flags.json"))
+                .expect("the fixture is a flag map");
+        assert!(go.len() >= 40, "every flag is in the fixture");
+        let flags = feature_flags_from_env(default_feature_flags(), &|key| {
+            (key == "MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD").then(|| "true".to_owned())
+        });
+        let ours: std::collections::BTreeMap<String, String> = flags.to_map().into_iter().collect();
+        assert_eq!(ours, go);
+        assert_eq!(
+            go["EnableExportDirectDownload"], "false",
+            "feature_flags.go:168"
         );
+    }
+
+    /// Each flag has its own variable, named by upper-casing the Go field name, and moves
+    /// nothing else. A bool takes `strconv.ParseBool`'s spellings only; a string is taken whole.
+    #[test]
+    fn every_flag_has_its_own_environment_variable() {
+        let defaults = default_feature_flags().to_map();
+        for (name, value) in &defaults {
+            let variable = format!("MM_FEATUREFLAGS_{}", name.to_uppercase());
+            let set = match value.as_str() {
+                "true" => "F".to_owned(),
+                "false" => "T".to_owned(),
+                _ => "some value".to_owned(),
+            };
+            let moved = feature_flags_from_env(default_feature_flags(), &|key| {
+                (key == variable).then(|| set.clone())
+            })
+            .to_map();
+            for (other, before) in &defaults {
+                if other == name {
+                    assert_ne!(&moved[other], before, "{variable} moves {name}");
+                } else {
+                    assert_eq!(&moved[other], before, "{variable} leaves {other} alone");
+                }
+            }
+        }
+
+        let unparsed = feature_flags_from_env(default_feature_flags(), &|key| {
+            (key == "MM_FEATUREFLAGS_BURNONREAD").then(|| "off".to_owned())
+        });
+        assert!(unparsed.burn_on_read, "an unparseable bool changes nothing");
+        let exported = feature_flags_from_env(default_feature_flags(), &|key| {
+            (key == "MM_FEATUREFLAGS_ENABLEEXPORTDIRECTDOWNLOAD").then(|| "true".to_owned())
+        });
+        assert!(exported.enable_export_direct_download);
+    }
+
+    /// `json.Unmarshal` fills `Config.FeatureFlags` from a row that has the section, and
+    /// `Config.SetDefaults` then leaves it alone (config.go:4345) — so a partial section zeroes the
+    /// flags it omits, and only an absent or `null` section takes `FeatureFlags.SetDefaults`. Go
+    /// never writes the section while `readOnlyFF` holds, which is why the stack's own row has
+    /// none (`scripts/dump-config-fixture.sh` checks).
+    #[test]
+    fn a_feature_flags_section_in_the_document_replaces_the_defaults_whole() {
+        let partial = Config::from_document(r#"{"FeatureFlags":{"BurnOnRead":false}}"#)
+            .expect("valid document");
+        assert!(!partial.feature_flags.burn_on_read, "the section is read");
+        assert!(
+            !partial.feature_flags.mm_blocks_enabled,
+            "an omitted flag is false, not its `true` default"
+        );
+        assert_eq!(
+            partial.feature_flags.test_feature, "",
+            "and a string is empty"
+        );
+
+        for document in [r#"{}"#, r#"{"FeatureFlags":null}"#] {
+            let config = Config::from_document(document).expect("valid document");
+            assert_eq!(config.feature_flags, default_feature_flags(), "{document}");
+            assert!(config.feature_flags.mm_blocks_enabled);
+            assert_eq!(config.feature_flags.test_feature, "off");
+        }
     }
 
     /// The flag is not the setting. `isBurnOnReadEnabled` ands the two (app/post_helpers.go:270),
@@ -5180,7 +5187,7 @@ mod go_parity {
             "the setting is read from the row"
         );
         assert!(
-            config.feature_flag_burn_on_read,
+            config.feature_flags.burn_on_read,
             "the flag is not, and must not follow it"
         );
         assert!(
@@ -8460,12 +8467,12 @@ mod env_go_parity {
                 "{name}: PluginStates"
             );
             assert_eq!(
-                Some(got.feature_flag_burn_on_read),
+                Some(got.feature_flags.burn_on_read),
                 want["FeatureFlags"]["BurnOnRead"].as_bool(),
                 "{name}: FeatureFlags.BurnOnRead"
             );
             assert_eq!(
-                got.feature_flag_test_feature,
+                got.feature_flags.test_feature,
                 want["FeatureFlags"]["TestFeature"].as_str().expect("str"),
                 "{name}: FeatureFlags.TestFeature"
             );

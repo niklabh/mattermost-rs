@@ -2425,7 +2425,7 @@ impl AppPluginApi {
                 .collect()),
             None => Err(self.not_implemented(
                 "ListBuiltInCommands",
-                "the built-in commands are held in English only, or /exportlink is undecidable",
+                "the built-in commands are held in English only",
             )),
         }
     }

@@ -660,8 +660,7 @@ impl App {
     /// is none; this is [`crate::command_provider::BUILTIN_TRIGGERS`]'.
     ///
     /// The strings are `GetCommand(a, i18n.T)`'s — the **server** locale — and this server holds
-    /// them in English only, so `None` for any other server locale, and for `/exportlink`'s
-    /// undecidable definition.
+    /// them in English only, so `None` for any other server locale.
     pub fn list_built_in_commands(&self) -> Option<Vec<Command>> {
         use crate::command_provider::{BUILTIN_TRIGGERS, ProviderCommand, provider_command};
         let config = self.config();
@@ -671,10 +670,11 @@ impl App {
         if locale != "en" {
             return None;
         }
+        let export_links = self.export_file_backend().generates_links();
         let mut seen = std::collections::HashSet::new();
         let mut commands = Vec::new();
         for trigger in BUILTIN_TRIGGERS {
-            match provider_command(&config, trigger) {
+            match provider_command(&config, export_links, trigger) {
                 ProviderCommand::Command(command) => {
                     let mut command = *command;
                     if command.auto_complete && seen.insert(command.trigger.clone()) {
@@ -682,7 +682,6 @@ impl App {
                         commands.push(command);
                     }
                 }
-                ProviderCommand::Undecidable => return None,
                 ProviderCommand::Nil | ProviderCommand::Unregistered => {}
             }
         }

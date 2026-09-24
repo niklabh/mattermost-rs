@@ -1,0 +1,19 @@
+# Mutation plan for D-260 (exportlink reservation, presign gates) and the FeatureFlags block.
+#
+#   MUTATE_PACKAGE=mm-app scripts/mutate-batch.sh scripts/mutations/config-feature-flags.plan
+
+ff-document-ignored	crates/mm-app/src/config.rs	feature_flags: feature_flags_from_document(parsed.feature_flags),	feature_flags: default_feature_flags(),	lib	config::
+ff-absent-section-zeroed	crates/mm-app/src/config.rs	section.unwrap_or_else(default_feature_flags)	section.unwrap_or_default()	lib	config::
+ff-env-bool-unparsed	crates/mm-app/src/config.rs	if let Some(parsed) = parse_bool(&raw) {\n                    *current = parsed;\n                }	*current = raw == "true";	lib	config::
+ff-env-string-ignored	crates/mm-app/src/config.rs	serde_json::Value::String(current) => *current = raw,	serde_json::Value::String(_) => {}	lib	config::
+ff-env-name-not-uppercased	crates/mm-app/src/config.rs	lookup(&format!("MM_FEATUREFLAGS_{}", name.to_uppercase()))	lookup(&format!("MM_FEATUREFLAGS_{}", name))	lib	config::
+ff-env-dropped	crates/mm-app/src/config.rs	feature_flags: feature_flags_from_env(default.feature_flags, lookup),	feature_flags: default.feature_flags,	lib	config::
+links-s3-only	crates/mm-app/src/filestore.rs	matches!(self.driver_name(), DRIVER_S3 | DRIVER_AZURE)	matches!(self.driver_name(), DRIVER_S3)	lib	filestore
+exportlink-no-flag	crates/mm-app/src/command_provider.rs	if !config.feature_flags.enable_export_direct_download\n                || !config.dedicated_export_store	if !config.dedicated_export_store	lib	command
+exportlink-no-backend	crates/mm-app/src/command_provider.rs	|| !config.dedicated_export_store\n                || !export_links	|| !config.dedicated_export_store	lib	command
+exportlink-hint-untemplated	crates/mm-app/src/command_provider.rs	.replace("{{.LatestMsg}}", LATEST_EXPORT_MESSAGE)	.replace("{{.LatestMsg}}", "")	lib	command
+uniqueness-ignores-backend	crates/mm-app/src/command.rs	built_in_command_triggers(&self.config(), self.export_file_backend().generates_links())	built_in_command_triggers(&self.config(), false)	lib	command
+presign-no-driver-gate	crates/mm-app/src/export.rs	if !self.export_file_backend().generates_links() {	if false {	lib	export::
+presign-gates-swapped	crates/mm-app/src/export.rs	if !config.feature_flags.enable_export_direct_download {	if !config.feature_flags.enable_export_direct_download && config.dedicated_export_store {	lib	export::
+control-iter-mut	crates/mm-app/src/config.rs	for (name, value) in &mut fields {	for (name, value) in fields.iter_mut() {	lib	config::
+control-rename-defaults	crates/mm-app/src/config.rs	    let mut flags = FeatureFlags::default();\n    flags.set_defaults();\n    flags\n	    let mut defaults = FeatureFlags::default();\n    defaults.set_defaults();\n    defaults\n	lib	config::
