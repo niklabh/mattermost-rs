@@ -852,10 +852,15 @@ var (
 //  1. every run of exactly 60 lower-case hex digits (a multipart boundary drawn from
 //     crypto/rand) becomes BOUNDARY<n>, numbered by first appearance from 1;
 //  2. every line "Date: …" becomes "Date: DATE";
-//  3. a generated message id "<{16 z-base-32}-{unix}@" becomes "<RANDOM-UNIX@".
+//  3. a generated message id "<{16 z-base-32}-{unix}@" becomes "<RANDOM-UNIX@";
+//  4. a transcript that starts with a TLS handshake record (0x16 0x03: a client that spoke TLS
+//     to a plaintext sink) becomes "[TLS CLIENT HELLO]" — the hello is random.
 //
 // Nothing else in the transcript is random.
 func normaliseTranscript(s string) string {
+	if strings.HasPrefix(s, "\x16\x03") {
+		return "[TLS CLIENT HELLO]"
+	}
 	seen := map[string]string{}
 	s = boundaryRe.ReplaceAllStringFunc(s, func(b string) string {
 		if n, ok := seen[b]; ok {

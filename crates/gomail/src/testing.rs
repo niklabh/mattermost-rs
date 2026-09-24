@@ -223,8 +223,13 @@ impl AsyncWrite for PlainOrTls<'_> {
 }
 
 /// `normaliseTranscript` (behaviour_mail.go): boundaries → `BOUNDARY<n>` by first appearance,
-/// `Date: …` lines → `Date: DATE`, generated message ids → `<RANDOM-UNIX@`.
+/// `Date: …` lines → `Date: DATE`, generated message ids → `<RANDOM-UNIX@`, and a transcript
+/// that opens with a TLS handshake record → `[TLS CLIENT HELLO]`.
 pub fn normalise_transcript(s: &str) -> String {
+    // 4. A client that spoke TLS to a plaintext sink: the hello is random.
+    if s.starts_with("\u{16}\u{3}") {
+        return "[TLS CLIENT HELLO]".to_owned();
+    }
     // 1. Leftmost-first runs of exactly 60 lower-case hex digits, as Go's regexp finds them.
     let bytes = s.as_bytes();
     let is_hex = |b: u8| b.is_ascii_digit() || (b'a'..=b'f').contains(&b);
