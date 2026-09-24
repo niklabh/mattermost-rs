@@ -3,13 +3,16 @@ name = "gohtml2text"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
-# A port of github.com/jaytaylor/html2text (MIT) over a port of golang.org/x/net/html's parser
-# (BSD-3-Clause). It contains no Mattermost code and must never depend on an `mm-*` crate.
-license = "MIT AND BSD-3-Clause"
+# A port of github.com/jaytaylor/html2text and github.com/ssor/bom (both MIT; LICENSE-HTML2TEXT,
+# LICENSE-BOM). The x/net/html parser it runs on is the separate BSD-3-Clause crate `gohtml`.
+# It contains no Mattermost code and must never depend on an `mm-*` crate.
+license = "MIT"
 repository.workspace = true
 description = "Byte-exact port of jaytaylor/html2text as Mattermost's mail sender calls it"
+include = ["src/**/*.rs", "LICENSE*"]
 
 [dependencies]
+gohtml.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

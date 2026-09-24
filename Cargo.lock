@@ -1157,6 +1157,7 @@ dependencies = [
 name = "gohtml2text"
 version = "0.1.0"
 dependencies = [
+ "gohtml",
  "serde_json",
  "thiserror",
 ]
