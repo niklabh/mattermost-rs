@@ -6922,6 +6922,9 @@ What is needed: `AuditStore::save` (`mm-store/src/audit_store.rs` is read-only t
 `mm_model::audit_record` is already ported in full. `LogAuditRec`/`MakeAuditRecord` are a
 **separate** and much smaller question: those write to the audit *log* (mlog) rather than to the
 database, so nothing over the API can see them and they need no entry.
+
+**Started 2026-09-24:** `AuditStore::save` and `App::log_audit` exist, and `moveChannel` (REST
+and local socket) writes its two rows through them — the pattern for the rest.
 ---
 
 ## D-280 · `POST /api/v4/bots` cannot be compared with Go on this deployment
@@ -8110,33 +8113,13 @@ reimplementing Go's quoting for a value that cannot exercise the difference.
 
 ---
 
-## D-480 · `POST /channels/{channel_id}/move` is not ported
+## D-480 · `POST /channels/{channel_id}/move` is not ported — CLOSED 2026-09-24
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (channel administration)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (channel administration)
 
-`moveChannel` (api4/channel.go:3063) is unblocked and unported. It is forwarded, and Go answers it
-normally — measured on stack 4, where a move of a public channel to its own team returned 200 and
-the channel body.
-
-**What it needs**, none of which exists yet:
-
-- `Channel().RemoveAllDeactivatedMembers` and `Channel().UpdateSidebarChannelCategoryOnMove`;
-- `Thread().UpdateTeamIdForChannelThreads`;
-- `Webhook().UpdateIncoming`/`UpdateOutgoing`, driven from the two per-team webhook page reads
-  that **are** ported — the move rewrites `TeamId` on every hook pointing at the channel;
-- `GetTeamMembersByIds`, which `App.MoveChannel` asks **twice**: once as a precondition (every
-  channel member must already be in the target team, or the whole move is an
-  `app.channel.move_channel.members_do_not_match.error` 500) and once inside
-  `RemoveUsersFromChannelNotMemberOfTeam`;
-- the `api.team.move_channel.success` i18n string for `postChannelMoveMessage`.
-
-**The ordering worth preserving when it lands:** the `force` flag removes non-members *before* the
-move, and `MoveChannel` then calls `RemoveUsersFromChannelNotMemberOfTeam` again itself and
-**logs** rather than fails on its error — so a forced move and an unforced one differ only in
-whether the precondition can be met, not in the end state.
-
-**A parity suite for it must create its own team and channel.** `moveChannel` rewrites
-`Channels.TeamId`, and the shared fixture channel is read by two dozen suites in the same binary.
+Served since 2026-09-14 (`mm_api::channel_move`); closed once the rest landed: the webhook settings
+gates, the store's `UpdateAt` stamp on re-homed hooks, the notice in the server locale, and the two
+`LogAudit` rows. `parity::channel_move`; the one remaining forward (the `force` sweep) is [D-1130].
 
 ---
 
@@ -10071,3 +10054,20 @@ pairs Go registers with `HEAD`, and a parity sweep over `scripts/routes.py`'s `G
 to `[]` — its doc comment states the comma rule as Go's. The other two slice settings
 (`SignaturePublicKeyFiles`, `TrustedProxyIPHeader`) split on spaces. **What is owed:** replace
 `split_list` with the space split and turn its test round.
+
+---
+
+## D-1130 · Removing a guest, a group-constrained or a shared-channel member forwards the whole request
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-24 (D-480, channel move)
+
+`App::remove_user_from_channel_inner` answers `MemberWrite::Forward` for three branches of Go's
+`removeUserFromChannel` (app/channel.go:2999), all of them public code: a **guest** (whose last
+channel on the team evicts them from it — `teamService.RemoveTeamMember` and
+`postProcessTeamMemberLeave`), a **group-constrained** channel swept by someone else
+(`FilterNonGroupChannelMembers`; `App::channel_members_minus_group_members` is already here), and a
+**shared** channel (`NotifyMembershipChanged` to the shared-channel service — the one that may
+genuinely need Go's state). Every caller forwards the whole request for it: `DELETE
+/channels/{id}/members/{user}`, the leave routes, and `moveChannel`'s `force` sweep, which is its
+only forward. **What is owed:** the first two ported; the third decided (port or permanent forward
+naming the service).

@@ -4,13 +4,44 @@
 //! it is the thing a port gets wrong: `ErrOutOfBounds` is a **400** with its own id, and every
 //! other store failure is a 500 with a different one.
 
-use mm_model::audit::Audits;
+use mm_model::audit::{Audit, Audits};
 use mm_model::utils::{AppError, AppResult};
 use mm_store::{AuditStore, StoreError};
 
 use crate::App;
 
 impl App {
+    /// Port of `web.Context.LogAudit` (web/context.go:95): one `Audits` row — the session's
+    /// user and id, the request's IP address, `action` the request **path**
+    /// (`c.AppContext.Path()`, `r.URL.Path`: no query string) — written unconditionally, with no
+    /// config gate. A failed save is logged (`app.audit.save.saving.app_error`) and never fails
+    /// the request, as in Go.
+    ///
+    /// The handler passes the pieces of Go's `Context`: the session's user id and the
+    /// `HookContext`'s session id and IP address, which is `utils.GetIPAddress` already. A
+    /// local-socket request has none of the three, and neither has Go's.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, action = %action))]
+    pub async fn log_audit(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        ip_address: &str,
+        action: &str,
+        extra_info: &str,
+    ) {
+        let mut audit = Audit {
+            user_id: user_id.to_owned(),
+            ip_address: ip_address.to_owned(),
+            action: action.to_owned(),
+            extra_info: extra_info.to_owned(),
+            session_id: session_id.to_owned(),
+            ..Audit::default()
+        };
+        if let Err(err) = self.store().audit().save(&mut audit).await {
+            tracing::error!(error = %err, id = "app.audit.save.saving.app_error", "LogAudit failed");
+        }
+    }
+
     /// Port of `App.GetAuditsPage` (audit.go:59).
     ///
     /// Go multiplies `page * perPage` into an offset in `int` arithmetic. Both values arrive from

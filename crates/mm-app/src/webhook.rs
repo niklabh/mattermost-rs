@@ -529,7 +529,7 @@ impl App {
 
         self.store()
             .webhook()
-            .update_incoming(&hook)
+            .update_incoming(&mut hook)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "incoming webhook update failed");
@@ -756,7 +756,7 @@ impl App {
 
         self.store()
             .webhook()
-            .update_outgoing(&hook)
+            .update_outgoing(&mut hook)
             .await
             .map_err(|err| update_outgoing_error("UpdateOutgoingWebhook", err))?;
 
@@ -805,7 +805,7 @@ impl App {
 
         self.store()
             .webhook()
-            .update_outgoing(&hook)
+            .update_outgoing(&mut hook)
             .await
             .map_err(|err| update_outgoing_error("RegenOutgoingWebhookToken", err))?;
 

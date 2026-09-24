@@ -13100,8 +13100,11 @@ remove (a guest, a shared channel) forwards the whole request.
 | test | `crates/mm-api/tests/parity/channel_move.rs` — 3, each move on its own channel, the five writes read back from the database | DONE |
 | mutation | `scripts/mutations/channel-move.plan` — 12 run, 10 caught, 2 controls survived | DONE |
 
-- **The move post is English** (`api.team.move_channel.success` with the *previous* team's
-  name), the same exception every system post makes — see `App::create_system_post`.
+- **The move post is in the server locale** since 2026-09-24 (`i18n.T` + `fmt.Sprintf`, see
+  `App::post_channel_move_message`); it was English until then.
+- **D-480 closed (2026-09-24):** webhooks re-homed through the settings-gated page reads (a disabled
+  kind stays behind) with the store stamping `UpdateAt`, and the two `LogAudit` rows written — 5
+  parity tests; `scripts/mutations/channel-move-d480.plan` — 12 run, 10 caught, 2 controls survived.
 
 ## `POST /api/v4/notifications/ack` (2026-09-14)
 

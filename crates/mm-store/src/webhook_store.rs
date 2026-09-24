@@ -104,10 +104,14 @@ pub trait WebhookStore {
         hook: &IncomingWebhook,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
-    /// Port of `SqlWebhookStore.UpdateIncoming` (webhook_store.go:87).
+    /// Port of `SqlWebhookStore.UpdateIncoming` (webhook_store.go:101).
+    ///
+    /// **Stamps `hook.update_at` itself**, as Go's does (`hook.UpdateAt = model.GetMillis()`) —
+    /// so a caller that writes a hook it did not stamp, `MoveChannel`'s re-homing, still moves
+    /// `UpdateAt`, and the caller's hook carries the value written.
     fn update_incoming(
         &self,
-        hook: &IncomingWebhook,
+        hook: &mut IncomingWebhook,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
     /// Port of `SqlWebhookStore.DeleteIncoming` (webhook_store.go:151) — a **soft** delete.
@@ -123,10 +127,14 @@ pub trait WebhookStore {
         hook: &OutgoingWebhook,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
-    /// Port of `SqlWebhookStore.UpdateOutgoing` (webhook_store.go:298).
+    /// Port of `SqlWebhookStore.UpdateOutgoing` (webhook_store.go:394).
+    ///
+    /// Stamps `hook.update_at`, like [`WebhookStore::update_incoming`] — which is what makes
+    /// `RegenOutgoingWebhookToken`'s answer carry a fresh `update_at` and a moved channel's hook
+    /// a new one.
     fn update_outgoing(
         &self,
-        hook: &OutgoingWebhook,
+        hook: &mut OutgoingWebhook,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
     /// Port of `SqlWebhookStore.DeleteOutgoing` (webhook_store.go:313) — a **soft** delete.
@@ -385,7 +393,8 @@ impl WebhookStore for SqlWebhookStore {
     /// last-used stamp — which is why `UpdateIncomingWebhook` copies them off the old hook first
     /// and the store never has to.
     #[tracing::instrument(skip_all, fields(id = %hook.id))]
-    async fn update_incoming(&self, hook: &IncomingWebhook) -> Result<(), StoreError> {
+    async fn update_incoming(&self, hook: &mut IncomingWebhook) -> Result<(), StoreError> {
+        hook.update_at = mm_model::utils::get_millis();
         sqlx::query!(
             r#"
             UPDATE incomingwebhooks
@@ -484,7 +493,8 @@ impl WebhookStore for SqlWebhookStore {
     /// `Token` and `CreatorId`. That is what lets `RegenOutgoingWebhookToken` reuse it with
     /// nothing changed but the token.
     #[tracing::instrument(skip_all, fields(id = %hook.id))]
-    async fn update_outgoing(&self, hook: &OutgoingWebhook) -> Result<(), StoreError> {
+    async fn update_outgoing(&self, hook: &mut OutgoingWebhook) -> Result<(), StoreError> {
+        hook.update_at = mm_model::utils::get_millis();
         let trigger_words = string_array_text(hook.trigger_words.as_ref())?;
         let callback_urls = string_array_text(hook.callback_urls.as_ref())?;
 
