@@ -14848,3 +14848,11 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `literalStore`'s `null` (decode.go:904), `object`'s exact-then-`foldName` field match (decode.go:699, encode.go:1306), `array`'s reuse of the backing array (decode.go:507), per-kind reassignment of a repeated key | `mm_model::go_decode` (`GoJson`, `At`), behind every `mm_model::utils` body decoder; `from_value_go` | DONE, closes [D-057], [D-075], [D-460], [D-071]; opens [D-1240], [D-1241] | `body_decode_go_parity` (89 bodies × 3 decodes + a fold-collision corpus with U+212A), 8 `go_decode` unit, 14 model corpora flipped from "divergence" to agreement, `parity::malformed_bodies` (13 more route cases) | The document is parsed once into an order-keeping tree and each field gets all its occurrences, so the target kind decides what a repeat means. A `#[serde(flatten)]` type only gets the top-level `null` rule ([D-1240]). |
 | The handlers that decoded into a `Value` and then `from_value` (emoji, user and channel searches, typing, view, logs query, role patch, onboarding, LDAP test, SAML reset, CPA and property patches, marketplace install), the websocket request, `CommandResponseFromJSON` | the body decoders directly | DONE | as above; `users_search` found by the parity case (`{"Term":…}` was a 400) | `searchUsers`' forwarded-field check now folds keys too. |
+
+## createPost's webhook forward and setPostUnread's mention arms — D-421 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `handleWebhookEvents` relevance loop (app/webhook.go:62) | `mm_app::post_create::outgoing_hook_fires` | DONE | 1 unit table, `parity::post_creates::only_an_outgoing_webhook_that_fires_forwards_the_post`; 8 mutations, 6 caught, 2 controls survived | A createPost is forwarded only when a hook would fire; any hook on the team used to forward every post (the `licensed_sweep` priority regression). |
+| `countMentionsFromPost`, `isPostMention`, `isCommentMention`, `markChannelAsUnreadFromPostCRTUnsupported`'s reply arm | `mm_app::post_unread` | DONE, closes [D-421] | 2 unit, `parity::set_unread_mentions` (2), `parity::post_acks` flipped to served; 14 mutations, 12 caught, 2 controls survived | `GetPostsAfterPost` reads as the **session's** user, not the marked user. |
+

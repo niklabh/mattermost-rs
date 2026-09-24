@@ -320,7 +320,16 @@ async fn a_null_string_array_column_is_null_either_way() {
     };
     let client = client();
     let admin = go_minted_token(&client).await;
-    let (team, channel) = common::a_team_and_channel_the_user_is_in(&client, &admin).await;
+    let (team, _) = common::a_team_and_channel_the_user_is_in(&client, &admin).await;
+    // A channel of its own: with its trigger words nulled the hook fires on **every** post in its
+    // channel, and in the shared channel that forwarded every other suite's served post there
+    // (`licensed_sweep`'s priority post, 2026-09-25). A run that panics before the cleanup below
+    // leaves the hook live, so the previous run's leftovers go first.
+    sqlx::query("DELETE FROM outgoingwebhooks WHERE displayname = 'mmrs-parity-nullcols'")
+        .execute(&pool)
+        .await
+        .expect("stale hooks are removed");
+    let channel = create_channel(&client, &admin, &team, "nullhooks").await;
 
     let created = |path: &'static str, body: serde_json::Value| {
         let client = &client;
@@ -341,7 +350,7 @@ async fn a_null_string_array_column_is_null_either_way() {
     let hook = created(
         "/api/v4/hooks/outgoing",
         serde_json::json!({
-            "team_id": team, "channel_id": channel, "display_name": "nullcols",
+            "team_id": team, "channel_id": channel, "display_name": "mmrs-parity-nullcols",
             "trigger_words": ["nullcols"], "callback_urls": ["http://localhost:9/x"],
         }),
     )
@@ -403,6 +412,7 @@ async fn a_null_string_array_column_is_null_either_way() {
         .header("Authorization", format!("Bearer {admin}"))
         .send()
         .await;
+    delete_channel(&client, &admin, &channel).await;
 }
 
 /// `drafts.props` (sqlx, `StringInterface` over `varchar`) and `drafts.fileids` (`StringArray`,

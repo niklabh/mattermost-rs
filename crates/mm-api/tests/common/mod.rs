@@ -2553,6 +2553,13 @@ impl SecondServer {
             .env("MM_FILESETTINGS_DIRECTORY", stack_data_dir())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
+        // `MMRS_SECOND_SERVER_LOG=<dir>` keeps each second server's log as `<dir>/<port>.log`, at
+        // debug — the only way to see *why* a second server forwarded a request it should serve.
+        if let Ok(dir) = std::env::var("MMRS_SECOND_SERVER_LOG")
+            && let Ok(file) = std::fs::File::create(format!("{dir}/{port}.log"))
+        {
+            command.stdout(file).env("RUST_LOG", "debug");
+        }
         for (key, value) in env {
             command.env(key, value);
         }

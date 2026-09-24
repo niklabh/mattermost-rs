@@ -1,0 +1,10 @@
+# The createPost outgoing-webhook forward fires only for hooks handleWebhookEvents would fire.
+any-hook-forwards	crates/mm-app/src/post_create.rs	                .any(|hook| outgoing_hook_fires(hook, &post.channel_id, &post.message))	                .any(|_hook| true)	api	only_an_outgoing_webhook_that_fires_forwards_the_post
+no-hook-forwards	crates/mm-app/src/post_create.rs	                .any(|hook| outgoing_hook_fires(hook, &post.channel_id, &post.message))	                .any(|_hook| false)	api	only_an_outgoing_webhook_that_fires_forwards_the_post
+channel-check-dropped	crates/mm-app/src/post_create.rs	    if hook.channel_id != channel_id && !hook.channel_id.is_empty() {	    if false {	lib	post_create::tests::an_outgoing
+catch-all-dropped	crates/mm-app/src/post_create.rs	    if hook.channel_id == channel_id && no_trigger_words {	    if false && no_trigger_words {	lib	post_create::tests::an_outgoing
+trigger-when-swapped	crates/mm-app/src/post_create.rs	        0 => hook.trigger_word_exact_match(first_word),	        0 => hook.trigger_word_starts_with(first_word),	api	only_an_outgoing_webhook_that_fires_forwards_the_post
+last-word-not-first	crates/mm-app/src/post_create.rs	    let first_word = message.split_whitespace().next().unwrap_or("");	    let first_word = message.split_whitespace().last().unwrap_or("");	lib	post_create::tests::an_outgoing
+# Controls: must survive.
+control-rename-first-word	crates/mm-app/src/post_create.rs	    let first_word = message.split_whitespace().next().unwrap_or("");\n    match hook.trigger_when {\n        0 => hook.trigger_word_exact_match(first_word),\n        1 => hook.trigger_word_starts_with(first_word),	    let word = message.split_whitespace().next().unwrap_or("");\n    match hook.trigger_when {\n        0 => hook.trigger_word_exact_match(word),\n        1 => hook.trigger_word_starts_with(word),	lib	post_create::tests::an_outgoing
+control-is-empty-spelling	crates/mm-app/src/post_create.rs	    if hook.channel_id != channel_id && !hook.channel_id.is_empty() {	    if hook.channel_id != channel_id && hook.channel_id.len() != 0 {	api	only_an_outgoing_webhook_that_fires_forwards_the_post

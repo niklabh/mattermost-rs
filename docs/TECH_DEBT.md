@@ -7738,30 +7738,16 @@ missing preview. The two store methods are exercised by
 `crates/mm-store/tests/db_post_reminder_store.rs` (4 tests) rather than left for the compiler —
 the upsert, the not-found that must write nothing, and the `COALESCE` a DM needs.
 
-## D-421 · setPostUnread serves a DM or group channel and forwards the rest
+## D-421 · setPostUnread serves a DM or group channel and forwards the rest — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (postacks)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (postacks)
 
-`POST /api/v4/users/{user_id}/posts/{post_id}/set_unread` answers two of Go's three arms and
-forwards the others. `mm_app::post_unread::App::mark_channel_as_unread_from_post` is the list;
-both refusals are decided from reads alone, so a forwarded request reaches Go with nothing
-written.
+Paid off: every arm is served — `countMentionsFromPost` beyond the DM short circuit
+(`is_post_mention`/`is_comment_mention` on `crate::mention`, `GetPostsAfterPost`, the priority
+reads) and the CRT-unsupported reply arm's thread follow and recount; `parity::set_unread_mentions`
+compares responses, member and thread-membership rows, and both events against Go.
 
-| forwarded shape | what it needs |
-|---|---|
-| an open or private channel | the mention engine — `MentionKeywords`, `isPostMention`, `GetPostsAfterPost` and `PostPriority().GetForPosts`. `countMentionsFromPost`'s DM/GM short circuit is the only branch that avoids it. |
-| a **reply** when the client did not send `collapsed_threads_supported` | `Thread().MaintainMembership`/`UpdateMembership`/`GetThreadForUser`, `sanitizeThreadResponse`, and `countThreadMentions` — the mention engine again. Half-porting it would write a `ThreadMemberships` row carrying a wrong `UnreadMentions` that no later request corrects. |
-
-The mention engine is the same unlock [D-401] names, and it is now owed by two routes rather than
-one.
-
-One line of `update_last_viewed_at_post` is unreachable from the served path and stays that way:
-the read-back's `c.deleteat = 0` guard. It is reached only for a DM or group channel, and Go has
-no route that archives one; an open channel, which can be archived, is forwarded before the store
-is touched. A mutation dropping the guard therefore survives, and the reason is the route shape
-rather than a missing fixture — recorded here so the next batch does not re-derive it.
-
-`App.UpdateMobileAppBadge` is sent from both served arms since 2026-09-24 ([D-215] closed).
+---
 
 ## D-422 · the acknowledgement pair is a licence refusal and stays one until a licence exists — CLOSED 2026-09-13
 
