@@ -45,13 +45,10 @@ use crate::error::ApiError;
 use crate::proxy;
 use crate::sessions::{check_embedded_cookie, render_session_cookie};
 
-/// Port of `model.MapFromJSON` (utils.go:507) — every failure is an empty map.
-///
-/// A third copy of the two-liner `auth_writes` and `channel_member_writes` already carry, for the
-/// reason stated there: several agents edit this workspace at once and a shared two-line helper
-/// is a worse merge risk than a copy.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    serde_json::from_slice::<StringMap>(bytes).unwrap_or_default()
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// `model.HeaderRequestedWith` / `model.HeaderRequestedWithXML` (model/client4.go constants,
@@ -1100,17 +1097,24 @@ mod tests {
     /// `map_from_json` swallows everything, so a malformed login body is a blank password rather
     /// than a decode error — which is the id the client sees.
     #[test]
-    fn map_from_json_turns_every_failure_into_an_empty_map() {
-        assert!(map_from_json(b"").is_empty());
-        assert!(map_from_json(b"null").is_empty());
-        assert!(map_from_json(b"[]").is_empty());
-        assert!(map_from_json(br#"{"login_id": 7}"#).is_empty());
-        assert!(map_from_json(b"{").is_empty());
+    fn map_from_json_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"login_id":"a@b.c","n":5} trailing"#);
+        assert_eq!(mixed.get("login_id").map(String::as_str), Some("a@b.c"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(br#"{"login_id":"a@b.c"}"#)
+            map_from_json(br#"{"login_id":7}"#)
                 .get("login_id")
                 .map(String::as_str),
-            Some("a@b.c")
+            Some("")
         );
     }
 

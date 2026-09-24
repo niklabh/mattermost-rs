@@ -310,4 +310,9 @@ mod parity {
     pub mod api_head;
     // Appended 2026-09-24: rate limiting against its own Go server (D-430).
     pub mod ratelimit;
+    // Appended 2026-09-25: arrays, nulls and trailing bytes as bodies (D-941).
+    pub mod malformed_bodies;
+    // Appended 2026-09-25: SQL NULL versus JSON null in every map, slice and pointer column
+    // (D-331, D-158).
+    pub mod null_columns;
 }

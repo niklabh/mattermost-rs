@@ -1,0 +1,7 @@
+# D-941: the handlers, against parity::malformed_bodies.
+a_array_rule	crates/mm-model/src/go_decode.rs	        if self.is_struct {\n            return Err(de::Error::custom(ARRAY_INTO_STRUCT));	        if false {\n            return Err(de::Error::custom(ARRAY_INTO_STRUCT));	api	malformed_bodies
+a_value_null	crates/mm-model/src/utils.rs	    Ok(decode_one_from_json::<Option<T>>(data)?.unwrap_or_default())	    decode_one_from_json::<T>(data)	api	malformed_bodies
+a_status_from_slice	crates/mm-api/src/status.rs	    let submitted: Status = match mm_model::utils::decode_one_value_from_json(&bytes) {	    let submitted: Status = match serde_json::from_slice(&bytes) {	api	malformed_bodies
+a_reaction_from_slice	crates/mm-api/src/reactions.rs	    let mut reaction: Reaction = match mm_model::utils::decode_one_value_from_json(&bytes) {	    let mut reaction: Reaction = match serde_json::from_slice(&bytes) {	api	malformed_bodies
+a_create_post_from_slice	crates/mm-api/src/post_writes.rs	    // `c.SetInvalidParamWithErr("post", jsonErr)`.\n    let mut post: Post = match mm_model::utils::decode_one_value_from_json(&bytes) {	    // `c.SetInvalidParamWithErr("post", jsonErr)`.\n    let mut post: Post = match serde_json::from_slice(&bytes) {	api	malformed_bodies
+control_a_reaction_turbofish	crates/mm-api/src/reactions.rs	    let mut reaction: Reaction = match mm_model::utils::decode_one_value_from_json(&bytes) {	    let mut reaction: Reaction = match mm_model::utils::decode_one_value_from_json::<Reaction>(&bytes) {	api	malformed_bodies

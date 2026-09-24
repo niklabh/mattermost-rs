@@ -1593,13 +1593,18 @@ struct ThreadedPostRow {
 /// An empty participants array leaves the field **nil**, not `[]`: Go appends into a nil slice
 /// and never allocates when there is nothing to append. `participants` carries no `omitempty`,
 /// so that is `"participants":null` on the wire.
+///
+/// `COALESCE(Threads.Participants, '[]')` catches only a SQL NULL; a jsonb `null` reaches
+/// `StringArray.Scan` and unmarshals to a nil slice, which is the same empty loop. [D-331]
 fn threaded_post_from_row(row: ThreadedPostRow) -> Result<Post, StoreError> {
     let participant_ids: Vec<String> =
-        serde_json::from_value(row.thread_participants).map_err(|source| StoreError::Decode {
-            entity: "Thread",
-            column: "participants",
-            source,
-        })?;
+        serde_json::from_value::<Option<Vec<String>>>(row.thread_participants)
+            .map_err(|source| StoreError::Decode {
+                entity: "Thread",
+                column: "participants",
+                source,
+            })?
+            .unwrap_or_default();
 
     let mut post = post_from_row(PostRow {
         id: row.id,

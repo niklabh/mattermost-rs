@@ -630,7 +630,8 @@ pub async fn patch_group(
         Ok(bytes) => bytes,
         Err(err) => return err.into_response(),
     };
-    let mut patch: GroupPatch = match decode_one_from_json(&bytes) {
+    // `var groupPatch model.GroupPatch` (group.go:255): a value, so `null` is an empty patch.
+    let mut patch: GroupPatch = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(patch) => patch,
         Err(_) => return crate::error::ApiError::invalid_param("group").into_response(),
     };
@@ -1295,7 +1296,9 @@ pub async fn link_group_syncable(
             .into_response();
         }
     };
-    let patch = match serde_json::from_slice::<Option<GroupSyncablePatch>>(&bytes) {
+    // `json.Unmarshal(body, &patch)` into a `*model.GroupSyncablePatch` (group.go:354): the whole
+    // body, a `null` is the nil the handler refuses, and an array is not a patch.
+    let patch = match mm_model::utils::unmarshal_from_json::<Option<GroupSyncablePatch>>(&bytes) {
         Ok(Some(patch)) => patch,
         Ok(None) | Err(_) => {
             return ApiError::invalid_param(&format!("Group{syncable_type}")).into_response();
@@ -1498,7 +1501,9 @@ pub async fn patch_group_syncable(
             .into_response();
         }
     };
-    let patch = match serde_json::from_slice::<Option<GroupSyncablePatch>>(&bytes) {
+    // `json.Unmarshal(body, &patch)` into a `*model.GroupSyncablePatch` (group.go:354): the whole
+    // body, a `null` is the nil the handler refuses, and an array is not a patch.
+    let patch = match mm_model::utils::unmarshal_from_json::<Option<GroupSyncablePatch>>(&bytes) {
         Ok(Some(patch)) => patch,
         Ok(None) | Err(_) => {
             return ApiError::invalid_param(&format!("Group[{syncable_type}]Patch"))

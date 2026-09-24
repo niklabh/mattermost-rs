@@ -138,8 +138,9 @@ fn require_command_id(command_id: &str) -> Result<(), ApiError> {
 /// The body every write but `moveCommand` reads: a whole `model.Command`.
 ///
 /// Go is `json.NewDecoder(r.Body).Decode(&cmd)`, whose failure is
-/// `SetInvalidParamWithErr("command")` — the body-param 400. `serde_json::from_slice` is stricter
-/// than `Decode` about trailing bytes after the object; nothing a client sends reaches that.
+/// `SetInvalidParamWithErr("command")` — the body-param 400. A value, so `null` is the zero command
+/// (which `createCommand` then refuses on its empty team's permission) and trailing bytes are
+/// ignored.
 async fn command_from_body(request: Request, parameter: &str) -> Result<Command, ApiError> {
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
@@ -148,7 +149,7 @@ async fn command_from_body(request: Request, parameter: &str) -> Result<Command,
             return Err(ApiError::invalid_param(parameter));
         }
     };
-    serde_json::from_slice(&bytes).map_err(|err| {
+    mm_model::utils::decode_one_value_from_json(&bytes).map_err(|err| {
         tracing::debug!(error = %err, "command body did not decode");
         ApiError::invalid_param(parameter)
     })
@@ -595,7 +596,8 @@ pub async fn move_command(
         }
     };
     // `SetInvalidParamWithErr("team_id")` — the *field*, not the type, names this one.
-    let move_request: CommandMoveRequest = match serde_json::from_slice(&bytes) {
+    let move_request: CommandMoveRequest = match mm_model::utils::decode_one_value_from_json(&bytes)
+    {
         Ok(move_request) => move_request,
         Err(err) => {
             tracing::debug!(error = %err, "move request body did not decode");

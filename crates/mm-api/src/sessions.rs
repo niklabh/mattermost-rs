@@ -117,18 +117,10 @@ fn status_ok() -> Response {
         .into_response()
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507).
-///
-/// Every failure is an empty map — Go discards the decode error and replaces a nil map with an
-/// allocated one, so a caller can never tell "no keys" from "unparseable". That matters here:
-/// `revokeSession` reads `props["session_id"]` out of the result, so a malformed body and a body
-/// with no `session_id` produce the **same** 400 on the same parameter.
-///
-/// Go's decoder fills the map as it goes and only then fails, so `{"a":"b","c":5}` yields
-/// `{"a":"b"}` there and `{}` here. Reachable only with a mixed-type object; recorded on
-/// `channel_member_writes::map_from_json`, which is the same divergence.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    serde_json::from_slice::<StringMap>(bytes).unwrap_or_default()
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// Port of `revokeSession` (user.go:2602), reached as
@@ -1043,18 +1035,24 @@ mod tests {
     /// `MapFromJSON` swallows everything, so `revokeSession` cannot tell a malformed body from
     /// one with no `session_id` — both are the same 400 on the same parameter.
     #[test]
-    fn map_from_json_swallows_every_failure() {
-        assert!(map_from_json(b"").is_empty());
-        assert!(map_from_json(b"[]").is_empty());
-        assert!(map_from_json(b"null").is_empty());
-        assert!(map_from_json(b"\"x\"").is_empty());
-        assert!(map_from_json(b"{\"session_id\": 5}").is_empty());
-        assert!(map_from_json(b"not json at all").is_empty());
+    fn map_from_json_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"session_id":"abc","n":5} trailing"#);
+        assert_eq!(mixed.get("session_id").map(String::as_str), Some("abc"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(b"{\"session_id\":\"abc\"}")
+            map_from_json(br#"{"session_id":7}"#)
                 .get("session_id")
                 .map(String::as_str),
-            Some("abc")
+            Some("")
         );
         // An explicitly empty value is present-but-empty, which the handler treats exactly as
         // absent — the `sessionId == ""` test, not a `_, ok :=`.

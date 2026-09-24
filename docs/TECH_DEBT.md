@@ -1515,7 +1515,9 @@ lands with the logging layer and reduces to `if let Err(e) = self.props_is_valid
 
 ## D-043 · Absent JSON keys must zero-fill, and 14 of 75 types say so
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Closed** 2026-09-24 with [D-192] — every `Deserialize` struct in the server crates now zero-fills
+an absent key, and `mm_model::serde_default_guard` parses their source so a new one cannot forget.
 
 Go's `encoding/json` leaves an absent field at its zero value; serde's derived `Deserialize`
 **errors** with `missing field` unless the field or the container carries `#[serde(default)]`. So
@@ -2570,6 +2572,10 @@ worth re-checking when the app layer lands.
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-08-16 (phase 1, `channel_view.go`)
 **Related** [D-040] (the other crate-wide `encoding/json`-versus-serde decode difference)
+**Narrowed** 2026-09-25 — option (b) is built for request bodies: every `mm_model::utils` body
+decoder buffers a struct's members through `go_decode::Strict`, so a repeated key is last-wins
+there ([D-941]). What is left is decoding that does not go through them — store rows, config,
+`serde_json::from_value` of an already-parsed document.
 
 `encoding/json` has no duplicate-key rule: it walks the object and assigns each field as it comes,
 so the **last** occurrence wins. `serde_derive`'s generated `Deserialize` tracks which fields it
@@ -5664,37 +5670,13 @@ believing the server is unlicensed — but unlike the two settings above, being 
 
 ---
 
-## D-158 · sqlx materialises a nil Go map before scanning, and only one ported store knows it
+## D-158 · sqlx materialises a nil Go map before scanning, and only one ported store knows it — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-23 (phase 2, getPostsForChannel)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-23 (phase 2, getPostsForChannel)
 
-Reading `StringInterface.Scan` (model/utils.go:185) says a NULL column leaves the field nil, and a
-nil Go map marshals as `null`. That is what `mm-store/src/post_store.rs` did, and it was wrong:
-the running server answers `"props":{}` for a post whose `props` column is SQL NULL.
-
-The scan never sees a nil map. **sqlx allocates one first** — `reflectx.FieldByIndexes` calls
-`reflect.MakeMap` for any nil map on the path to the field it is about to scan into — so `Scan`'s
-early return on NULL lands on an empty map. Slices get no such treatment, which is why a NULL
-`fileids` column really does reach the client as `null`. Measured three ways on the same row:
-
-| `posts.props` | Go answers |
-|---|---|
-| SQL `NULL` | `{}` |
-| jsonb `'null'` | `null` — `json.Unmarshal` sets the map back to nil |
-| jsonb `'[1,2]'` | 500, `app.post.get.app_error` |
-
-Fixed for `Post` and pinned by `parity_channel_posts::a_null_props_column_is_an_empty_object_on_every_route`,
-which asserts it on `GET /posts/{id}` as well — the divergence had been shipping there since that
-route landed, undetected because no fixture had a NULL column.
-
-**What is owed:** the same question for every other ported store that scans a Go **map** field out
-of a nullable column. `Channel.Props`, `Session.Props`, `User.NotifyProps` and
-`User.Props` are all `StringMap`/`StringInterface` over nullable columns, and each is one
-`UPDATE … SET col = NULL` and one request away from an answer. None of them can be produced
-through the REST API, which is why none was noticed; that is an argument for checking them, not
-for assuming they are fine.
-
-**Where the pin lives:** the module doc on `mm-store/src/post_store.rs`, with the table above.
+Paid off with [D-331]: every map, slice and pointer column `mm-store` reads was audited against
+how Go scans it, five sites were fixed, and `parity::null_columns` plants SQL NULL and jsonb `null`
+for each distinct shape and compares both servers.
 
 ---
 
@@ -6109,7 +6091,10 @@ question about who decides that a status changed.
 
 ## D-192 · A `Deserialize` derive without `#[serde(default)]` rejects bodies Go accepts
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (OAuth app writes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-08 (OAuth app writes)
+**Closed** 2026-09-24 — `Permission` was the last struct without the attribute; three types keep
+`missing field` because Go errors too, each named with its reason in `mm_model::serde_default_guard`,
+the `syn` walk over mm-model, mm-api, mm-app, mm-store, mm-ws and mm-plugin that fails on a new one.
 
 Go's `json.Decode` into a struct leaves an **absent field at its zero value**. A serde derive
 without `#[serde(default)]` makes an absent field a *decode error*. So any type a handler decodes
@@ -6478,8 +6463,11 @@ parity suite against Go rather than one that would be changing it in passing.
 
 ## D-224 · Muting a sidebar category does not mute its channels
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)
-**Blocked on** a `ChannelMembers` write in `mm-store/src/channel_store.rs`.
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)
+**Closed** 2026-09-24 — `App::set_channels_muted` (`mm_app::channel_member`) on a ported
+`update_multiple_members` / `get_members_by_channel_ids` now runs behind the reconciliation and
+publishes Go's `channel_member_updated` per changed member;
+`parity::sidebar_category_writes::muting_a_category_mutes_its_channels_like_go` and two siblings.
 
 `UpdateSidebarCategories` ends in `muteChannelsForUpdatedCategories` (app/channel_category.go:164),
 which reconciles the category's `muted` flag with its channels' `ChannelMembers.NotifyProps
@@ -7115,33 +7103,14 @@ that identifies a server, rather than on a path or a ping.
 
 ---
 
-## D-331 · a NULL `jsonb` column is `{}` in Go, and the audit of the other sites is owed
+## D-331 · a NULL `jsonb` column is `{}` in Go, and the audit of the other sites is owed — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (properties read routes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-12 (properties read routes)
 
-`PropertyField.Attrs` is a Go **map**, and sqlx's `reflectx.FieldByIndexes` allocates a nil map
-before scanning into it. `StringInterface.Scan` returns early for a nil driver value
-(`model/utils.go:186`), so a SQL `NULL` leaves that freshly allocated empty map behind and
-marshals as **`{}`** — while a jsonb `null` reaches `json.Unmarshal`, which zeroes the map, and
-marshals as **`null`**. Measured on both, twice.
-
-`mm-store`'s port had the two the wrong way round and it was invisible: the CPA reads that first
-used `search_fields` can only return an empty page unlicensed, so no row ever carried an `attrs`.
-Fixed for `PropertyFields`.
-
-**What is owed:** the same question for every other `jsonb` column this crate reads into an
-`Option`. `crates/mm-store` has roughly a dozen `None | Some(Value::Null) => None` sites —
-`channel_store` (×4), `user_store` (×2), `team_store`, `post_store`, `job_store`, `draft_store`,
-`role_store` — and each is correct **only if** Go's destination is not a bare map. A pointer or a
-`*StringMap` destination really is nil for both cases; a plain `StringMap`/`StringInterface` is
-not. The audit is one grep of the Go struct per site.
-
-**Why it is not urgent:** Go's own writers never leave these columns SQL NULL — `Value()` on a nil
-map emits the four bytes `null` — so the divergence needs a row written by a migration or by hand.
-That is exactly how this one was found, and a migration adding a nullable `jsonb` would reach it
-for real.
-
-**Where the pin lives:** `PropertyFieldRow::into_field` in `crates/mm-store/src/property_store.rs`.
+Paid off: the rule is how Go scans, not the column (sqlx map field `{}`/`null`, pointer
+`null`/empty struct, slice `null`/`null`, manual `[]byte` scan a 500 on NULL); fixed for users,
+channel members, sessions, channel banners, the `StringArray` text columns and thread participants,
+and proven per shape in `parity::null_columns` (8 tests).
 
 ---
 
@@ -9599,7 +9568,11 @@ thirteen ids. Nothing does today.
 
 ## D-941 · Body decoders: serde takes a JSON array for a struct, and refuses `null` for one
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-20 (D-092, the error translation)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-20 (D-092, the error translation)
+**Closed** 2026-09-25 — the array refusal (and last-wins for a repeated key) now lives inside every
+`mm_model::utils` body decoder through `go_decode::Strict`, and all ~120 body-decode sites were
+audited against their Go declaration and moved onto the value, pointer or `Unmarshal` form, held
+by `behaviour_body_decode.json` and `parity::malformed_bodies`.
 
 Two habits of `encoding/json` that serde does not share, both reachable from any route that
 decodes a body, and both invisible until error *messages* started being compared — the answers
@@ -10061,7 +10034,11 @@ store ones through a parameter), with a test that moves each flag.
 
 ## D-1150 · With `RateLimitSettings.Enable`, a forwarded request is limited twice
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Closed** 2026-09-25 — this server's stores decide for every request: the forward leg sets the trusted
+header when Go would fall back to the peer (`client_ip::forwarded_address_header`), Go's rate-limit
+headers are dropped from forwarded answers, and the per-user step counts forwarded Go web handlers too;
+`parity::ratelimit::forwarded_requests_are_limited_once_on_the_clients_key`. Open: [D-1210].
 
 `mm_api::ratelimit` limits every request at the front, as Go's `Server.Start` wrapper does, and a
 forwarded one then meets the Go process's own limiters: its global one keys on **this server's
@@ -10077,7 +10054,9 @@ Go. **What is owed:** a forward leg Go can key on the client — an `X-Forwarded
 
 ## D-1151 · `UserIdRateLimit` does not run for the web client's pages
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Closed** 2026-09-25 — `web_static::fallback` runs the per-user step for `NewStaticHandler`'s catch-all
+(the SPA page; `/static/…` is a plain handler and has none) with `IsStatic`'s headers on the refusal.
 
 Go's static handler (`NewStaticHandler`, the SPA page and `/static/…`) is a `web.Handler`, so with
 `VaryByUser` a request that carries a session cookie spends the user's budget there too and can be
@@ -10085,6 +10064,32 @@ refused after `IsStatic`'s headers (`X-Frame-Options`, the CSP). `ratelimit::per
 `route_layer` and never sees `web_static::fallback`. **What is owed:** call the per-user step from
 `web_static`'s `root` and `static_files`, with the static header set on its refusal, and a parity row
 that exhausts a user's budget on `/`.
+
+---
+
+## D-1210 · A forwarded branch of a rate-limited route meets Go's route limiter on this server's address
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+
+Go builds the three `RateLimitedHandler` limiters with `NewRateLimiter(&settings, []string{})`
+(api4/handlers.go:229): no trusted header, so they key on `RemoteAddr` alone, and behind this server
+that is this server. `login` forwards its magic-link, LDAP, cloud and MFA branches and
+`register_oauth_client` forwards the whole registration when DCR is on; each such request is counted
+here on the client's key and then in Go's route limiter on one key shared by every client — 5/s for
+MFA logins, 2/s for registrations, across the deployment — and Go's 429 is passed through.
+**What is owed:** port those branches (MFA login first), so no request of these three routes reaches Go.
+
+---
+
+## D-1211 · An API request over `MaximumURLLength` is answered, where Go's `basicSecurityChecks` refuses it
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+
+`ServeHTTP` refuses a request URI longer than `ServiceSettings.MaximumURLLength` (default 2048) with
+the 414 `basic_security_check.url.too_long_error` before anything else it does (web/handlers.go:143),
+per-user rate limit included. The web client's fallback and `/manualtest` check it; the API router
+does not: `GET /api/v4/system/ping?x=<3000 bytes>` is Go 414, here 200, and the per-user step counts
+it. **What is owed:** a layer on the API router with Go's 414 body, ahead of `ratelimit::per_user`.
 
 ---
 

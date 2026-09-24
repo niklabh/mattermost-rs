@@ -1,0 +1,1431 @@
+{
+    "int64_decode": [
+        {
+            "in": "2",
+            "ok": true,
+            "out": 2
+        },
+        {
+            "in": "0",
+            "ok": true,
+            "out": 0
+        },
+        {
+            "in": "-1",
+            "ok": true,
+            "out": -1
+        },
+        {
+            "in": "null",
+            "ok": true,
+            "out": 0
+        },
+        {
+            "in": "1.5",
+            "ok": false
+        },
+        {
+            "in": "\"2\"",
+            "ok": false
+        },
+        {
+            "in": "[]",
+            "ok": false
+        },
+        {
+            "in": "{}",
+            "ok": false
+        },
+        {
+            "in": "2 x",
+            "ok": true,
+            "out": 2
+        },
+        {
+            "in": "",
+            "ok": false
+        }
+    ],
+    "map_bool_decode": [
+        {
+            "in": "",
+            "out": {}
+        },
+        {
+            "in": "null",
+            "out": {}
+        },
+        {
+            "in": "[]",
+            "out": {}
+        },
+        {
+            "in": "\"x\"",
+            "out": {}
+        },
+        {
+            "in": "{",
+            "out": {}
+        },
+        {
+            "in": "{}",
+            "out": {}
+        },
+        {
+            "in": "{\"collapsed_threads_supported\":true}",
+            "out": {
+                "collapsed_threads_supported": true
+            }
+        },
+        {
+            "in": "{\"collapsed_threads_supported\":true,\"x\":\"nope\"}",
+            "out": {
+                "collapsed_threads_supported": true,
+                "x": false
+            }
+        },
+        {
+            "in": "{\"x\":\"nope\",\"collapsed_threads_supported\":true}",
+            "out": {
+                "collapsed_threads_supported": true,
+                "x": false
+            }
+        },
+        {
+            "in": "{\"a\":1}",
+            "out": {
+                "a": false
+            }
+        },
+        {
+            "in": "{\"a\":null}",
+            "out": {
+                "a": false
+            }
+        },
+        {
+            "in": "{\"a\":\"true\"}",
+            "out": {
+                "a": false
+            }
+        },
+        {
+            "in": "{\"a\":false,\"a\":true}",
+            "out": {
+                "a": true
+            }
+        },
+        {
+            "in": "{\"a\":true} trailing",
+            "out": {
+                "a": true
+            }
+        },
+        {
+            "in": "{\"a\":{\"b\":true}}",
+            "out": {
+                "a": false
+            }
+        }
+    ],
+    "struct_decode": [
+        {
+            "in": "",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "   ",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "null",
+            "pointer": null,
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": null,
+            "whole_ok": true
+        },
+        {
+            "in": " null ",
+            "pointer": null,
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": null,
+            "whole_ok": true
+        },
+        {
+            "in": "[]",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "[\"x\"]",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "[{}]",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "\"s\"",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "7",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "true",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"name\":\"a\"}",
+            "pointer": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"name\":\"a\"} ",
+            "pointer": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"name\":\"a\"}\n",
+            "pointer": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"name\":\"a\"} trailing",
+            "pointer": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"name\":\"a\"}{\"name\":\"b\"}",
+            "pointer": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"name\":\"a\"}[]",
+            "pointer": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole_ok": false
+        },
+        {
+            "in": "null x",
+            "pointer": null,
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole_ok": false
+        },
+        {
+            "in": "[] x",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"inner\":{\"a\":\"x\",\"n\":3}}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "x",
+                    "n": 3
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "x",
+                    "n": 3
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "x",
+                    "n": 3
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"inner\":[]}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"inner\":[\"x\"]}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"inner\":\"x\"}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"maybe\":null}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"maybe\":{\"a\":\"m\"}}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": {
+                    "a": "m",
+                    "n": 0
+                },
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": {
+                    "a": "m",
+                    "n": 0
+                },
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": {
+                    "a": "m",
+                    "n": 0
+                },
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"maybe\":[]}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"list\":null}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"list\":[]}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": [],
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": [],
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": [],
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"list\":[{\"a\":\"1\"},{\"a\":\"2\",\"n\":2}]}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": [
+                    {
+                        "a": "1",
+                        "n": 0
+                    },
+                    {
+                        "a": "2",
+                        "n": 2
+                    }
+                ],
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": [
+                    {
+                        "a": "1",
+                        "n": 0
+                    },
+                    {
+                        "a": "2",
+                        "n": 2
+                    }
+                ],
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": [
+                    {
+                        "a": "1",
+                        "n": 0
+                    },
+                    {
+                        "a": "2",
+                        "n": 2
+                    }
+                ],
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"list\":[[]]}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"list\":{}}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"tags\":[]}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": [],
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": [],
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": [],
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"tags\":[\"b\",\"a\",\"b\"]}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": [
+                    "b",
+                    "a",
+                    "b"
+                ],
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": [
+                    "b",
+                    "a",
+                    "b"
+                ],
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": [
+                    "b",
+                    "a",
+                    "b"
+                ],
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"tags\":\"a\"}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"props\":{\"k\":[1,{\"x\":2}],\"s\":\"v\"}}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": {
+                    "k": [
+                        1,
+                        {
+                            "x": 2
+                        }
+                    ],
+                    "s": "v"
+                }
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": {
+                    "k": [
+                        1,
+                        {
+                            "x": 2
+                        }
+                    ],
+                    "s": "v"
+                }
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": {
+                    "k": [
+                        1,
+                        {
+                            "x": 2
+                        }
+                    ],
+                    "s": "v"
+                }
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"props\":[]}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"props\":null}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"name\":\"a\",\"name\":\"b\"}",
+            "pointer": {
+                "name": "b",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "b",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "b",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"inner\":{\"a\":\"x\",\"a\":\"y\"}}",
+            "pointer": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "y",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "y",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "y",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"name\":\"a\",\"count\":1,\"name\":\"c\"}",
+            "pointer": {
+                "name": "c",
+                "count": 1,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "c",
+                "count": 1,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "c",
+                "count": 1,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"count\":\"7\"}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"count\":1.5}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"flag\":1}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"name\":7}",
+            "pointer_ok": false,
+            "value_ok": false,
+            "whole_ok": false
+        },
+        {
+            "in": "{\"zzz\":1,\"name\":\"a\"}",
+            "pointer": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "a",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"name\":\"\\ud800\"}",
+            "pointer": {
+                "name": "�",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "�",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "�",
+                "count": 0,
+                "flag": false,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "maybe": null,
+                "list": null,
+                "tags": null,
+                "props": null
+            },
+            "whole_ok": true
+        },
+        {
+            "in": "{\"name\":\"n\",\"count\":9,\"flag\":true,\"inner\":{\"a\":\"i\",\"n\":1},\"maybe\":{\"a\":\"m\",\"n\":2},\"list\":[{\"a\":\"l\"}],\"tags\":[\"t\"],\"props\":{\"p\":true}}",
+            "pointer": {
+                "name": "n",
+                "count": 9,
+                "flag": true,
+                "inner": {
+                    "a": "i",
+                    "n": 1
+                },
+                "maybe": {
+                    "a": "m",
+                    "n": 2
+                },
+                "list": [
+                    {
+                        "a": "l",
+                        "n": 0
+                    }
+                ],
+                "tags": [
+                    "t"
+                ],
+                "props": {
+                    "p": true
+                }
+            },
+            "pointer_ok": true,
+            "value": {
+                "name": "n",
+                "count": 9,
+                "flag": true,
+                "inner": {
+                    "a": "i",
+                    "n": 1
+                },
+                "maybe": {
+                    "a": "m",
+                    "n": 2
+                },
+                "list": [
+                    {
+                        "a": "l",
+                        "n": 0
+                    }
+                ],
+                "tags": [
+                    "t"
+                ],
+                "props": {
+                    "p": true
+                }
+            },
+            "value_ok": true,
+            "whole": {
+                "name": "n",
+                "count": 9,
+                "flag": true,
+                "inner": {
+                    "a": "i",
+                    "n": 1
+                },
+                "maybe": {
+                    "a": "m",
+                    "n": 2
+                },
+                "list": [
+                    {
+                        "a": "l",
+                        "n": 0
+                    }
+                ],
+                "tags": [
+                    "t"
+                ],
+                "props": {
+                    "p": true
+                }
+            },
+            "whole_ok": true
+        }
+    ]
+}

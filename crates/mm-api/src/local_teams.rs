@@ -326,7 +326,7 @@ async fn local_patch_team(
         }
     };
     let request = Request::from_parts(parts, Body::from(bytes.clone()));
-    if serde_json::from_slice::<TeamPatch>(&bytes)
+    if mm_model::utils::decode_one_value_from_json::<TeamPatch>(&bytes)
         .is_ok_and(|patch| patch.group_constrained == Some(true))
     {
         return forward_over_unix(&go.0, request).await;

@@ -132,10 +132,23 @@ async fn forward(state: AppState, request: Request) -> Response {
         }
     };
 
+    // Go must key the client, not this server ([D-1150]): see `forwarded_address_header`.
+    let mut outbound = forwardable(&parts.headers);
+    if let Some((name, value)) = crate::client_ip::forwarded_address_header(
+        &parts.headers,
+        parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|info| info.0),
+        &state.app.config().trusted_proxy_ip_header,
+    ) {
+        outbound.insert(name, value);
+    }
+
     let upstream = state
         .forward_http
         .request(parts.method.clone(), &url)
-        .headers(forwardable(&parts.headers))
+        .headers(outbound)
         .body(body_bytes)
         .send()
         .await;
@@ -173,6 +186,10 @@ async fn forward(state: AppState, request: Request) -> Response {
         Ok(bytes) => response
             .body(Body::from(bytes))
             .map(|response| crate::web_static::head_framing(&parts.method, response))
+            .map(|mut response| {
+                crate::ratelimit::strip_go_rate_limit_headers(&state, &mut response);
+                response
+            })
             .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response()),
         Err(err) => {
             tracing::error!(error = %err, "could not read the Go server's response body");

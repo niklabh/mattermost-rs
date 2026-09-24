@@ -206,7 +206,7 @@ pub async fn upsert_draft(
         }
     };
 
-    let mut draft: Draft = match serde_json::from_slice(&bytes) {
+    let mut draft: Draft = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(draft) => draft,
         // `SetInvalidParam("draft")` — note the *plain* form, without the wrapped error that
         // `saveReaction` uses, so this one carries no `detailed_error`.

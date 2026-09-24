@@ -43,8 +43,7 @@ use mm_model::permission::{
 };
 use mm_model::session::Session;
 use mm_model::utils::{
-    AppError, decode_one_object_from_json, is_valid_id, non_sorted_array_from_json,
-    sorted_array_from_json,
+    AppError, decode_one_from_json, is_valid_id, non_sorted_array_from_json, sorted_array_from_json,
 };
 
 use crate::AppState;
@@ -154,7 +153,7 @@ pub async fn create_channel(
 
     // `decode_one_from_json` rather than `from_slice`: `json.Decoder.Decode` reads one value and
     // stops, so `{"…"} garbage` is a success on Go taking the first. See `channel_writes`.
-    let mut channel: Channel = match decode_one_object_from_json::<Option<Channel>>(&bytes) {
+    let mut channel: Channel = match decode_one_from_json::<Option<Channel>>(&bytes) {
         Ok(Some(channel)) => channel,
         Ok(None) => return ApiError::invalid_param("channel").into_response(),
         Err(err) => {

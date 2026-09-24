@@ -1182,11 +1182,14 @@ fn get_user_error(err: StoreError) -> Box<AppError> {
             String::new(),
             404,
         ),
+        // `app.user.get_by_username.app_error`, not `app.user.get.app_error` (app/user.go:551):
+        // `GetUser` borrows the by-username id for every failure but a miss. Unreachable until
+        // [D-331]'s audit found a row that fails `SqlUserStore.Get` — a NULL `timezone`.
         other => {
             tracing::error!(error = %other, "user lookup failed");
             AppError::boxed(
                 "GetUser",
-                "app.user.get.app_error",
+                "app.user.get_by_username.app_error",
                 None,
                 String::new(),
                 500,
@@ -1591,7 +1594,7 @@ mod tests {
             source: sqlx::Error::PoolClosed,
         });
         assert_eq!(err.status_code, 500);
-        assert_eq!(err.id, "app.user.get.app_error");
+        assert_eq!(err.id, "app.user.get_by_username.app_error");
     }
 
     /// `GetUsersByIds` has a single error branch with its own id — not `GetUser`'s pair and

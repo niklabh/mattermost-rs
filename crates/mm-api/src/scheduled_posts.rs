@@ -99,7 +99,7 @@ fn decode(bytes: &[u8], whole: bool) -> Option<(ScheduledPost, serde_json::Value
         return None;
     }
     let mut value: serde_json::Value = if whole {
-        serde_json::from_slice(&mm_model::utils::replace_lone_surrogates(bytes)).ok()?
+        mm_model::utils::unmarshal_from_json(bytes).ok()?
     } else {
         mm_model::utils::decode_one_from_json(bytes).ok()?
     };

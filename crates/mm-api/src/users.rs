@@ -2055,9 +2055,8 @@ pub async fn save_user_terms_of_service(
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
         .unwrap_or_default();
-    // Port of `model.StringInterfaceFromJSON` (utils.go:527): every failure is an empty map.
-    let props: std::collections::HashMap<String, serde_json::Value> =
-        serde_json::from_slice(&bytes).unwrap_or_default();
+    // Port of `model.StringInterfaceFromJSON` (utils.go:590).
+    let props = mm_model::utils::string_interface_from_json(&bytes);
 
     let Some(terms_of_service_id) = props.get("termsOfServiceId").and_then(|v| v.as_str()) else {
         return Err(ApiError::invalid_param("termsOfServiceId"));

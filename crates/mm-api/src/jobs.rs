@@ -293,18 +293,14 @@ pub(crate) async fn create_job_from_body(
     session: &AuthenticatedSession,
     bytes: &[u8],
 ) -> Option<Response> {
-    // `json.NewDecoder(r.Body).Decode(&job)` into a struct: `null` is accepted (a zero job),
-    // an array is not — the `Value` round-trip gives serde the same answer.
-    let job: Job = match serde_json::from_slice::<serde_json::Value>(bytes) {
-        Ok(serde_json::Value::Null) => Job::default(),
-        Ok(value @ serde_json::Value::Object(_)) => match serde_json::from_value(value) {
-            Ok(job) => job,
-            Err(err) => {
-                tracing::debug!(error = %err, "job body did not decode");
-                return Some(ApiError::invalid_param("job").into_response());
-            }
-        },
-        _ => return Some(ApiError::invalid_param("job").into_response()),
+    // `var job model.Job; json.NewDecoder(r.Body).Decode(&job)` (job.go:146): `null` is a zero
+    // job, an array is not a job, and trailing bytes are ignored.
+    let job: Job = match mm_model::utils::decode_one_value_from_json(bytes) {
+        Ok(job) => job,
+        Err(err) => {
+            tracing::debug!(error = %err, "job body did not decode");
+            return Some(ApiError::invalid_param("job").into_response());
+        }
     };
     tracing::Span::current().record("job_type", job.job_type.as_str());
 
@@ -434,11 +430,7 @@ pub async fn update_job_status(
         }
     };
     // `model.StringInterfaceFromJSON`: anything that is not an object decodes to an empty map.
-    let props: serde_json::Map<String, serde_json::Value> =
-        match serde_json::from_slice::<serde_json::Value>(&bytes) {
-            Ok(serde_json::Value::Object(map)) => map,
-            _ => serde_json::Map::new(),
-        };
+    let props = mm_model::utils::string_interface_from_json(&bytes);
     let Some(status) = props
         .get("status")
         .and_then(|v| v.as_str())

@@ -333,7 +333,7 @@ fn parameter_is_id_shaped(name: &str) -> bool {
 ///
 /// A parameter this does not know about is not checked, which is the right default: axum's
 /// `{name}` already matches one whole segment, and every pattern in api4 is a subset of that.
-fn segment_matches_go_mux_for(name: &str, value: &str) -> bool {
+pub(crate) fn segment_matches_go_mux_for(name: &str, value: &str) -> bool {
     match name {
         // `{timestamp:[0-9]+}` (api4/user.go:117) — the one non-id parameter with a digits-only
         // class. `-1`, `1.5` and `now` are mux 404s; `0` matches and is the handler's 400.
@@ -952,10 +952,9 @@ pub fn router(state: AppState) -> Router {
         // up to its feature flag.
         .route(
             "/api/v4/users/login",
-            // `RateLimitedHandler(…, {PerSec: 5, MaxBurst: 10})` (api4/user.go:69).
-            partially_migrated(post(login::login).route_layer(
-                axum::middleware::from_fn_with_state(state.clone(), ratelimit::login),
-            )),
+            // `RateLimitedHandler(…, {PerSec: 5, MaxBurst: 10})` (api4/user.go:69) is
+            // `ratelimit::global`'s, ahead of the per-user step as in Go.
+            partially_migrated(post(login::login)),
         )
         .route(
             "/api/v4/users/login/cws",
@@ -963,10 +962,8 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/users/login/desktop_token",
-            // `RateLimitedHandler(…, {PerSec: 2, MaxBurst: 1})` (api4/user.go:71).
-            partially_migrated(post(login::login_with_desktop_token).route_layer(
-                axum::middleware::from_fn_with_state(state.clone(), ratelimit::desktop_token),
-            )),
+            // `RateLimitedHandler(…, {PerSec: 2, MaxBurst: 1})` (api4/user.go:71): see `/login`.
+            partially_migrated(post(login::login_with_desktop_token)),
         )
         // `BaseRoutes.Users.Handle("/login/sso/code-exchange")`: the 410 its feature flag gives
         // while off, served; on, forwarded whole.
@@ -1899,10 +1896,9 @@ pub fn router(state: AppState) -> Router {
         // one route in this file that takes no session.
         .route(
             "/api/v4/oauth/apps/register",
-            // `RateLimitedHandler(…, {PerSec: 2, MaxBurst: 1})` (api4/oauth.go:24).
-            partially_migrated(post(oauth::register_oauth_client).route_layer(
-                axum::middleware::from_fn_with_state(state.clone(), ratelimit::oauth_register),
-            )),
+            // `RateLimitedHandler(…, {PerSec: 2, MaxBurst: 1})` (api4/oauth.go:24) is
+            // `ratelimit::global`'s, ahead of the per-user step as in Go.
+            partially_migrated(post(oauth::register_oauth_client)),
         )
         .route(
             "/api/v4/oauth/apps/{app_id}",
@@ -3816,7 +3812,7 @@ pub fn router(state: AppState) -> Router {
         // theirs — see `web_static::fallback`.
         // `UserIdRateLimit` in `ServeHTTP`, over every route served here and none of the
         // fallbacks — a `route_layer` skips both `Router::fallback` and each method router's
-        // `any` forward. Outside the three routes' own limiters, so their set comes first.
+        // `any` forward; `web_static::fallback` counts the web client's own.
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             ratelimit::per_user,

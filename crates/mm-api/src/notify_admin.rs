@@ -29,14 +29,12 @@ pub async fn handle_notify_admin(
             return ApiError::invalid_param("notifyAdminRequest").into_response();
         }
     };
+    // `var notifyAdminRequest *model.NotifyAdminToUpgradeRequest` (notify_admin.go:14): `null`
+    // is the nil the handler refuses, as is anything that does not decode.
     let decoded: Option<NotifyAdminToUpgradeRequest> =
-        serde_json::from_slice::<serde_json::Value>(&bytes)
+        mm_model::utils::decode_one_from_json::<Option<NotifyAdminToUpgradeRequest>>(&bytes)
             .ok()
-            .and_then(|value| match value {
-                serde_json::Value::Null => None,
-                serde_json::Value::Object(_) => serde_json::from_value(value).ok(),
-                _ => None,
-            });
+            .flatten();
     let Some(notify_admin_request) = decoded else {
         tracing::debug!("notify-admin body did not decode");
         return ApiError::invalid_param("notifyAdminRequest").into_response();
@@ -84,12 +82,10 @@ pub async fn handle_trigger_notify_admin_posts(
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .unwrap_or_default();
-    let decoded = match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(value @ serde_json::Value::Object(_)) => {
-            serde_json::from_value::<NotifyAdminToUpgradeRequest>(value).ok()
-        }
-        _ => None,
-    };
+    let decoded =
+        mm_model::utils::decode_one_from_json::<Option<NotifyAdminToUpgradeRequest>>(&bytes)
+            .ok()
+            .flatten();
     if decoded.is_none() {
         return ApiError::invalid_param("notifyAdminRequest").into_response();
     }
