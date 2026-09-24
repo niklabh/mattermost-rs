@@ -1,0 +1,16 @@
+[package]
+name = "gotemplate"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+# A port of Go's standard-library `text/template` and `html/template` (BSD-3-Clause). It contains no
+# Mattermost code and must never depend on an `mm-*` crate.
+license = "BSD-3-Clause"
+repository.workspace = true
+description = "Byte-exact port of Go's text/template and html/template contextual escaper"
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

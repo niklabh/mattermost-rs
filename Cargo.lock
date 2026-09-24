@@ -1145,6 +1145,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gohtml2text"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "goimage"
 version = "0.1.0"
 dependencies = [
@@ -1152,6 +1160,17 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror",
+]
+
+[[package]]
+name = "gomail"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "gohtml2text",
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1167,6 +1186,14 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "gotemplate"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

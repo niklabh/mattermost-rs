@@ -22,6 +22,13 @@ members = [
     # Byte-exact port of freetype-go's TrueType rasteriser and the font.Drawer over it
     # ((FTL OR GPL-2.0-or-later) AND BSD-3-Clause); forbidden from depending on any mm-* crate.
     "crates/gofont",
+    # Byte-exact ports of the libraries Mattermost's e-mail is built from: Go's text/template and
+    # html/template (BSD-3-Clause), jaytaylor/html2text over x/net/html's parser (MIT AND
+    # BSD-3-Clause), and go-mail's writer with net/mail and net/smtp (MIT AND BSD-3-Clause).
+    # Forbidden from depending on any mm-* crate. mm-app drives them.
+    "crates/gotemplate",
+    "crates/gohtml2text",
+    "crates/gomail",
 ]
 
 [workspace.package]
