@@ -657,6 +657,13 @@ pub async fn create_incoming_hook(
 ///
 /// The channel's team is then compared to the hook's, which is `SetInvalidParam("channel_id")`.
 /// Three id checks in a row, three different errors.
+///
+/// # A move is checked for the hook's owner
+///
+/// When the body names a different channel, the **old hook's owner** — not the caller — must be
+/// able to read it (`ValidateIncomingWebhookUserChannelAccess`), or the answer is 403
+/// `api.webhook.incoming.user_membership.app_error`: moving a hook must not attribute its owner's
+/// posts to a channel they cannot see. An update that keeps the channel is not checked.
 #[tracing::instrument(skip_all, fields(hook_id = %hook_id))]
 pub async fn update_incoming_hook(
     State(state): State<AppState>,
@@ -758,6 +765,22 @@ pub async fn update_incoming_hook(
                 .await;
             return permission_error(&session, &PERMISSION_READ_CHANNEL_CONTENT);
         }
+    }
+
+    // "Moving the hook must not attribute its owner's posts to a channel they cannot access"
+    // (webhook.go:176): only when the channel changes, and checked for the **old** hook's owner —
+    // not the caller, who passed their own read check above. Before the channel-lock rewrite, so
+    // it is the channel the body named.
+    if updated.channel_id != old_hook.channel_id
+        && let Err(err) = state
+            .app
+            .validate_incoming_webhook_user_channel_access(&old_hook.user_id, &channel)
+            .await
+    {
+        audit
+            .log(&state.app, Some(&session.0), "fail - invalid webhook user")
+            .await;
+        return ApiError::from(err).into_response();
     }
 
     if !state
@@ -942,10 +965,12 @@ pub async fn create_outgoing_hook(
     }
 }
 
-/// Port of `updateOutgoingHook` (api4/webhook.go:610) —
+/// Port of `updateOutgoingHook` (api4/webhook.go:396) —
 /// `PUT /api/v4/hooks/outgoing/{hook_id}`.
 ///
-/// `200`, not the `201` its incoming sibling answers for the same shape of request.
+/// `200`, not the `201` its incoming sibling answers for the same shape of request. The team
+/// checks are the incoming route's: an empty `team_id` is the stored one, any other is the 400
+/// `api.webhook.team_mismatch.app_error`, after the fetch and before the permissions.
 #[tracing::instrument(skip_all, fields(hook_id = %hook_id))]
 pub async fn update_outgoing_hook(
     State(state): State<AppState>,
@@ -965,7 +990,7 @@ pub async fn update_outgoing_hook(
             return ApiError::invalid_param("outgoing_webhook").into_response();
         }
     };
-    let updated: OutgoingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
+    let mut updated: OutgoingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(hook) => hook,
         Err(err) => {
             tracing::debug!(error = %err, "outgoing_webhook body did not decode");
@@ -982,6 +1007,23 @@ pub async fn update_outgoing_hook(
         Ok(hook) => hook,
         Err(err) => return ApiError::from(err).into_response(),
     };
+
+    // The incoming route's pair of checks (webhook.go:425-432): an empty `team_id` is filled from
+    // the stored hook, and any other team is a 400 — so omitting the field is allowed and naming a
+    // different team is refused, where the app layer below would silently put the old team back.
+    if updated.team_id.is_empty() {
+        updated.team_id.clone_from(&old_hook.team_id);
+    }
+    if updated.team_id != old_hook.team_id {
+        return ApiError::from(AppError::new(
+            "updateOutgoingHook",
+            "api.webhook.team_mismatch.app_error",
+            None,
+            format!("user_id={}", session.0.user_id),
+            400,
+        ))
+        .into_response();
+    }
 
     if !state
         .app
