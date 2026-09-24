@@ -162,17 +162,15 @@ mod go_parity {
         }
     }
 
-    /// The point of this test is the **count**: four divergences, all of them standing crate-wide
-    /// entries, and nothing else. If a future change to these types introduced a new one, the
-    /// count moves and this fails rather than the new case quietly joining an exemption list.
+    /// Four rows serde's derive alone gets wrong — [D-057] on the string and on the bool, [D-040]
+    /// on the folded key, [D-071] on the repeated one — and the body decoder, which is what
+    /// `searchEmojis` uses, gets every row right. The count pins the premise.
     #[test]
-    fn the_only_divergences_are_the_standing_ones() {
+    fn the_decode_matches_go() {
         let oracle = oracle();
         let cases = oracle["decode"].as_array().unwrap();
         assert_eq!(cases.len(), 10, "the decode corpus changed size");
 
-        // [D-057] on the string and on the bool, [D-040] on the folded key, [D-071] on the
-        // repeated one.
         const DIVERGENT: [&str; 4] = ["null_string", "null_bool", "folded_key", "duplicate_key"];
 
         let mut seen = 0;
@@ -181,20 +179,17 @@ mod go_parity {
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<EmojiSearch>(doc);
+            let got = crate::utils::decode_one_from_json::<EmojiSearch>(doc.as_bytes());
             let go_ok = case["ok"].as_bool().unwrap();
 
             if DIVERGENT.contains(&name) {
                 seen += 1;
                 assert!(go_ok, "{name}: Go used to accept it");
-                if name == "folded_key" {
-                    // Go folds the key and populates; we ignore it as unknown.
-                    assert!(case["prefix_only"].as_bool().unwrap(), "Go folded it");
-                    assert!(!got.unwrap().prefix_only, "{name}: expected the divergence");
-                } else {
-                    assert!(got.is_err(), "{name}: expected the divergence");
-                }
-                continue;
+                let plain = serde_json::from_str::<EmojiSearch>(doc);
+                assert!(
+                    plain.is_err() || name == "folded_key" && !plain.unwrap().prefix_only,
+                    "{name}: the premise — serde's derive alone differs"
+                );
             }
 
             assert_eq!(got.is_ok(), go_ok, "{name}: {doc}");

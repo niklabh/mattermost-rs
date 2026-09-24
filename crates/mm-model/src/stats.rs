@@ -183,10 +183,11 @@ mod go_parity {
         serde_json::from_str(include_str!("../../../fixtures/behaviour_stats.json")).unwrap()
     }
 
-    /// Go accepts `null` into a scalar and leaves the zero value; we reject. See [D-057].
+    /// Go accepts `null` into a scalar and leaves the zero value; serde's derive alone rejects it
+    /// ([D-057]).
     const NULL_SCALAR: [&str; 2] = ["null_string", "null_int"];
 
-    /// Go matches field names case-insensitively; we do not. See [D-040].
+    /// Go matches field names case-insensitively; serde's derive alone does not ([D-040]).
     const CASE_FOLDED: [&str; 2] = ["uppercase_key", "mixed_case_key"];
 
     /// A repeated struct field: Go takes the last value, serde's derive errors. See [D-071].
@@ -280,48 +281,34 @@ mod go_parity {
     /// The ordinary decode shape, driven through `TeamStats` because it has both a string and two
     /// integers so a document can be malformed in either position.
     ///
-    /// Three named groups diverge and all three are crate-wide entries, not new here.
+    /// Five rows serde's derive alone gets wrong — the `null`s, the folded keys and the repeated
+    /// one — and the body decoder gets every row right.
     #[test]
     fn the_scalar_decode_matches_go() {
         let oracle = oracle();
         let cases = oracle["scalar_decode"].as_array().unwrap();
         assert_eq!(cases.len(), 15, "the decode corpus changed size");
 
-        let (mut agreed, mut divergent) = (0, 0);
+        let mut serde_alone_differs = 0;
         for case in cases {
             let name = case["name"].as_str().unwrap();
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<TeamStats>(doc);
+            let got = crate::utils::decode_one_from_json::<TeamStats>(doc.as_bytes());
             let go_ok = case["ok"].as_bool().unwrap();
 
-            if NULL_SCALAR.contains(&name) || name == DUPLICATE_FIELD {
+            if NULL_SCALAR.contains(&name) || name == DUPLICATE_FIELD || CASE_FOLDED.contains(&name)
+            {
                 assert!(go_ok, "{name}: Go used to accept it");
-                assert!(got.is_err(), "{name}: expected the documented divergence");
-                divergent += 1;
-                continue;
-            }
-
-            if CASE_FOLDED.contains(&name) {
-                assert!(go_ok, "{name}: Go used to accept it");
-                let got = got.unwrap_or_else(|e| panic!("{name}: {e}"));
-                // Go populated a field from the folded key; we ignored it as unknown.
-                assert_eq!(got, TeamStats::default(), "{name}: expected the divergence");
-                assert_ne!(
-                    (
-                        case["team_id"].as_str().unwrap(),
-                        case["total_member_count"].as_i64().unwrap()
-                    ),
-                    ("", 0),
-                    "{name}: Go stopped folding this key"
-                );
-                divergent += 1;
-                continue;
+                match serde_json::from_str::<TeamStats>(doc) {
+                    Err(_) => {}
+                    Ok(plain) => assert_eq!(plain, TeamStats::default(), "{name}: premise"),
+                }
+                serde_alone_differs += 1;
             }
 
             assert_eq!(got.is_ok(), go_ok, "{name}: {doc}");
-            agreed += 1;
             if !go_ok {
                 continue;
             }
@@ -345,8 +332,7 @@ mod go_parity {
             );
         }
 
-        assert_eq!(divergent, 5, "the crate-wide divergences changed count");
-        assert_eq!(agreed, 10);
+        assert_eq!(serde_alone_differs, 5, "the premise rows changed count");
     }
 
     /// `mixed_case_key` is worth its own assertion, because it looks like a counterexample to the
@@ -374,7 +360,16 @@ mod go_parity {
             "Go folded it"
         );
 
-        let ours: TeamStats = serde_json::from_str(case["in"].as_str().unwrap()).unwrap();
-        assert_eq!(ours.total_member_count, 0, "we treat it as an unknown key");
+        let doc = case["in"].as_str().unwrap();
+        let plain: TeamStats = serde_json::from_str(doc).unwrap();
+        assert_eq!(
+            plain.total_member_count, 0,
+            "serde's derive alone ignores it"
+        );
+        let ours: TeamStats = crate::utils::decode_one_from_json(doc.as_bytes()).unwrap();
+        assert_eq!(
+            ours.total_member_count, 5,
+            "the body decoder folds against the tag"
+        );
     }
 }

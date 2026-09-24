@@ -1338,6 +1338,8 @@ numbers through `f64` and is used by `MessageAttachment::equals`,
 `mm_model::go_json::remap_object_keys` rewrites folded keys to their exact spellings before serde
 sees them, driven by a per-type `GoFields` schema; `case_insensitive_keys` came off the corpus's
 `DIVERGENT` list and five nested cases were added beside it.
+**Widened** 2026-09-25 — the fold is now in every body decoder (`mm_model::go_decode`, [D-460]), not only the
+attachment family's `GoFields` schemas; a `#[serde(flatten)]` type is the gap, [D-1240].
 
 **Option (b) was the right one, and cheaper than the entry assumed.** It says a case-insensitive
 deserializer "must lowercase with `utils::go_to_lower`, and Go's own rule is a *simple ASCII-ish
@@ -2072,8 +2074,11 @@ it is a change to ~7 loops in one file, none of which affects a recorded value.
 
 ## D-057 · `null` into a scalar field is accepted by Go and rejected crate-wide
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `search_params.go`)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `search_params.go`)
 **Related** [D-043] (absent keys, which is the *other* half of the same contract) and [D-033]
+**Closed** 2026-09-25 — the body decoders (`mm_model::go_decode`) ignore `null` for a scalar or a struct and nil a
+pointer, map, slice or interface, as `literalStore` does; held by `behaviour_body_decode.json` and
+`parity::malformed_bodies`, and the model corpora that asserted the divergence now decode through it.
 
 Go's `encoding/json` documents that unmarshalling `null` into anything other than an interface,
 map, pointer or slice **has no effect and produces no error** — the destination keeps its zero
@@ -2570,12 +2575,17 @@ worth re-checking when the app layer lands.
 
 ## D-071 · A repeated JSON key takes the last value in Go and fails the decode here
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-16 (phase 1, `channel_view.go`)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-16 (phase 1, `channel_view.go`)
 **Related** [D-040] (the other crate-wide `encoding/json`-versus-serde decode difference)
 **Narrowed** 2026-09-25 — option (b) is built for request bodies: every `mm_model::utils` body
-decoder buffers a struct's members through `go_decode::Strict`, so a repeated key is last-wins
+decoder buffers a struct's members through `go_decode`, so a repeated key is last-wins
 there ([D-941]). What is left is decoding that does not go through them — store rows, config,
 `serde_json::from_value` of an already-parsed document.
+**Closed** 2026-09-25 — a repeated key is assigned again in document order by the body decoders, with Go's
+per-kind meaning (overwrite, merge, element-wise into the backing array). The other decode paths cannot
+carry one: store rows come from `jsonb`, which keeps the last of a repeated key, or from text Go or
+this server marshalled; the configuration is Go's own marshal. Decoders of JSON another program
+wrote outside a request body are [D-1241].
 
 `encoding/json` has no duplicate-key rule: it walks the object and assigns each field as it comes,
 so the **last** occurrence wins. `serde_derive`'s generated `Deserialize` tracks which fields it
@@ -2727,8 +2737,10 @@ cited rather than repeated when the next one lands.
 
 ## D-075 · `null` inside a `[]string` is the empty string in Go and a decode failure here
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `channel_search.go`)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `channel_search.go`)
 **Related** [D-057] (the same rule at struct-field position), [D-033] (a nil element in a `[]*T`)
+**Closed** 2026-09-25 with [D-057] — a `null` slice element or map value is decoded into a fresh zero value, so
+`[null]` is `[""]` for a `[]string` and a zero struct for a `[]T`.
 
 `{"team_ids":[null]}` decodes in Go to a one-element slice holding `""`, and re-marshals as
 `{"team_ids":[""]}`. `serde_json` rejects the document: `invalid type: null, expected a string`.
@@ -7913,8 +7925,11 @@ secret, is excused by name), and every newly compared value agreed with `Config:
 
 ## D-460 · `model.User` and `model.UserPatch` decode case-sensitively where Go folds
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the user-update vertical)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-13 (the user-update vertical)
 **Related** [D-040], which closed this class for `Post`'s attachment family only.
+**Closed** 2026-09-25 — the body decoders fold keys against the `fields` serde hands `deserialize_struct` with Go's
+`foldName`, so every struct a handler decodes, `User` and `UserPatch` included, needs no `GoFields` schema;
+`user_patch_decoding_matches_go` now asserts agreement on the folded row.
 
 `encoding/json` matches a JSON key against a struct field name **case-insensitively** when no
 exact match exists, so Go's `patchUser` takes `{"USERNAME":"folded"}` as a username change.
@@ -10117,3 +10132,40 @@ Go fills an empty `team_id` from the stored hook and answers 400 `api.webhook.te
 for a different one (api4/webhook.go:425-432); `mm_api::webhooks::update_outgoing_hook` lets the app
 layer reset the team silently and answers 200. **What is owed:** the fill and the 400, with a parity
 row (`the_id_checks_and_the_team_mismatch_agree` covers only incoming hooks).
+
+---
+
+## D-1240 · A `#[serde(flatten)]` type gets only part of Go's decoding rules
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (the body decoders, D-057/D-040)
+
+serde decodes a struct with a flattened member through `deserialize_map` and buffers the members
+into its private `Content`, so `mm_model::go_decode` never learns the field names. It drops a
+top-level `null` member (Go's answer for every kind of field) and takes the last of an exact
+repeated key, but a key in another case is not folded onto a flattened field or the outer one, a
+repeated struct key is not merged, and below the top level serde's own rules decide — a `null` in
+a nested scalar or a `[]string` fails the decode where Go zero-fills. `scheduled_posts` folds with
+a hand-listed `GoFields` schema before decoding, the pattern that works today.
+
+Body types affected: `ScheduledPost`, `SidebarCategoryWithChannels`, `GroupWithUserIds`,
+`RetentionPolicyWithTeamAndChannelIDs`, the report request in `postrest`, the channel and team
+member patch shapes with a flattened base. **What is owed:** replace `flatten` on those body types
+with an explicit field list (a hand-written `Deserialize` that decodes one flat struct and splits
+it), or give the decoder the names through a trait the types implement.
+
+---
+
+## D-1241 · JSON another program wrote, outside a request body, is still decoded by serde alone
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-071's close)
+
+The body decoders carry Go's rules for `null`, key case and repeated keys; the slash-command
+response (`CommandResponse::from_json`) and the websocket request now use them too. What still
+calls `serde_json` directly on a document it did not write: link metadata and oEmbed responses
+(`mm_app::link_metadata`, `opengraph`), the Marketplace and product-notices feeds, the push proxy's
+answer, `mm_blocks_actions`' cookie payload, plugin RPC JSON (`property_hooks`,
+`broadcast_hooks`, `plugin_commands`), and the configuration and file-store-test `Config` bodies
+(`config_writes`, `email_test`, `file_store_test`, which strip `null` members themselves). Each
+is Go's `json.Unmarshal` on the other side. **What is owed:** move each onto
+`mm_model::utils::{unmarshal_from_json, from_value_go}`, with a corpus row per source that a
+remote actually varies (a folded key from a Marketplace mirror is the plausible one).

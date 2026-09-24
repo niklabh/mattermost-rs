@@ -170,10 +170,9 @@ pub(crate) fn first_value(body: &[u8]) -> Option<serde_json::Value> {
 /// where Go gives a 400). A literal `null` decodes without error in Go and leaves the pointer
 /// nil, which lands on the same `None`.
 pub(crate) fn decode_struct<T: serde::de::DeserializeOwned>(body: &[u8]) -> Option<T> {
-    match first_value(body)? {
-        object @ serde_json::Value::Object(_) => serde_json::from_value(object).ok(),
-        _ => None,
-    }
+    mm_model::utils::decode_one_from_json::<Option<T>>(body)
+        .ok()
+        .flatten()
 }
 
 /// `Decode(&v)` where `v` is a `map[string]json.RawMessage`, as both value handlers write it.

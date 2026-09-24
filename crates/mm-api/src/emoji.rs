@@ -199,26 +199,14 @@ pub async fn search_emojis(
             ApiError::invalid_param("term")
         })?;
 
-    // Decoded to a `Value` first, because **serde builds a struct from a JSON array
-    // positionally** where Go's decoder refuses one: `["abc", true]` would otherwise become
-    // `EmojiSearch { term: "abc", prefix_only: true }` and *search*, where Go answers 400.
-    // Measured against the running server after this route shipped without the check.
-    let decoded: serde_json::Value =
-        mm_model::utils::decode_one_from_json(&bytes).map_err(|err| {
+    // `var emojiSearch model.EmojiSearch; Decode` — a value: `null` is the zero search (which the
+    // empty-term check refuses), an array is not a search (serde alone would have read
+    // `["abc", true]` positionally and searched), and a folded key or a `null` member decodes.
+    let search: EmojiSearch =
+        mm_model::utils::decode_one_value_from_json(&bytes).map_err(|err| {
             tracing::debug!(error = %err, "emoji search body did not decode");
             ApiError::invalid_param("term")
         })?;
-    let search: EmojiSearch = match decoded {
-        // `Decode` into a non-pointer struct leaves the zero value for a JSON `null`, and the
-        // empty-term check below is what refuses it.
-        serde_json::Value::Null => EmojiSearch::default(),
-        serde_json::Value::Object(map) => serde_json::from_value(serde_json::Value::Object(map))
-            .map_err(|err| {
-                tracing::debug!(error = %err, "emoji search body has the wrong field types");
-                ApiError::invalid_param("term")
-            })?,
-        _ => return Err(ApiError::invalid_param("term")),
-    };
     if search.term.is_empty() {
         return Err(ApiError::invalid_param("term"));
     }
