@@ -11,6 +11,8 @@ license = "Apache-2.0"
 repository.workspace = true
 
 [dependencies]
+# x/net/html's tokenizer (BSD-3-Clause), re-exported as `go_html`.
+gohtml.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

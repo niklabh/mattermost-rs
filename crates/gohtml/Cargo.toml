@@ -1,0 +1,19 @@
+[package]
+name = "gohtml"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+# DELIBERATELY NOT `license.workspace = true`. A port of `golang.org/x/net/html` (its tokenizer,
+# tree builder and atom table; BSD-3-Clause, ./LICENSE). It contains no Mattermost code and must
+# never depend on an `mm-*` crate.
+license = "BSD-3-Clause"
+repository.workspace = true
+description = "Byte-exact port of golang.org/x/net/html's tokenizer and HTML5 tree builder"
+include = ["src/**/*.rs", "LICENSE"]
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+base64.workspace = true

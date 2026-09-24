@@ -1145,6 +1145,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gohtml"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "gohtml2text"
 version = "0.1.0"
 dependencies = [
@@ -1824,6 +1833,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "encoding_rs",
+ "gohtml",
  "rand 0.9.5",
  "regex",
  "serde",

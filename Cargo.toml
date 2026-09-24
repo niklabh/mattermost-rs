@@ -27,6 +27,9 @@ members = [
     # BSD-3-Clause), and go-mail's writer with net/mail and net/smtp (MIT AND BSD-3-Clause).
     # Forbidden from depending on any mm-* crate. mm-app drives them.
     "crates/gotemplate",
+    # x/net/html's tokenizer and tree builder, which gohtml2text parses with and mm-model's link
+    # previews tokenize with (BSD-3-Clause).
+    "crates/gohtml",
     "crates/gohtml2text",
     "crates/gomail",
 ]
@@ -56,6 +59,7 @@ mm-markdown = { path = "crates/mm-markdown" }
 mm-store = { path = "crates/mm-store" }
 mm-app = { path = "crates/mm-app" }
 goimage = { path = "crates/goimage" }
+gohtml = { path = "crates/gohtml" }
 
 # Runtime
 tokio = { version = "1", features = ["full"] }
