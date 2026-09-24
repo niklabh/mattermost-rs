@@ -1704,8 +1704,42 @@ impl Config {
     ///
     /// Kept as the constructor for tests and for a deployment whose Go server has never written a
     /// configuration row.
+    ///
+    /// `fixConfig` runs on both sides of the overlay, as [`Config::load`] runs it.
     pub fn from_env() -> Self {
-        Self::default().apply_env()
+        let env = get_environment();
+        Self::from_env_with(&|key| process_lookup(&env, key))
+    }
+
+    /// [`Config::from_env`] against an arbitrary environment lookup.
+    fn from_env_with(lookup: &impl Fn(&str) -> Option<String>) -> Self {
+        Self::default()
+            .fix_config()
+            .apply_env_from(lookup)
+            .fix_config()
+    }
+
+    /// Port of `fixConfig` (config/utils.go:135) over the settings modelled here: a trailing
+    /// slash comes off `SiteURL`, a local driver's `Directory` gains one, and an unsupported
+    /// default server or client locale becomes `en`.
+    ///
+    /// `AvailableLocales` is not a field of this config — nothing reads it through this struct —
+    /// so the half of `fixInvalidLocales` that rewrites it is [`fix_config_document`]'s alone;
+    /// it never moves either default locale, so leaving it out changes nothing here.
+    ///
+    /// `Store.Load` runs this **twice** (store.go:290, :293): on the document, and again after
+    /// the environment overlay. A single pass after the overlay is not the same function — a
+    /// local driver in the document gives `Directory` its slash even when the environment then
+    /// names S3 — and `fix_config_go_parity` has the rows that tell the two apart.
+    #[must_use]
+    fn fix_config(mut self) -> Self {
+        if let Some(site_url) = self.site_url.as_mut() {
+            fix_site_url(site_url);
+        }
+        fix_file_directory(&self.file_driver_name, &mut self.file_directory);
+        fix_locale(&mut self.default_server_locale);
+        fix_locale(&mut self.default_client_locale);
+        self
     }
 
     /// Apply the `MM_<SECTION>_<SETTING>` overlay on top of `self`.
@@ -3027,7 +3061,8 @@ impl Config {
                 Self::default()
             }
         };
-        Ok(base.apply_env_from(lookup))
+        // store.go:290 → :292 → :293: fix the document, overlay, fix again.
+        Ok(base.fix_config().apply_env_from(lookup).fix_config())
     }
 }
 
@@ -5795,9 +5830,126 @@ pub async fn load_model_config_with_env(
         }
     }
 
+    // store.go:290 → :292 → :293: fix the document, overlay, fix again.
+    fix_config_document(&mut value);
     apply_environment_map(&mut value, env);
+    fix_config_document(&mut value);
 
     serde_json::from_value(value).map_err(|source| ConfigError::Malformed { source })
+}
+
+/// Port of `fixConfig` (config/utils.go:135) over a whole `model.Config` document, for
+/// [`load_model_config`], which is the only reader of `AvailableLocales`.
+///
+/// Go runs it on a config `SetDefaults` has filled; [`load_model_config`] does not run
+/// `SetDefaults`, so an absent (or `null`) setting is left absent, never invented. Where
+/// `fixConfig` *reads* a setting to decide another, an absent one is read as the value
+/// `SetDefaults` would have given it — `DriverName` as `local` (config.go `FileSettings.SetDefaults`)
+/// and `DefaultClientLocale` as `en` (config.go:2904) — because that is what Go decides on.
+fn fix_config_document(document: &mut serde_json::Value) {
+    if let Some(serde_json::Value::String(site_url)) =
+        document.pointer_mut("/ServiceSettings/SiteURL")
+    {
+        fix_site_url(site_url);
+    }
+
+    let driver = match document.pointer("/FileSettings/DriverName") {
+        Some(serde_json::Value::String(driver)) => driver.as_str(),
+        _ => crate::filestore::DRIVER_LOCAL,
+    };
+    // Owned because the next line borrows the same document mutably: the driver is a few bytes.
+    let driver = driver.to_owned();
+    if let Some(serde_json::Value::String(directory)) =
+        document.pointer_mut("/FileSettings/Directory")
+    {
+        fix_file_directory(&driver, directory);
+    }
+
+    for key in [
+        "/LocalizationSettings/DefaultServerLocale",
+        "/LocalizationSettings/DefaultClientLocale",
+    ] {
+        if let Some(serde_json::Value::String(locale)) = document.pointer_mut(key) {
+            fix_locale(locale);
+        }
+    }
+    let client = match document.pointer("/LocalizationSettings/DefaultClientLocale") {
+        Some(serde_json::Value::String(client)) => client.as_str(),
+        _ => mm_model::user::DEFAULT_LOCALE,
+    };
+    // Owned for the same reason as `driver`.
+    let client = client.to_owned();
+    if let Some(serde_json::Value::String(available)) =
+        document.pointer_mut("/LocalizationSettings/AvailableLocales")
+    {
+        fix_available_locales(available, &client);
+    }
+}
+
+/// `fixConfig`'s `SiteURL` step (config/utils.go:137): `strings.TrimRight(url, "/")` — **every**
+/// trailing slash, so `"///"` and `"/"` both become `""`.
+fn fix_site_url(site_url: &mut String) {
+    let trimmed = site_url.trim_end_matches('/').len();
+    site_url.truncate(trimmed);
+}
+
+/// `fixConfig`'s `Directory` step (config/utils.go:142): only for the `local` driver — compared
+/// exactly, as Go compares it — and only for a non-empty directory not already ending in `/`.
+/// One slash is added; a directory ending in several keeps them all.
+fn fix_file_directory(driver: &str, directory: &mut String) {
+    if driver == crate::filestore::DRIVER_LOCAL
+        && !directory.is_empty()
+        && !directory.ends_with('/')
+    {
+        directory.push('/');
+    }
+}
+
+/// `fixInvalidLocales`' default-locale steps (config/utils.go:155, :161): a locale that is not a
+/// key of `i18n.GetSupportedLocales()` — [`crate::i18n::is_supported_locale`], exact and
+/// case-sensitive — becomes `model.DefaultLocale`.
+fn fix_locale(locale: &mut String) {
+    if !crate::i18n::is_supported_locale(locale) {
+        mm_model::user::DEFAULT_LOCALE.clone_into(locale);
+    }
+}
+
+/// `fixInvalidLocales`' `AvailableLocales` step (config/utils.go:167), after the client locale
+/// has been fixed.
+///
+/// Walks the comma-separated list in order: the **first** unsupported piece clears the whole
+/// setting (and counts as "includes the client", so nothing is appended); otherwise the client
+/// locale is appended when no piece equals it exactly. Pieces are never trimmed, so `"de, fr"`
+/// and `"de,,fr"` are cleared. Last, `RemoveDuplicatesFromStringArray` keeps the first of each.
+fn fix_available_locales(available: &mut String, client: &str) {
+    if available.is_empty() {
+        return;
+    }
+    let mut includes_client = false;
+    let mut all_supported = true;
+    for word in available.split(',') {
+        if !crate::i18n::is_supported_locale(word) {
+            all_supported = false;
+            includes_client = true;
+            break;
+        }
+        if word == client {
+            includes_client = true;
+        }
+    }
+    if !all_supported {
+        available.clear();
+    }
+    if !includes_client {
+        available.push(',');
+        available.push_str(client);
+    }
+    let mut seen = std::collections::HashSet::new();
+    let deduped: Vec<&str> = available
+        .split(',')
+        .filter(|word| seen.insert(*word))
+        .collect();
+    *available = deduped.join(",");
 }
 
 /// Port of `(*model.Config).Sanitize(nil, nil)` (config.go:5346) — what `GET /api/v4/config`
@@ -8520,6 +8672,219 @@ mod env_go_parity {
             want("states: the last fold-equal key wins")["PluginSettings"]["PluginStates"],
             serde_json::json!({"x": {"Enable": false}})
         );
+    }
+}
+
+/// `fixConfig` (config/utils.go:135) as `Store.Load` runs it, against the Go oracle
+/// `reference/dump/behaviour_fix_config.go` → `fixtures/behaviour_fix_config.json`.
+///
+/// Each row is a document (the six settings `fixConfig` reads or writes, after `SetDefaults`), an
+/// environment, what Go runs on (`want`) and what it writes back (`persisted`: one pass, no
+/// environment). All three of this module's paths are held to it — [`Config::load`],
+/// [`load_model_config`] and [`fix_config_document`] on its own.
+#[cfg(test)]
+mod fix_config_go_parity {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn oracle() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../fixtures/behaviour_fix_config.json"))
+            .expect("behaviour_fix_config.json is generated by reference/dump")
+    }
+
+    fn rows() -> Vec<serde_json::Value> {
+        let rows = oracle()["fix_config"].as_array().expect("rows").clone();
+        assert!(rows.len() >= 48, "the corpus is all there");
+        rows
+    }
+
+    fn row_env(row: &serde_json::Value) -> BTreeMap<String, String> {
+        environment_from(row["env"].as_array().expect("env").iter().map(|pair| {
+            (
+                pair[0].as_str().expect("name").to_owned(),
+                pair[1].as_str().expect("value").to_owned(),
+            )
+        }))
+    }
+
+    struct DocumentStore(String);
+
+    impl mm_store::ConfigStore for DocumentStore {
+        async fn load_active(&self) -> Result<Option<String>, mm_store::StoreError> {
+            Ok(Some(self.0.clone()))
+        }
+
+        async fn active_id(&self) -> Result<Option<String>, mm_store::StoreError> {
+            Ok(None)
+        }
+
+        async fn has_file(&self, _name: &str) -> Result<bool, mm_store::StoreError> {
+            Ok(false)
+        }
+
+        async fn get_file(&self, _name: &str) -> Result<Option<Vec<u8>>, mm_store::StoreError> {
+            Ok(None)
+        }
+    }
+
+    /// The oracle's projection of a whole-config document.
+    fn projection(document: &serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "ServiceSettings": {"SiteURL": document["ServiceSettings"]["SiteURL"]},
+            "FileSettings": {
+                "DriverName": document["FileSettings"]["DriverName"],
+                "Directory": document["FileSettings"]["Directory"],
+            },
+            "LocalizationSettings": {
+                "DefaultServerLocale": document["LocalizationSettings"]["DefaultServerLocale"],
+                "DefaultClientLocale": document["LocalizationSettings"]["DefaultClientLocale"],
+                "AvailableLocales": document["LocalizationSettings"]["AvailableLocales"],
+            },
+        })
+    }
+
+    /// Go's supported-locale map is built at run time from the i18n directory, filtered by the
+    /// hard-coded list; the oracle records the map it actually had.
+    #[test]
+    fn the_supported_locales_are_gos_runtime_map() {
+        let mut ours: Vec<&str> = crate::i18n::SUPPORTED_LOCALES.to_vec();
+        ours.sort_unstable();
+        let theirs: Vec<String> = oracle()["supported_locales"]
+            .as_array()
+            .expect("list")
+            .iter()
+            .map(|l| l.as_str().expect("str").to_owned())
+            .collect();
+        assert_eq!(ours, theirs);
+    }
+
+    #[tokio::test]
+    async fn the_narrow_config_loads_every_row_as_go_does() {
+        for row in rows() {
+            let name = row["name"].as_str().expect("name");
+            let env = row_env(&row);
+            let store = DocumentStore(row["doc"].to_string());
+            let got = Config::load_with_env(&store, &|key| overlay_lookup(&env, key))
+                .await
+                .expect("loads");
+            let want = &row["want"];
+            assert_eq!(
+                got.site_url.as_deref(),
+                want["ServiceSettings"]["SiteURL"].as_str(),
+                "{name}: SiteURL"
+            );
+            assert_eq!(
+                got.file_driver_name, want["FileSettings"]["DriverName"],
+                "{name}: DriverName"
+            );
+            assert_eq!(
+                got.file_directory, want["FileSettings"]["Directory"],
+                "{name}: Directory"
+            );
+            assert_eq!(
+                got.default_server_locale, want["LocalizationSettings"]["DefaultServerLocale"],
+                "{name}: DefaultServerLocale"
+            );
+            assert_eq!(
+                got.default_client_locale, want["LocalizationSettings"]["DefaultClientLocale"],
+                "{name}: DefaultClientLocale"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_model_config_loads_every_row_as_go_does() {
+        for row in rows() {
+            let name = row["name"].as_str().expect("name");
+            let store = DocumentStore(row["doc"].to_string());
+            let got = load_model_config_with_env(&store, &row_env(&row))
+                .await
+                .expect("loads");
+            let got = serde_json::to_value(&got).expect("serializes");
+            assert_eq!(projection(&got), row["want"], "{name}");
+        }
+    }
+
+    /// What Go writes back to the store: the document with one pass and no environment.
+    #[test]
+    fn one_pass_over_the_document_is_what_go_persists() {
+        for row in rows() {
+            let name = row["name"].as_str().expect("name");
+            let mut document = row["doc"].clone();
+            fix_config_document(&mut document);
+            assert_eq!(document, row["persisted"], "{name}");
+        }
+    }
+
+    /// The corpus can tell two passes from one: on these rows, fixing only after the overlay
+    /// answers differently from Go. Without it, dropping the first pass would survive.
+    #[test]
+    fn the_first_pass_is_observable() {
+        let rows = rows();
+        for name in [
+            "an s3 driver from the environment keeps the slash the document's local driver added",
+            "a document client locale and an environment client locale are both appended",
+        ] {
+            let row = rows
+                .iter()
+                .find(|row| row["name"] == name)
+                .unwrap_or_else(|| panic!("row {name:?} is missing"));
+            let mut one_pass = row["doc"].clone();
+            apply_environment_map(&mut one_pass, &row_env(row));
+            fix_config_document(&mut one_pass);
+            assert_ne!(one_pass, row["want"], "{name}: must discriminate");
+        }
+    }
+
+    /// `from_env` is `Load` over an empty store: the defaults already pass `fixConfig`, and the
+    /// environment's values are fixed after the overlay.
+    #[test]
+    fn from_env_fixes_the_overlay() {
+        let env = environment_from(
+            [
+                (
+                    "MM_SERVICESETTINGS_SITEURL".to_owned(),
+                    "http://x.example.com//".to_owned(),
+                ),
+                ("MM_FILESETTINGS_DIRECTORY".to_owned(), "/srv/mm".to_owned()),
+                (
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE".to_owned(),
+                    "xx".to_owned(),
+                ),
+            ]
+            .into_iter(),
+        );
+        let got = Config::from_env_with(&|key| overlay_lookup(&env, key));
+        assert_eq!(got.site_url.as_deref(), Some("http://x.example.com"));
+        assert_eq!(got.file_directory, "/srv/mm/");
+        assert_eq!(got.default_server_locale, "en");
+        assert_eq!(Config::default().fix_config(), Config::default());
+    }
+
+    /// `fix_config_document` reads an absent driver or client locale as `SetDefaults` would
+    /// have filled it, and does not invent the absent settings themselves.
+    #[test]
+    fn an_absent_setting_is_read_as_its_default_and_left_absent() {
+        let mut document = serde_json::json!({
+            "FileSettings": {"Directory": "./files"},
+            "LocalizationSettings": {"AvailableLocales": "de"},
+        });
+        fix_config_document(&mut document);
+        assert_eq!(
+            document,
+            serde_json::json!({
+                "FileSettings": {"Directory": "./files/"},
+                "LocalizationSettings": {"AvailableLocales": "de,en"},
+            })
+        );
+        // Go's `!= ""` guard: an empty directory gains nothing (and `IsValid` then refuses it).
+        let mut empty = serde_json::json!({"FileSettings": {"Directory": ""}});
+        fix_config_document(&mut empty);
+        assert_eq!(empty["FileSettings"]["Directory"], "");
+        let mut s3 =
+            serde_json::json!({"FileSettings": {"DriverName": "amazons3", "Directory": "d"}});
+        fix_config_document(&mut s3);
+        assert_eq!(s3["FileSettings"]["Directory"], "d");
     }
 }
 

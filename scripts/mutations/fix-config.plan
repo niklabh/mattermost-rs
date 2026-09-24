@@ -1,0 +1,18 @@
+# D-1160: fixConfig on both load paths. lib suite, MUTATE_PACKAGE=mm-app.
+narrow-no-first-pass	crates/mm-app/src/config.rs	Ok(base.fix_config().apply_env_from(lookup).fix_config())	Ok(base.apply_env_from(lookup).fix_config())	lib	config::
+model-no-first-pass	crates/mm-app/src/config.rs	    fix_config_document(&mut value);\n    apply_environment_map(&mut value, env);	    apply_environment_map(&mut value, env);	lib	config::
+model-no-second-pass	crates/mm-app/src/config.rs	    apply_environment_map(&mut value, env);\n    fix_config_document(&mut value);	    apply_environment_map(&mut value, env);	lib	config::
+from-env-no-second-pass	crates/mm-app/src/config.rs	            .apply_env_from(lookup)\n            .fix_config()	            .apply_env_from(lookup)	lib	config::
+trim-one-slash	crates/mm-app/src/config.rs	let trimmed = site_url.trim_end_matches('/').len();	let trimmed = site_url.strip_suffix('/').unwrap_or(site_url).len();	lib	config::
+dir-any-non-s3-driver	crates/mm-app/src/config.rs	    if driver == crate::filestore::DRIVER_LOCAL\n	    if driver != crate::filestore::DRIVER_S3\n	lib	config::
+dir-empty-gains-slash	crates/mm-app/src/config.rs	        && !directory.is_empty()\n	        && true\n	lib	config::
+dir-double-slash-check	crates/mm-app/src/config.rs	        && !directory.ends_with('/')\n	        && !directory.ends_with("//")\n	lib	config::
+locale-case-insensitive	crates/mm-app/src/config.rs	if !crate::i18n::is_supported_locale(locale) {	if !crate::i18n::SUPPORTED_LOCALES.iter().any(|l| l.eq_ignore_ascii_case(locale)) {	lib	config::
+cleared-appends-client	crates/mm-app/src/config.rs	all_supported = false;\n            includes_client = true;	all_supported = false;	lib	config::
+client-prefix-match	crates/mm-app/src/config.rs	if word == client {	if word.starts_with(client) {	lib	config::
+no-dedupe	crates/mm-app/src/config.rs	.filter(|word| seen.insert(*word))	.filter(|word| seen.insert(*word) || true)	lib	config::
+absent-client-empty	crates/mm-app/src/config.rs	_ => mm_model::user::DEFAULT_LOCALE,	_ => "",	lib	config::
+narrow-client-unfixed	crates/mm-app/src/config.rs	        fix_locale(&mut self.default_client_locale);\n        self	        self	lib	config::
+# Controls: must survive.
+control-swap-locales	crates/mm-app/src/config.rs	        fix_locale(&mut self.default_server_locale);\n        fix_locale(&mut self.default_client_locale);	        fix_locale(&mut self.default_client_locale);\n        fix_locale(&mut self.default_server_locale);	lib	config::
+control-rename-deduped	crates/mm-app/src/config.rs	        .collect();\n    *available = deduped.join(",");	        .collect();\n    let unique = deduped;\n    *available = unique.join(",");	lib	config::

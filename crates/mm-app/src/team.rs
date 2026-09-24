@@ -427,7 +427,7 @@ impl App {
     ///
     /// | term | here |
     /// |---|---|
-    /// | `FeatureFlags.TeamMembershipAccessControl` | `true` — `SetDefaults` sets it (feature_flags.go:173) and, like every flag, it lives only in the environment; not modelled, so the default is the value |
+    /// | `FeatureFlags.TeamMembershipAccessControl` | [`crate::config::Config::feature_flags`] — `true` by default (feature_flags.go:173). Read **first**: off, the licence is never asked, so even a failing licence read answers `false` |
     /// | `MinimumEnterpriseAdvancedLicense(License())` | read from [`App::license`] since 2026-09-13; `false` for the Enterprise licence the stack's oracle carries, `true` only for `advanced` or `entry` |
     /// | `AccessControlSettings.EnableAttributeBasedAccessControl` | [`crate::config::Config::enable_attribute_based_access_control`], default `false` |
     ///
@@ -438,6 +438,9 @@ impl App {
     /// **forwards** when this is true and serves the plain listing when it is false; the licence
     /// term is the one this process could not read until now.
     pub async fn team_membership_access_control_enabled(&self) -> AppResult<bool> {
+        if !self.config().feature_flags.team_membership_access_control {
+            return Ok(false);
+        }
         let license = self.license().await?;
         if !mm_model::license::minimum_enterprise_advanced_license(license.as_deref()) {
             return Ok(false);
@@ -767,6 +770,26 @@ mod tests {
                 .unwrap_err()
                 .status_code,
             500
+        );
+        // `FeatureFlags.TeamMembershipAccessControl` off: `false` whatever the licence and the
+        // setting say — and before the licence is read, so the unreachable store is never asked.
+        let mut flag_off = app("advanced", true);
+        let mut config = (*flag_off.config()).clone();
+        config.feature_flags.team_membership_access_control = false;
+        flag_off = crate::App::with_config(unreachable_store(), config);
+        assert!(
+            !flag_off
+                .team_membership_access_control_enabled()
+                .await
+                .unwrap()
+        );
+        let mut config = crate::config::Config::default();
+        config.feature_flags.team_membership_access_control = false;
+        assert!(
+            !crate::App::with_config(unreachable_store(), config)
+                .team_membership_access_control_enabled()
+                .await
+                .unwrap()
         );
     }
 

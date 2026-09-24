@@ -508,9 +508,15 @@ async fn serve_create_group_channel(
         return Err(make_permission_error(session, &[&PERMISSION_VIEW_MEMBERS]).into());
     }
 
-    let channel = state
+    match state
         .app
         .create_group_channel(hook_ctx, user_ids, &session.user_id)
-        .await?;
-    created("createGroupChannel", &channel).map(Some)
+        .await?
+    {
+        ChannelCreate::Created(channel) => created("createGroupChannel", &channel).map(Some),
+        ChannelCreate::Forward(reason) => {
+            tracing::debug!(reason, "forwarding to Go");
+            Ok(None)
+        }
+    }
 }

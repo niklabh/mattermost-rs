@@ -1,0 +1,2 @@
+# D-1161: EnableConcurrentReact from the running config. lib suite, MUTATE_PACKAGE=mm-api.
+concurrent-react-constant	crates/mm-api/src/web_static.rs	            .is_some_and(|flags| flags.enable_concurrent_react);	            .is_some_and(|_| false);	lib	web_static

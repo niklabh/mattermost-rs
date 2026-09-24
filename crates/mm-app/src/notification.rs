@@ -68,9 +68,8 @@ use crate::broadcast_hooks::{
     BROADCAST_ADD_FOLLOWERS, BROADCAST_ADD_MENTIONS, BROADCAST_CHANNEL_MENTIONS,
     BROADCAST_POSTED_ACK,
 };
-use crate::mention::{MentionKeywords, MentionResults, MentionType, get_explicit_mentions};
+use crate::mention::{MentionKeywords, MentionResults, MentionType};
 use crate::plugin_hooks::HookContext;
-use crate::thread_read::MM_BLOCKS_ENABLED;
 
 /// Port of `app.CRTNotifiers` (notification.go): the followers of a thread who should be told
 /// about a reply, by channel. Only `desktop` reaches the wire here — it is the `add_followers`
@@ -716,8 +715,7 @@ impl App {
                             thread_participants.insert(root_post.user_id.clone());
                         }
                         if channel.channel_type != CHANNEL_TYPE_DIRECT {
-                            let root_mentions =
-                                get_explicit_mentions(root_post, &keywords, MM_BLOCKS_ENABLED);
+                            let root_mentions = self.explicit_mentions(root_post, &keywords);
                             for (id, mention_type) in &root_mentions.mentions {
                                 if *mention_type == MentionType::ChannelMention
                                     && auto_follow_off(id)
@@ -1499,7 +1497,7 @@ impl App {
             )
             .await?;
 
-        mentions = get_explicit_mentions(post, &keywords, MM_BLOCKS_ENABLED);
+        mentions = self.explicit_mentions(post, &keywords);
 
         // Add a GM mention to all members of a GM channel.
         if channel.channel_type == CHANNEL_TYPE_GROUP {
