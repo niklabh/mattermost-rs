@@ -14739,3 +14739,8 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `yuin/goldmark` v1.8.2 + GFM, `channels/utils/markdown.go` | `gogoldmark`, `mm_app::markdown_utils` | DONE | ~71,500 HTML comparisons, 11,924 inputs; 49 + 17 mutations, all non-equivalent caught | Push text and notification HTML. |
 | `app/notification_email.go`, `userAllowsEmail`, `GetMessageForNotification`, `ProcessMessageAttachments`, `GetFormattedPostTime` | `mm_app::notification_email` | DONE | `parity::email_send::a_mentions_notification_email_matches_gos` (mention + reply) | The e-mail pass is boxed: inlined, its future overflowed a debug worker's stack. Batching and the generated avatar: [D-1072]. |
 
+## API compression — D-208 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `gzhttp.GzipHandler` around every `APIHandler`-family handler (api4/handlers.go:42, web/handlers.go:553) | `mm_api::go_global_headers` → `gzhttp::wrap` (now streaming), `gzhttp::net_http_framing`; `proxy::forwardable` keeps `Accept-Encoding` | DONE | `gzhttp_stream` oracle (17 rows), `parity::api_compression` (3); mutations in `scripts/mutations/api-gzip.plan` | The mode is read at start, as Go wraps at registration; an answer with no type is sniffed and the header set, as gzhttp does. |
