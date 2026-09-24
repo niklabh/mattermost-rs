@@ -25,11 +25,9 @@
 //! request is the file server's one answer not ported, and is forwarded — to a Go that has no
 //! such plugin, so it is Go's 404 ([D-1062]).
 
-use std::net::SocketAddr;
 use std::path::Path;
 
 use axum::body::{Body, Bytes};
-use axum::extract::ConnectInfo;
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Version, header};
 use axum::response::Response;
@@ -161,11 +159,7 @@ fn plugin_http_request(parts: &Parts, url: GoUrl, raw_target: &str) -> PluginHtt
         proto_minor: minor,
         header,
         host,
-        remote_addr: parts
-            .extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|ConnectInfo(addr)| addr.to_string())
-            .unwrap_or_default(),
+        remote_addr: crate::client_ip::go_remote_addr(&parts.extensions),
         request_uri: raw_target.to_owned(),
         context: crate::plugin_context::hook_context(parts, None),
     }

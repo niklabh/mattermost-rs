@@ -258,6 +258,13 @@ pub struct Config {
     /// ([`crate::http_guard`]) lets a user-driven request reach inside the reserved ranges.
     pub allowed_untrusted_internal_connections: String,
 
+    /// `ServiceSettings.TrustedProxyIPHeader` (config.go:379, no `json:` tag, so the key is the
+    /// field name). Go default the **empty list** (`SetDefaults`, config.go:679, which turns a
+    /// `null` or absent key into `[]` and leaves any list as written). The request headers
+    /// `utils.GetIPAddress` walks, in this order, for the client address before falling back to
+    /// the peer's — see `mm_api::client_ip`.
+    pub trusted_proxy_ip_header: Vec<String>,
+
     /// `ServiceSettings.RestrictLinkPreviews` (config.go:398). Go default `""`. The comma-,
     /// space- or `@`-separated domains `isLinkAllowedForPreview` (post_metadata.go:735) refuses
     /// to preview — a **substring** test on the IDNA-mapped host, so `example.com` also blocks
@@ -1480,6 +1487,7 @@ impl Default for Config {
             enable_permalink_previews: true,
             enable_file_search: true,
             allowed_untrusted_internal_connections: String::new(),
+            trusted_proxy_ip_header: Vec::new(),
             restrict_link_previews: String::new(),
             link_metadata_timeout_milliseconds: 5000,
             default_server_locale: "en".to_owned(),
@@ -1844,6 +1852,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
             )
             .unwrap_or(default.allowed_untrusted_internal_connections),
+            // `strings.Split(value, " ")` (environment.go:80): spaces, and an empty variable is one
+            // empty name — which `GetIPAddress` then looks up and never finds.
+            trusted_proxy_ip_header: lookup("MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER")
+                .map(|raw| raw.split(' ').map(str::to_owned).collect())
+                .unwrap_or(default.trusted_proxy_ip_header),
             restrict_link_previews: lookup("MM_SERVICESETTINGS_RESTRICTLINKPREVIEWS")
                 .unwrap_or(default.restrict_link_previews),
             link_metadata_timeout_milliseconds: lookup_int(
@@ -2676,6 +2689,9 @@ impl Config {
             allowed_untrusted_internal_connections: service
                 .allowed_untrusted_internal_connections
                 .unwrap_or(default.allowed_untrusted_internal_connections),
+            trusted_proxy_ip_header: service
+                .trusted_proxy_ip_header
+                .unwrap_or(default.trusted_proxy_ip_header),
             restrict_link_previews: service
                 .restrict_link_previews
                 .unwrap_or(default.restrict_link_previews),
@@ -3481,6 +3497,8 @@ struct ServiceSettingsDocument {
     enable_file_search: Option<bool>,
     #[serde(rename = "AllowedUntrustedInternalConnections")]
     allowed_untrusted_internal_connections: Option<String>,
+    #[serde(rename = "TrustedProxyIPHeader")]
+    trusted_proxy_ip_header: Option<Vec<String>>,
     #[serde(rename = "RestrictLinkPreviews")]
     restrict_link_previews: Option<String>,
     #[serde(rename = "EnableInsecureOutgoingConnections")]
@@ -4503,6 +4521,60 @@ mod go_parity {
         );
     }
 
+    /// `TrustedProxyIPHeader`: `SetDefaults` turns `null` or an absent key into `[]`
+    /// (config.go:679) and leaves a list alone, empty entries included.
+    #[test]
+    fn trusted_proxy_ip_header_defaults_to_empty_and_keeps_a_list_verbatim() {
+        let doc = |v: &str| {
+            Config::from_document(&format!(
+                r#"{{"ServiceSettings": {{"TrustedProxyIPHeader": {v}}}}}"#
+            ))
+            .expect("valid document")
+            .trusted_proxy_ip_header
+        };
+        assert!(Config::default().trusted_proxy_ip_header.is_empty());
+        assert!(
+            Config::from_document("{}")
+                .unwrap()
+                .trusted_proxy_ip_header
+                .is_empty()
+        );
+        assert!(doc("null").is_empty());
+        assert!(doc("[]").is_empty());
+        assert_eq!(doc(r#"["X-Forwarded-For", ""]"#), ["X-Forwarded-For", ""]);
+    }
+
+    /// `strings.Split(value, " ")` (environment.go:80): spaces, never commas, and an empty
+    /// variable is one empty name, not an empty list.
+    #[test]
+    fn trusted_proxy_ip_header_env_splits_on_spaces() {
+        let with = |value: &'static str| {
+            Config::default()
+                .apply_env_from(&move |key| {
+                    (key == "MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER").then(|| value.to_owned())
+                })
+                .trusted_proxy_ip_header
+        };
+        assert_eq!(
+            with("X-Real-IP X-Forwarded-For"),
+            ["X-Real-IP", "X-Forwarded-For"]
+        );
+        assert_eq!(
+            with("X-Real-IP,X-Forwarded-For"),
+            ["X-Real-IP,X-Forwarded-For"]
+        );
+        assert_eq!(with(""), [""]);
+        let document = Config::from_document(
+            r#"{"ServiceSettings": {"TrustedProxyIPHeader": ["X-Real-IP"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            document.apply_env_from(&|_| None).trusted_proxy_ip_header,
+            ["X-Real-IP"],
+            "an unset variable leaves the document's value"
+        );
+    }
+
     /// The fixture covers **every** setting read from the document.
     ///
     /// Without this the coverage rots silently. `scripts/dump-config-fixture.sh` carries its own
@@ -4537,8 +4609,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 128,
-            "the fixture covers {keys} settings and Config reads 128 from the document. \
+            keys, 129,
+            "the fixture covers {keys} settings and Config reads 129 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4571,6 +4643,7 @@ mod go_parity {
                 "EnablePostSearch": false,
                 "EnableFileSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
+                "TrustedProxyIPHeader": ["X-Real-IP", "X-Forwarded-For"],
                 "RestrictLinkPreviews": "example.com",
                 "EnableInsecureOutgoingConnections": true,
                 "EnableMultifactorAuthentication": true,
@@ -4641,6 +4714,11 @@ mod go_parity {
         assert_eq!(
             config.allowed_untrusted_internal_connections,
             "10.0.0.0/8 localhost"
+        );
+        assert_eq!(
+            config.trusted_proxy_ip_header,
+            ["X-Real-IP", "X-Forwarded-For"],
+            "kept in the order written: GetIPAddress walks it in that order"
         );
         assert_eq!(config.restrict_link_previews, "example.com");
         assert_eq!(config.link_metadata_timeout_milliseconds, 250);

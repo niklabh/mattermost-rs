@@ -105,6 +105,8 @@ MODELLED = {
         "EnableFileSearch",
         "EnableInsecureOutgoingConnections",
         "AllowCookiesForSubdomains",
+        # The headers utils.GetIPAddress walks for the client address (plugin hook contexts).
+        "TrustedProxyIPHeader",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
         # the fixture has to record that a real document *has* the key. The value is "" here and

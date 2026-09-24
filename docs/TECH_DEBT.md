@@ -9502,7 +9502,9 @@ serves whatever is on disk. **What is owed:** the rewrite, once mm-api can be th
 
 ## D-903 · A forwarded `HEAD` loses its `Content-Length`
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-19 (web client)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-19 (web client)
+**Closed** 2026-09-24 — `proxy::forward` carries Go's `Content-Length` on a `HEAD` answer and, where Go sent
+none, hides the empty body's size so none is invented; `parity::web_client::a_forwarded_head_keeps_gos_content_length`.
 
 `proxy::forward` drops the upstream `Content-Length` as hop-by-hop and rebuilds the body from the
 bytes it read — which for a `HEAD` is none, so hyper writes `Content-Length: 0` where Go sent the
@@ -9511,7 +9513,9 @@ for every forwarded `HEAD`. **What is owed:** keep Go's `Content-Length` on a `H
 
 ## D-930 · `TrustedProxyIPHeader` is not modelled, so a hook's `IPAddress` is the peer's
 
-**Status** OPEN · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+**Status** CLOSED · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+**Closed** 2026-09-24 — `ServiceSettings.TrustedProxyIPHeader` is in `mm_app::config` and `mm_api::client_ip` ports
+`GetIPAddress` whole (70-row Go oracle), stamped per request on both routers; `parity::plugin_hooks` now walks it.
 
 `utils.GetIPAddress` (channels/utils/utils.go:94) walks
 `ServiceSettings.TrustedProxyIPHeader` for the first header holding a parseable address and only
@@ -10049,3 +10053,21 @@ Go registers api4 routes with `.Methods("GET")`, and gorilla does not add `HEAD`
 so this server returns 200 (or the handler's 401). Found by `parity::api_compression`; true of
 every served `GET`. **What is owed:** refuse `HEAD` on the api4 `GET` routes as Go's mux does
 (the web client's routes, which do take `HEAD`, excepted).
+
+Measured independently by D-903's forwarded-`HEAD` probe (raised there as D-1140, folded in
+here): `HEAD /api/v4/users/me` with no token is Go 404, this server 401. The file routes and the web
+client register `HEAD` in Go too, and are right. The fix wants one router-level guard keyed on which
+pairs Go registers with `HEAD`, and a parity sweep over `scripts/routes.py`'s `GET` list.
+
+---
+
+## D-1141 · A `[]string` setting from the environment is split on commas, where Go splits on spaces
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (`TrustedProxyIPHeader`)
+
+`applyEnvKey` sets a slice setting to `strings.Split(value, " ")` (config/environment.go:80), so
+`MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS="a b"` is `["a", "b"]` in Go and an empty variable is
+`[""]`. `mm_app::config::split_list`, which only that setting uses, splits on commas and maps `""`
+to `[]` — its doc comment states the comma rule as Go's. The other two slice settings
+(`SignaturePublicKeyFiles`, `TrustedProxyIPHeader`) split on spaces. **What is owed:** replace
+`split_list` with the space split and turn its test round.

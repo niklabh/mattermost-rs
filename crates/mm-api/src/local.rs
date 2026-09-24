@@ -311,6 +311,12 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
             state.clone(),
             crate::translate_error_messages,
         ))
+        // The socket goes through `ServeHTTP` too, so its header walk runs; with no peer its
+        // fallback is `""`. See [`crate::client_ip`].
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::client_ip::stamp_client_ip,
+        ))
         .with_state(state)
 }
 
