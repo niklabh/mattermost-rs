@@ -50,6 +50,12 @@ export MMRS_PORT_OFFSET=$((100 * MMRS_STACK))
 # each send and compare the two. Per stack because every stack's Go server used to send to the one
 # `localhost:10025`, which two concurrent suites would both have tried to bind.
 export MMRS_SMTP_PORT=$((10025 + 100 * MMRS_STACK))
+# The push proxy both servers post to (`EmailSettings.PushNotificationServer`), with push switched
+# on for both (`SendPushNotifications`). The parity suite serves it (`common::push_proxy`) and
+# compares what each server sends; between runs nothing listens and every push is a logged
+# connection failure. On since 2026-09-24: the stack used to run with push off and no server, so
+# no push path — the badge clear on view, the ack, the ping's device test — had an oracle.
+export MMRS_PUSH_PORT=$((10050 + 100 * MMRS_STACK))
 
 export MMRS_GO_BASE="http://localhost:$MMRS_GO_PORT"
 export MMRS_RUST_BASE="http://127.0.0.1:$MMRS_API_PORT"

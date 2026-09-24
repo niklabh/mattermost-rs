@@ -85,7 +85,8 @@
 # the demo launched: `GET /config/client` answers `SiteURL`, and the config suites compare it.
 # `MM_EMAILSETTINGS_SMTPPORT` (2026-09-24) is the stack's SMTP port from `stack-env.sh`, which
 # `go-server.sh` sets on the Go side too: both servers must send to the same place, or the parity
-# suite's SMTP sink hears only one of them.
+# suite's SMTP sink hears only one of them. The two push variables beside it are the same
+# arrangement for the push proxy (`common::push_proxy`).
 # `MMRS_API_HOST` (2026-09-18) is the address mm-api binds, loopback unless set. `0.0.0.0` makes
 # the stack reachable from another machine on the network — the browser UI through mm-api, as
 # `scripts/mm-api.sh` documents. The parity harness never sets it.
@@ -113,6 +114,8 @@ mmrs_launch_mm_api() {
     MM_API_GO_CACHE_USER=sliceuser \
     MM_API_CONFIG_POLL_MS=200 \
     MM_EMAILSETTINGS_SMTPPORT="$MMRS_SMTP_PORT" \
+    MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS=true \
+    MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER="http://localhost:$MMRS_PUSH_PORT" \
     nohup "$root/target/debug/mm-api" > "$log" 2>&1 &
   )
 }

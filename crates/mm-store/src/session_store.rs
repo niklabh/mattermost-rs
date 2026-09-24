@@ -69,6 +69,17 @@ pub trait SessionStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Session>, StoreError>> + Send;
 
+    /// Port of `SqlSessionStore.GetSessionsWithActiveDeviceIds` (session_store.go:179): the
+    /// user's unexpired sessions holding a live standard **or** VoIP device token — live meaning
+    /// non-empty and not the value last reported removed (`Props.last_removed_device_id`,
+    /// `last_removed_voip_device_id`). An `ExpiresAt` of 0 is excluded outright, as Go's
+    /// `NotEq{"ExpiresAt": 0}` does, although `IsExpired` would call it never-expiring. No
+    /// `ORDER BY` and no team members, as in Go.
+    fn get_sessions_with_active_device_ids(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Session>, StoreError>> + Send;
+
     /// Port of `SqlSessionStore.UpdateExpiresAt` (session_store.go:315): the new expiry, and
     /// `ExpiredNotify` cleared so the session can be warned about again. **Id only**, like
     /// [`SessionStore::update_last_activity_at`]; a miss updates nothing and succeeds.
@@ -481,6 +492,51 @@ impl SessionStore for SqlSessionStore {
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
 
+        tracing::Span::current().record("count", sessions.len());
+        Ok(sessions)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, count))]
+    async fn get_sessions_with_active_device_ids(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<Session>, StoreError> {
+        let now = mm_model::utils::get_millis();
+        let rows = sqlx::query_as!(
+            SessionRow,
+            r#"
+            SELECT id,
+                   token,
+                   createat,
+                   expiresat,
+                   lastactivityat,
+                   userid,
+                   deviceid,
+                   voipdeviceid,
+                   roles,
+                   isoauth,
+                   props,
+                   expirednotify
+              FROM sessions
+             WHERE userid = $1
+               AND expiresat <> 0
+               AND expiresat >= $2
+               AND ((deviceid <> '' AND deviceid != COALESCE(props->>'last_removed_device_id', ''))
+                 OR (voipdeviceid <> '' AND voipdeviceid != COALESCE(props->>'last_removed_voip_device_id', '')))
+            "#,
+            user_id,
+            now
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Sessions with userId={user_id}"),
+            source,
+        })?;
+        let sessions = rows
+            .into_iter()
+            .map(SessionRow::into_session)
+            .collect::<Result<Vec<_>, StoreError>>()?;
         tracing::Span::current().record("count", sessions.len());
         Ok(sessions)
     }

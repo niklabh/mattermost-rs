@@ -149,6 +149,7 @@ mod parity {
     /// Appended out of alphabetical order; see `config_reads`.
     pub mod properties;
     pub mod push_ack;
+    pub mod push_send;
     pub mod reaction_writes;
     pub mod recaps;
     pub mod recommended_channels;

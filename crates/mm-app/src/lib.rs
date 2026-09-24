@@ -112,6 +112,7 @@ pub mod preference;
 pub mod product_notices;
 pub mod properties;
 pub mod property_hooks;
+pub mod push;
 pub mod reaction;
 pub mod remote_cluster;
 pub mod report;

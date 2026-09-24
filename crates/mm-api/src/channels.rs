@@ -3713,7 +3713,12 @@ async fn serve_view_channel(
 
     let times = state
         .app
-        .view_channel(&view, &user_id, view.collapsed_threads_supported)
+        .view_channel(
+            &view,
+            &user_id,
+            &session.0.id,
+            view.collapsed_threads_supported,
+        )
         .await?;
 
     state
@@ -3801,7 +3806,7 @@ async fn serve_read_multiple_channels(
     let is_crt_enabled = state.app.is_crt_enabled_for_user(&user_id).await;
     let times = state
         .app
-        .mark_channels_as_viewed(&channel_ids, &user_id, true, is_crt_enabled)
+        .mark_channels_as_viewed(&channel_ids, &user_id, &session.0.id, true, is_crt_enabled)
         .await?;
 
     // Unreachable — the app call above reads the user row and fails for a malformed id — but the
@@ -3894,7 +3899,7 @@ async fn serve_read_all_messages(
     let is_crt_enabled = state.app.is_crt_enabled_for_user(&user_id).await;
     let times = state
         .app
-        .mark_all_direct_and_group_messages_viewed(&user_id, is_crt_enabled)
+        .mark_all_direct_and_group_messages_viewed(&user_id, &session.0.id, is_crt_enabled)
         .await?;
 
     view_response(times, "readAllMessages")
@@ -3965,7 +3970,7 @@ async fn serve_read_all_in_team(
     let is_crt_enabled = state.app.is_crt_enabled_for_user(&user_id).await;
     let times = state
         .app
-        .mark_team_channels_and_threads_viewed(team_id, &user_id, is_crt_enabled)
+        .mark_team_channels_and_threads_viewed(team_id, &user_id, &session.0.id, is_crt_enabled)
         .await?;
 
     view_response(times, "readAllInTeam")

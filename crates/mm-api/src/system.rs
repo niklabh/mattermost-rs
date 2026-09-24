@@ -69,14 +69,14 @@ pub struct PingParams {
 /// # What we answer, and what we hand back
 ///
 /// The plain ping is four config strings, a status and the active search backend — all readable
-/// from the configuration document both servers share. Three inputs take it out of reach and each
-/// is forwarded rather than guessed:
+/// from the configuration document both servers share. A non-empty **`device_id`** adds
+/// `CanReceiveNotifications`: a `test` push sent through the push proxy
+/// ([`mm_app::App::send_test_push_notification`]), answering `"true"`, `"false"` or `"unknown"`.
+/// Two inputs take it out of reach and each is forwarded rather than guessed:
 ///
 /// - **`get_server_status=true`** runs `DBHealthCheckWrite`/`Delete` and
 ///   `TestFileStoreConnection`, and then reports whether the *Go process* is running as root
 ///   (`os.Geteuid()`). Our euid is not the answer to that question.
-/// - **`device_id=…`** sends a real push notification through the push proxy and reports whether
-///   it landed. There is no push client here.
 /// - **a configured `GoroutineHealthThreshold`** compares `runtime.NumGoroutine()` against it.
 ///   That is the Go process's goroutine count; ours is a different number about a different
 ///   program, and reporting `UNHEALTHY` — or failing to — on the strength of it would be worse
@@ -131,7 +131,6 @@ pub(crate) async fn ping_answer(
 
     if let Some(reason) = ping_is_not_ours_to_answer(
         params.get_server_status.as_deref(),
-        params.device_id.as_deref(),
         config.goroutine_health_threshold,
         config.elasticsearch_enable_indexing,
         config.elasticsearch_enable_searching,
@@ -163,6 +162,14 @@ pub(crate) async fn ping_answer(
         body.insert(
             "TestFeatureFlag".to_owned(),
             Value::from(config.feature_flag_test_feature.as_str()),
+        );
+    }
+    // `if deviceID := r.FormValue("device_id"); deviceID != ""` — an **empty** value is not a
+    // device id, so `?device_id=` alone sends nothing.
+    if let Some(device_id) = params.device_id.as_deref().filter(|id| !id.is_empty()) {
+        body.insert(
+            "CanReceiveNotifications".to_owned(),
+            Value::from(state.app.send_test_push_notification(device_id).await),
         );
     }
     body.insert(
@@ -213,7 +220,6 @@ fn json_body(body: Vec<u8>) -> Response {
 /// have a truth table.
 fn ping_is_not_ours_to_answer(
     get_server_status: Option<&str>,
-    device_id: Option<&str>,
     goroutine_health_threshold: i64,
     elasticsearch_enable_indexing: bool,
     elasticsearch_enable_searching: bool,
@@ -222,11 +228,6 @@ fn ping_is_not_ours_to_answer(
     // extended check and must stay ours.
     if get_server_status == Some("true") {
         return Some("get_server_status");
-    }
-    // `if deviceID := r.FormValue("device_id"); deviceID != ""` — an **empty** value is not a
-    // device id, so `?device_id=` alone stays ours.
-    if device_id.is_some_and(|id| !id.is_empty()) {
-        return Some("device_id");
     }
     // `> 0`, not `!= 0`: the default is -1 and Go's own guard is a strict positive.
     if goroutine_health_threshold > 0 {
@@ -1043,53 +1044,40 @@ mod tests {
     /// The default deployment answers, and none of the five boundaries fires.
     #[test]
     fn a_stock_configuration_keeps_the_ping() {
-        assert_eq!(
-            ping_is_not_ours_to_answer(None, None, -1, false, false),
-            None
-        );
+        assert_eq!(ping_is_not_ours_to_answer(None, -1, false, false), None);
     }
 
     /// Each boundary on its own, and — the part that matters — the near misses that must **not**
-    /// fire. Go compares `get_server_status` against the literal `"true"` and `device_id` against
-    /// emptiness, so `?get_server_status=1` and `?device_id=` are ordinary pings.
+    /// fire. Go compares `get_server_status` against the literal `"true"`, so
+    /// `?get_server_status=1` is an ordinary ping.
     #[test]
     fn every_boundary_fires_only_on_its_own_input() {
         assert_eq!(
-            ping_is_not_ours_to_answer(Some("true"), None, -1, false, false),
+            ping_is_not_ours_to_answer(Some("true"), -1, false, false),
             Some("get_server_status")
         );
         assert_eq!(
-            ping_is_not_ours_to_answer(Some("1"), None, -1, false, false),
+            ping_is_not_ours_to_answer(Some("1"), -1, false, false),
             None,
             "`\"1\"` is not `\"true\"`; Go compares the literal"
         );
         assert_eq!(
-            ping_is_not_ours_to_answer(Some("TRUE"), None, -1, false, false),
+            ping_is_not_ours_to_answer(Some("TRUE"), -1, false, false),
             None,
             "and the comparison is case-sensitive"
         );
 
         assert_eq!(
-            ping_is_not_ours_to_answer(None, Some("abc"), -1, false, false),
-            Some("device_id")
-        );
-        assert_eq!(
-            ping_is_not_ours_to_answer(None, Some(""), -1, false, false),
-            None,
-            "an empty device id is not a device id"
-        );
-
-        assert_eq!(
-            ping_is_not_ours_to_answer(None, None, 1, false, false),
+            ping_is_not_ours_to_answer(None, 1, false, false),
             Some("goroutine_health_threshold")
         );
         assert_eq!(
-            ping_is_not_ours_to_answer(None, None, 0, false, false),
+            ping_is_not_ours_to_answer(None, 0, false, false),
             None,
             "`> 0` is strict, so a zero threshold is disarmed"
         );
         assert_eq!(
-            ping_is_not_ours_to_answer(None, None, -1, false, false),
+            ping_is_not_ours_to_answer(None, -1, false, false),
             None,
             "and -1 is the Go default"
         );
@@ -1097,11 +1085,11 @@ mod tests {
         // `EnableIndexing` is the setting the Elasticsearch engine reports itself active on; the
         // licence is not in the predicate and cannot be passed here at all.
         assert_eq!(
-            ping_is_not_ours_to_answer(None, None, -1, true, false),
+            ping_is_not_ours_to_answer(None, -1, true, false),
             Some("elasticsearch_indexing")
         );
         assert_eq!(
-            ping_is_not_ours_to_answer(None, None, -1, false, true),
+            ping_is_not_ours_to_answer(None, -1, false, true),
             Some("elasticsearch")
         );
     }
