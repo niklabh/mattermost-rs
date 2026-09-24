@@ -1,0 +1,1617 @@
+{
+    "csrf": [
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "a bearer request is not checked",
+                "method": "POST",
+                "target": "/x",
+                "headers": null,
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": false,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "a cookie GET is not checked",
+                "method": "GET",
+                "target": "/x",
+                "headers": null,
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "a cookie HEAD is checked",
+                "method": "HEAD",
+                "target": "/x",
+                "headers": null,
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "the header matches",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "X-CSRF-Token: right"
+                ],
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "the header is wrong and the form is not read",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "X-CSRF-Token: wrong",
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 14,
+            "body_prefix": "a=1\u0026csrf=right",
+            "case": {
+                "name": "the form field",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "a=1\u0026csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "the form field under a charset",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: Application/X-WWW-Form-Urlencoded; charset=utf-8"
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "a JSON body is no form",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/json"
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "no type is no form",
+                "method": "POST",
+                "target": "/x",
+                "headers": null,
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 66,
+            "body_prefix": "--b\r\nContent-Disposition: form-data; name=\"csrf\"\r\n\r\nright\r\n--b--",
+            "case": {
+                "name": "a multipart body is not parsed",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: multipart/form-data; boundary=b"
+                ],
+                "body": "--b\r\nContent-Disposition: form-data; name=\"csrf\"\r\n\r\nright\r\n--b--\r\n",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "the query field",
+                "method": "POST",
+                "target": "/x?csrf=right",
+                "headers": null,
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=wrong",
+            "case": {
+                "name": "the body before the query",
+                "method": "POST",
+                "target": "/x?csrf=right",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "csrf=wrong",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "a PUT form",
+                "method": "PUT",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "a PATCH form",
+                "method": "PATCH",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "a DELETE body is not a form",
+                "method": "DELETE",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "a DELETE query",
+                "method": "DELETE",
+                "target": "/x?csrf=right",
+                "headers": null,
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "XMLHttpRequest passes when lenient",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "X-Requested-With: XMLHttpRequest"
+                ],
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "XMLHttpRequest fails when strict",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "X-Requested-With: XMLHttpRequest"
+                ],
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": true
+            },
+            "passed": false
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "XMLHttpRequest is case-sensitive",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "X-Requested-With: xmlhttprequest"
+                ],
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "a matching token beats strictness",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "X-Requested-With: XMLHttpRequest",
+                    "X-CSRF-Token: right"
+                ],
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": true
+            },
+            "passed": true
+        },
+        {
+            "body_len": 0,
+            "body_prefix": "",
+            "case": {
+                "name": "no csrf on either side",
+                "method": "POST",
+                "target": "/x",
+                "headers": null,
+                "body": "",
+                "body_pad": 0,
+                "session_csrf": "",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "a conflicting duplicate parameter is no type",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded; a=1; a=2"
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "an equal duplicate parameter is fine",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded; a=1; a=\"1\""
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "an unparseable parameter keeps the type",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded; =x"
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10,
+            "body_prefix": "csrf=right",
+            "case": {
+                "name": "a malformed type is no type",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded/extra"
+                ],
+                "body": "csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 16,
+            "body_prefix": "x=%zz\u0026csrf=right",
+            "case": {
+                "name": "a bad escape keeps the rest",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "x=%zz\u0026csrf=right",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 14,
+            "body_prefix": "csrf=right;x=1",
+            "case": {
+                "name": "a semicolon pair is dropped",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "csrf=right;x=1",
+                "body_pad": 0,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 10485760,
+            "body_prefix": "csrf=right\u0026pad=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "case": {
+                "name": "a form of exactly ten megabytes",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "csrf=right\u0026pad=",
+                "body_pad": 10485745,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        },
+        {
+            "body_len": 10485761,
+            "body_prefix": "csrf=right\u0026pad=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "case": {
+                "name": "a form past ten megabytes",
+                "method": "POST",
+                "target": "/x",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "csrf=right\u0026pad=",
+                "body_pad": 10485746,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": false
+        },
+        {
+            "body_len": 10485775,
+            "body_prefix": "csrf=wrong\u0026pad=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "case": {
+                "name": "a form past ten megabytes still has the query",
+                "method": "POST",
+                "target": "/x?csrf=right",
+                "headers": [
+                    "Content-Type: application/x-www-form-urlencoded"
+                ],
+                "body": "csrf=wrong\u0026pad=",
+                "body_pad": 10485760,
+                "session_csrf": "right",
+                "cookie_auth": true,
+                "strict": false
+            },
+            "passed": true
+        }
+    ],
+    "framing": [
+        {
+            "body": "",
+            "body_len": 0,
+            "case": {
+                "name": "nothing written",
+                "method": "GET",
+                "ops": null
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "0"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "hello",
+            "body_len": 5,
+            "case": {
+                "name": "a short text body",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "text": "hello"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "5"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "\u003chtml\u003e\u003cbody\u003ex\u003c/body\u003e\u003c/html\u003e",
+            "body_len": 27,
+            "case": {
+                "name": "html is sniffed",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "text": "\u003chtml\u003e\u003cbody\u003ex\u003c/body\u003e\u003c/html\u003e"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "27"
+                ],
+                "Content-Type": [
+                    "text/html; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "{\"a\":1}",
+            "body_len": 7,
+            "case": {
+                "name": "a JSON body is sniffed as text",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "text": "{\"a\":1}"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "7"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "{}",
+            "body_len": 2,
+            "case": {
+                "name": "a set type is kept",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "set",
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    },
+                    {
+                        "op": "write",
+                        "text": "{}"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "2"
+                ],
+                "Content-Type": [
+                    "application/json"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "abc",
+            "body_len": 3,
+            "case": {
+                "name": "an encoded body is not sniffed",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "set",
+                        "key": "Content-Encoding",
+                        "value": "gzip"
+                    },
+                    {
+                        "op": "write",
+                        "text": "abc"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Encoding": [
+                    "gzip"
+                ],
+                "Content-Length": [
+                    "3"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "",
+            "body_len": 0,
+            "case": {
+                "name": "a status and nothing else",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "status",
+                        "code": 418
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "0"
+                ]
+            },
+            "op_errors": null,
+            "status": 418
+        },
+        {
+            "body": "",
+            "body_len": 0,
+            "case": {
+                "name": "no content is no body",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "set",
+                        "key": "Content-Type",
+                        "value": "text/plain"
+                    },
+                    {
+                        "op": "set",
+                        "key": "Content-Length",
+                        "value": "5"
+                    },
+                    {
+                        "op": "status",
+                        "code": 204
+                    },
+                    {
+                        "op": "write",
+                        "text": "x"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Type": [
+                    "text/plain"
+                ]
+            },
+            "op_errors": [
+                "http: request method or response status code does not allow body"
+            ],
+            "status": 204
+        },
+        {
+            "body": "",
+            "body_len": 0,
+            "case": {
+                "name": "not modified keeps no type",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "set",
+                        "key": "Content-Type",
+                        "value": "text/plain"
+                    },
+                    {
+                        "op": "status",
+                        "code": 304
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {},
+            "op_errors": null,
+            "status": 304
+        },
+        {
+            "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "body_len": 2048,
+            "case": {
+                "name": "exactly the buffer",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "repeat": 2048
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "2048"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "body_len": 2049,
+            "case": {
+                "name": "one byte past the buffer",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "repeat": 2049
+                    }
+                ]
+            },
+            "chunked": true,
+            "header": {
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "body_len": 2049,
+            "case": {
+                "name": "two writes past the buffer",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "repeat": 1000
+                    },
+                    {
+                        "op": "write",
+                        "repeat": 1049
+                    }
+                ]
+            },
+            "chunked": true,
+            "header": {
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "body_len": 1006,
+            "case": {
+                "name": "two writes within the buffer",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "repeat": 1000
+                    },
+                    {
+                        "op": "write",
+                        "text": "\u003chtml\u003e"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "1006"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "\u003chtml\u003erest",
+            "body_len": 10,
+            "case": {
+                "name": "a flush sends the head",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "text": "\u003chtml\u003e"
+                    },
+                    {
+                        "op": "flush"
+                    },
+                    {
+                        "op": "write",
+                        "text": "rest"
+                    }
+                ]
+            },
+            "chunked": true,
+            "header": {
+                "Content-Type": [
+                    "text/html; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "\u003chtml\u003e",
+            "body_len": 6,
+            "case": {
+                "name": "a flush before any byte",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "flush"
+                    },
+                    {
+                        "op": "write",
+                        "text": "\u003chtml\u003e"
+                    }
+                ]
+            },
+            "chunked": true,
+            "header": {},
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "early",
+            "body_len": 5,
+            "case": {
+                "name": "a late status is lost",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "text": "early"
+                    },
+                    {
+                        "op": "status",
+                        "code": 500
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "5"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "x",
+            "body_len": 1,
+            "case": {
+                "name": "a header after the status is lost",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "set",
+                        "key": "X-A",
+                        "value": "1"
+                    },
+                    {
+                        "op": "status",
+                        "code": 201
+                    },
+                    {
+                        "op": "set",
+                        "key": "X-B",
+                        "value": "2"
+                    },
+                    {
+                        "op": "write",
+                        "text": "x"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "1"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ],
+                "X-A": [
+                    "1"
+                ]
+            },
+            "op_errors": null,
+            "status": 201
+        },
+        {
+            "body": "xy",
+            "body_len": 2,
+            "case": {
+                "name": "a header after the first byte is lost",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "write",
+                        "text": "x"
+                    },
+                    {
+                        "op": "set",
+                        "key": "X-C",
+                        "value": "3"
+                    },
+                    {
+                        "op": "write",
+                        "text": "y"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "2"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "abc",
+            "body_len": 3,
+            "case": {
+                "name": "a declared length is kept",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "set",
+                        "key": "Content-Length",
+                        "value": "3"
+                    },
+                    {
+                        "op": "write",
+                        "text": "abc"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "3"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "body_len": 3000,
+            "case": {
+                "name": "a declared length on a long body",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "set",
+                        "key": "Content-Length",
+                        "value": "3000"
+                    },
+                    {
+                        "op": "write",
+                        "repeat": 3000
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "3000"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "x",
+            "body_len": 1,
+            "case": {
+                "name": "an informational status does not count",
+                "method": "GET",
+                "ops": [
+                    {
+                        "op": "status",
+                        "code": 103
+                    },
+                    {
+                        "op": "status",
+                        "code": 202
+                    },
+                    {
+                        "op": "write",
+                        "text": "x"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "1"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 202
+        },
+        {
+            "body": "",
+            "body_len": 0,
+            "case": {
+                "name": "a HEAD with nothing",
+                "method": "HEAD",
+                "ops": null
+            },
+            "chunked": false,
+            "header": {},
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "",
+            "body_len": 0,
+            "case": {
+                "name": "a HEAD with a body",
+                "method": "HEAD",
+                "ops": [
+                    {
+                        "op": "write",
+                        "text": "abc"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Length": [
+                    "3"
+                ],
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "",
+            "body_len": 0,
+            "case": {
+                "name": "a HEAD past the buffer",
+                "method": "HEAD",
+                "ops": [
+                    {
+                        "op": "write",
+                        "repeat": 3000
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        },
+        {
+            "body": "",
+            "body_len": 0,
+            "case": {
+                "name": "a HEAD after a flush",
+                "method": "HEAD",
+                "ops": [
+                    {
+                        "op": "write",
+                        "text": "abc"
+                    },
+                    {
+                        "op": "flush"
+                    }
+                ]
+            },
+            "chunked": false,
+            "header": {
+                "Content-Type": [
+                    "text/plain; charset=utf-8"
+                ]
+            },
+            "op_errors": null,
+            "status": 200
+        }
+    ],
+    "requests": [
+        {
+            "case": {
+                "name": "bearer beats cookie and query",
+                "target": "/plugins/p/x?access_token=q",
+                "subpath": "/",
+                "headers": [
+                    "Authorization: Bearer tokbearer",
+                    "Cookie: MMAUTHTOKEN=ck"
+                ]
+            },
+            "cookie_auth": false,
+            "header": {
+                "Authorization": [
+                    "Bearer tokbearer"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?access_token=q",
+            "token": "tokbearer",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "bearer in any case",
+                "target": "/plugins/p/x",
+                "subpath": "/",
+                "headers": [
+                    "Authorization: bEaReR tokmixed"
+                ]
+            },
+            "cookie_auth": false,
+            "header": {
+                "Authorization": [
+                    "bEaReR tokmixed"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x",
+            "token": "tokmixed",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "token scheme",
+                "target": "/plugins/p/x",
+                "subpath": "/",
+                "headers": [
+                    "Authorization: token toktoken",
+                    "Cookie: MMAUTHTOKEN=ck"
+                ]
+            },
+            "cookie_auth": false,
+            "header": {
+                "Authorization": [
+                    "token toktoken"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x",
+            "token": "toktoken",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "token scheme in capitals",
+                "target": "/plugins/p/x",
+                "subpath": "/",
+                "headers": [
+                    "Authorization: TOKEN tokcaps"
+                ]
+            },
+            "cookie_auth": false,
+            "header": {
+                "Authorization": [
+                    "TOKEN tokcaps"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x",
+            "token": "tokcaps",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "a bare Bearer falls to the cookie",
+                "target": "/plugins/p/x?access_token=q",
+                "subpath": "/",
+                "headers": [
+                    "Authorization: Bearer ",
+                    "Cookie: MMAUTHTOKEN=ck"
+                ]
+            },
+            "cookie_auth": true,
+            "header": {
+                "Authorization": [
+                    "Bearer"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?access_token=q",
+            "token": "ck",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "bearer without the space is not one",
+                "target": "/plugins/p/x",
+                "subpath": "/",
+                "headers": [
+                    "Authorization: Bearerx",
+                    "Cookie: MMAUTHTOKEN=ck"
+                ]
+            },
+            "cookie_auth": true,
+            "header": {
+                "Authorization": [
+                    "Bearerx"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x",
+            "token": "ck",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "another scheme falls to the cookie",
+                "target": "/plugins/p/x?access_token=q",
+                "subpath": "/",
+                "headers": [
+                    "Authorization: Basic abc",
+                    "Cookie: MMAUTHTOKEN=ck"
+                ]
+            },
+            "cookie_auth": true,
+            "header": {
+                "Authorization": [
+                    "Basic abc"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?access_token=q",
+            "token": "ck",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "the kelvin sign folds to k",
+                "target": "/plugins/p/x",
+                "subpath": "/",
+                "headers": [
+                    "Authorization: toKen abc"
+                ]
+            },
+            "cookie_auth": false,
+            "header": {
+                "Authorization": [
+                    "toKen abc"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x",
+            "token": "n abc",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "cookies are rebuilt without the session",
+                "target": "/plugins/p/x",
+                "subpath": "/",
+                "headers": [
+                    "Cookie: a=1; MMAUTHTOKEN=first; b=\"x y\"; c=has,comma; bad name=1; e=\"q\"; MMAUTHTOKEN=second",
+                    "Cookie: d=4;; f"
+                ]
+            },
+            "cookie_auth": true,
+            "header": {
+                "Cookie": [
+                    "a=1; b=\"x y\"; c=\"has,comma\"; e=\"q\"; d=4; f="
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x",
+            "token": "first",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "a quoted session cookie",
+                "target": "/plugins/p/x",
+                "subpath": "/",
+                "headers": [
+                    "Cookie: MMAUTHTOKEN=\"quoted\""
+                ]
+            },
+            "cookie_auth": true,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p/x",
+            "token": "quoted",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "an invalid session cookie is skipped",
+                "target": "/plugins/p/x?access_token=fromquery",
+                "subpath": "/",
+                "headers": [
+                    "Cookie: MMAUTHTOKEN=a\\b; z=1"
+                ]
+            },
+            "cookie_auth": false,
+            "header": {
+                "Cookie": [
+                    "z=1"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?access_token=fromquery",
+            "token": "fromquery",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "an empty session cookie is a cookie",
+                "target": "/plugins/p/x?access_token=fromquery",
+                "subpath": "/",
+                "headers": [
+                    "Cookie: MMAUTHTOKEN="
+                ]
+            },
+            "cookie_auth": true,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?access_token=fromquery",
+            "token": "",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "too many cookies are none",
+                "target": "/plugins/p/x?access_token=fromquery",
+                "subpath": "/",
+                "headers": [
+                    "Cookie: x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; x=1; MMAUTHTOKEN=many"
+                ]
+            },
+            "cookie_auth": false,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?access_token=fromquery",
+            "token": "fromquery",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "the query token, and the query re-encoded",
+                "target": "/plugins/p/x?b=2\u0026access_token=qq\u0026a=1\u0026a=0\u0026sp=a+b%20c",
+                "subpath": "/",
+                "headers": null
+            },
+            "cookie_auth": false,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?b=2\u0026access_token=qq\u0026a=1\u0026a=0\u0026sp=a+b%20c",
+            "token": "qq",
+            "url": "/x?a=1\u0026a=0\u0026b=2\u0026sp=a+b+c"
+        },
+        {
+            "case": {
+                "name": "a query the parser half refuses",
+                "target": "/plugins/p/x?access_token=q%20x\u0026x=1;y=2\u0026z=%zz\u0026w=3",
+                "subpath": "/",
+                "headers": null
+            },
+            "cookie_auth": false,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?access_token=q%20x\u0026x=1;y=2\u0026z=%zz\u0026w=3",
+            "token": "q x",
+            "url": "/x?w=3"
+        },
+        {
+            "case": {
+                "name": "no token at all",
+                "target": "/plugins/p/x?y=1",
+                "subpath": "/",
+                "headers": [
+                    "Accept-Language: fr"
+                ]
+            },
+            "cookie_auth": false,
+            "header": {
+                "Accept-Language": [
+                    "fr"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?y=1",
+            "token": "",
+            "url": "/x?y=1"
+        },
+        {
+            "case": {
+                "name": "the server headers go",
+                "target": "/plugins/p/x",
+                "subpath": "/",
+                "headers": [
+                    "Mattermost-User-Id: spoofed",
+                    "mattermost-plugin-id: spoofed",
+                    "Referer: http://elsewhere/",
+                    "X-Kept: 1",
+                    "X-Kept: 2"
+                ]
+            },
+            "cookie_auth": false,
+            "header": {
+                "X-Kept": [
+                    "1",
+                    "2"
+                ]
+            },
+            "host": "example.com",
+            "request_uri": "/plugins/p/x",
+            "token": "",
+            "url": "/x"
+        },
+        {
+            "case": {
+                "name": "the bare plugin path",
+                "target": "/plugins/p",
+                "subpath": "/",
+                "headers": null
+            },
+            "cookie_auth": false,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p",
+            "token": "",
+            "url": ""
+        },
+        {
+            "case": {
+                "name": "the bare plugin path with a query",
+                "target": "/plugins/p?a=1",
+                "subpath": "/",
+                "headers": null
+            },
+            "cookie_auth": false,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p?a=1",
+            "token": "",
+            "url": "?a=1"
+        },
+        {
+            "case": {
+                "name": "a trailing slash",
+                "target": "/plugins/p/",
+                "subpath": "/",
+                "headers": null
+            },
+            "cookie_auth": false,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p/",
+            "token": "",
+            "url": "/"
+        },
+        {
+            "case": {
+                "name": "an escaped slash",
+                "target": "/plugins/p/a%2Fb/c%20d",
+                "subpath": "/",
+                "headers": null
+            },
+            "cookie_auth": false,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p/a%2Fb/c%20d",
+            "token": "",
+            "url": "/a/b/c%20d"
+        },
+        {
+            "case": {
+                "name": "a forced empty query",
+                "target": "/plugins/p/x?",
+                "subpath": "/",
+                "headers": null
+            },
+            "cookie_auth": false,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/plugins/p/x?",
+            "token": "",
+            "url": "/x?"
+        },
+        {
+            "case": {
+                "name": "under a subpath",
+                "target": "/sub/plugins/p/x/y?z=1",
+                "subpath": "/sub",
+                "headers": null
+            },
+            "cookie_auth": false,
+            "header": {},
+            "host": "example.com",
+            "request_uri": "/sub/plugins/p/x/y?z=1",
+            "token": "",
+            "url": "/x/y?z=1"
+        }
+    ]
+}

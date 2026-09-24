@@ -96,6 +96,7 @@ pub mod plugin_hooks;
 pub mod plugin_install;
 pub mod plugin_key_value_store;
 pub mod plugin_prepackaged;
+pub mod plugin_requests;
 pub mod plugin_signature;
 pub mod plugins;
 pub mod post;

@@ -9031,6 +9031,8 @@ site's own `/plugins/` subtree — is handed to Go: the signed trigger id, the u
 `applyPostActionUpdate`, the ephemeral text, the dialog response validation. The stack's
 allow-list is empty, so no oracle can reach an integration today. **What is owed:** a stack with
 an allow-listed echo integration, then the send and response halves.
+Since 2026-09-23 the `/plugins/` half has its request: `App::do_plugin_request` (Go's
+`doPluginRequest` into a `LocalResponseWriter`), used by the autocomplete's dynamic list.
 
 ## D-724 · A licensed `moveThread` with `MoveThreadsEnabled` forwards: `App.MoveThread` is unported
 
@@ -9839,7 +9841,11 @@ common one for bot-style commands — and a `/hookrec` verb per shape in the com
 
 ## D-1021 · Under the Rust plugin host, a suggestion that reaches a plugin's dynamic list is forwarded to a Go that lacks the command
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-23 (app/auto_complete.go) · **Owner** the plugin host
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-23 (app/auto_complete.go) · **Owner** the plugin host
+**Closed** 2026-09-23 — `App::autocomplete_suggestions` fetches each plugin dynamic list as the
+parser reaches it (`getDynamicListArgument` through `App::do_plugin_request`, Go's
+last-write-only `LocalResponseWriter` and `json.Decoder`'s first value); the serve tranche asks
+`/hookrec fetch` three ways on both hosts. A `builtin:` provider still forwards ([D-781]).
 
 `autocomplete_suggestions` forwards on `NeedsGo` ([D-781]); under the Rust host the command is
 this process's, so Go answers as if it did not exist. **What is owed:** `getDynamicListArgument`
@@ -9896,7 +9902,11 @@ watched user.
 
 ## D-1040 · Under the Rust plugin host, `/plugins/{plugin_id}/*` still goes to Go, which hosts no plugins
 
-**Status** OPEN · **Severity** gap · **Raised** 2026-09-23 (the plugin API's `PluginHTTP`) · **Owner** the plugin host
+**Status** CLOSED · **Severity** gap · **Raised** 2026-09-23 (the plugin API's `PluginHTTP`) · **Owner** the plugin host
+**Closed** 2026-09-23 — served under the Rust host (`mm_app::plugin_requests`,
+`mm_api::plugin_requests`), public files included; forwarded under the Go host as before.
+`parity::plugin_hooks::a_clients_plugin_request_is_served_as_go_serves_it`. What remains is
+[D-1060], [D-1061] and [D-1062].
 
 `Channels.ServePluginRequest` and `servePluginRequest` (app/plugin_requests.go:23, :156) — a
 client's HTTP request to a plugin's `ServeHTTP` — are not ported: `mm_api::web_static` classifies
@@ -9937,3 +9947,37 @@ refuses. The two sweeps behind it are the ones the REST unlink dispatches scoped
 **What is owed:** a licensed comparison on a database no other suite writes — a dedicated stack,
 or a tranche that runs alone — with one constrained team and one constrained channel, each holding
 a member outside its groups.
+## D-1060 · Under the Rust plugin host, a plugin cannot hijack a client's connection
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-23 (app/plugin_requests.go) · **Owner** the plugin host
+
+`net/http`'s writer is an `http.Hijacker`, so a plugin's `ServeHTTP` can take the connection — a
+plugin that serves its own websocket does. `mm_app::plugin_requests::GoResponseWriter` answers
+`hijack` with `None` (`response cannot be hijacked`). **What is owed:** a hyper upgrade handed to
+`mm_plugin::hijack`, and a recorder route that upgrades, on both hosts.
+
+---
+
+## D-1061 · A personal access token is not a session until Go has seen it
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-23 (app/session.go:106) · **Owner** sessions
+
+`App::get_session` does not port `createSessionForUserAccessToken`: a token found in no
+`Sessions` row is invalid here, where Go looks it up in `UserAccessTokens` and saves a session for
+it. Once Go has minted that row this server reads it, so only a token's first use through Rust
+differs — a 401 on REST, and a plugin request that reaches the plugin unauthenticated. **What is
+owed:** the lookup, the three refusals (inactive token, `EnableUserAccessTokens` off for a
+non-bot, inactive user), the 500 for a failed user read, and the saved session, with a parity
+check that uses a fresh token on Rust first.
+
+---
+
+## D-1062 · A plugin's public file has no parity check, and a multi-range request for one goes to Go
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-23 (app/plugin_requests.go:116) · **Owner** the plugin host
+
+`ServePluginPublicRequest` is served under the Rust host through `web_static::serve_file`, but the
+recorder's bundle has no `public/` directory, so the tranche only checks its 404s. A multi-range
+request is the file server's one unported answer and is forwarded, to a Go that has no such plugin.
+**What is owed:** a bundle with public files, and a tranche step for a file, a range, an
+`index.html` redirect and a directory without its slash.

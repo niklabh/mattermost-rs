@@ -1,0 +1,45 @@
+# Mutation plan for a client's request to a plugin's ServeHTTP and the dynamic list
+# (D-1040, D-1021; mm_app::plugin_requests, mm_api::plugin_requests, command_suggestions).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-servehttp.plan
+#
+# The api oracle is `parity::plugin_hooks::a_clients_plugin_request_is_served_as_go_serves_it`:
+# 27 client requests and three dynamic-list suggestions against a Go host and a Rust host. The
+# unit lines are what that tranche cannot reach (strict CSRF, a subpath, the framing thresholds,
+# a failed fetch), asserted by the `go_parity` corpus. The last two lines are no-op controls and
+# must SURVIVE.
+
+cookie-before-header	crates/mm-app/src/plugin_requests.rs	if auth.to_uppercase().starts_with(BEARER) {	if let Some(cookie) = read_cookies(header, SESSION_COOKIE_TOKEN).into_iter().next() {\n        return (cookie.value, true);\n    }\n    if auth.to_uppercase().starts_with(BEARER) {	api	plugin_hooks::a_clients_plugin_request
+bearer-case-sensitive	crates/mm-app/src/plugin_requests.rs	auth.to_uppercase().starts_with(BEARER)	auth.starts_with(BEARER)	api	plugin_hooks::a_clients_plugin_request
+query-token-ignored	crates/mm-app/src/plugin_requests.rs	.get("access_token")	.get("access_token_x")	api	plugin_hooks::a_clients_plugin_request
+cookie-not-cookie-auth	crates/mm-app/src/plugin_requests.rs	return (cookie.value, true);	return (cookie.value, false);	api	plugin_hooks::a_clients_plugin_request
+csrf-get-not-exempt	crates/mm-app/src/plugin_requests.rs	if !cookie_auth || request.method == "GET" {	if !cookie_auth || request.method == "HEAD" {	api	plugin_hooks::a_clients_plugin_request
+xhr-leniency-dropped	crates/mm-app/src/plugin_requests.rs	tracing::debug!(session_id = %session.id, "{MESSAGE}");\n        return (true, body);	tracing::debug!(session_id = %session.id, "{MESSAGE}");\n        return (false, body);	api	plugin_hooks::a_clients_plugin_request
+form-field-ignored	crates/mm-app/src/plugin_requests.rs	if media_type(content_type) == "application/x-www-form-urlencoded"	if media_type(content_type) == "multipart/form-data"	api	plugin_hooks::a_clients_plugin_request
+read-body-dropped	crates/mm-app/src/plugin_requests.rs	body = Body::Read(bytes);	body = Body::Read(Vec::new());	api	plugin_hooks::a_clients_plugin_request
+user-id-not-scrubbed	crates/mm-app/src/plugin_requests.rs	header_del(header, "Mattermost-User-Id");	header_del(header, "X-Unscrubbed");	api	plugin_hooks::a_clients_plugin_request
+plugin-id-not-scrubbed	crates/mm-app/src/plugin_requests.rs	header_del(header, "Mattermost-Plugin-ID");	header_del(header, "X-Unscrubbed");	api	plugin_hooks::a_clients_plugin_request
+session-cookie-kept	crates/mm-app/src/plugin_requests.rs	.filter(|c| c.name != SESSION_COOKIE_TOKEN)	.filter(|c| !c.name.is_empty())	api	plugin_hooks::a_clients_plugin_request
+referer-kept	crates/mm-app/src/plugin_requests.rs	header_del(header, "Referer");	header_del(header, "Referrer");	api	plugin_hooks::a_clients_plugin_request
+authorization-kept	crates/mm-app/src/plugin_requests.rs	header_del(&mut request.header, "Authorization");	header_del(&mut request.header, "X-Authorization");	api	plugin_hooks::a_clients_plugin_request
+user-id-despite-csrf	crates/mm-app/src/plugin_requests.rs	if passed {	if passed || cookie_auth {	api	plugin_hooks::a_clients_plugin_request
+no-session-id	crates/mm-app/src/plugin_requests.rs	request.context.session_id = session.id.clone();	let _ = &session.id;	api	plugin_hooks::a_clients_plugin_request
+path-not-trimmed	crates/mm-app/src/plugin_requests.rs	request.url.path = rest.as_bytes().to_vec();	let _ = rest;	api	plugin_hooks::a_clients_plugin_request
+query-not-reencoded	crates/mm-app/src/plugin_requests.rs	request.url.raw_query = query.encode();	let _ = query.encode();	api	plugin_hooks::a_clients_plugin_request
+no-sniff	crates/mm-app/src/plugin_requests.rs	crate::link_image::detect_content_type(&p),	"application/octet-stream",	api	plugin_hooks::a_clients_plugin_request
+flush-not-committing	crates/mm-app/src/plugin_requests.rs	fn flush(&mut self) {\n        self.ensure_status();\n        self.commit(false);	fn flush(&mut self) {\n        self.ensure_status();	api	plugin_hooks::a_clients_plugin_request
+late-status-counts	crates/mm-app/src/plugin_requests.rs	if self.wrote.is_some() {	if false {	api	plugin_hooks::a_clients_plugin_request
+not-found-status	crates/mm-app/src/plugin_requests.rs	http_error(&mut writer, "404 page not found", 404);	http_error(&mut writer, "404 page not found", 410);	api	plugin_hooks::a_clients_plugin_request
+route-not-hosted	crates/mm-api/src/web_static.rs	if setup.host_plugins\n        && let	if !setup.host_plugins\n        && let	api	plugin_hooks::a_clients_plugin_request
+local-writer-appends	crates/mm-app/src/plugin_requests.rs	body.clone_into(&mut self.data);	self.data.extend_from_slice(body);	api	plugin_hooks::a_clients_plugin_request
+site-url-dropped	crates/mm-app/src/command_suggestions.rs	if !site_url.is_empty() {	if site_url.is_empty() {	api	plugin_hooks::a_clients_plugin_request
+parsed-param-is-input	crates/mm-app/src/command_suggestions.rs	("parsed", &fetch.parsed),	("parsed", &user_input),	api	plugin_hooks::a_clients_plugin_request
+strict-ignored	crates/mm-app/src/plugin_requests.rs	        if strict {\n            tracing::warn!	        if false && strict {\n            tracing::warn!	unit	plugin_requests
+buffer-threshold-inclusive	crates/mm-app/src/plugin_requests.rs	if self.held.len() > BUFFER_BEFORE_CHUNKING {	if self.held.len() >= BUFFER_BEFORE_CHUNKING {	unit	plugin_requests
+head-length-on-empty	crates/mm-app/src/plugin_requests.rs	&& (!self.is_head || !p.is_empty())	&& !p.is_empty()	unit	plugin_requests
+subpath-ignored	crates/mm-app/src/plugin_requests.rs	let prefix = go_path::join(&[subpath, "plugins", plugin_id]);	let prefix = go_path::join(&["/", "plugins", plugin_id]);	unit	plugin_requests
+query-before-body	crates/mm-app/src/plugin_requests.rs	let value = from_body.or_else(|| {	let value = go_url::parse_query(raw_query).0.get("csrf").map(<[u8]>::to_vec).or(from_body).or_else(|| {	unit	plugin_requests
+cookie-limit-off-by-one	crates/mm-app/src/plugin_requests.rs	if count > COOKIE_MAX_NUM {	if count > COOKIE_MAX_NUM + 1 {	unit	plugin_requests
+failed-fetch-found	crates/mm-app/src/command_suggestions.rs	None => (false, parsed, to_be_parsed, Vec::new()),	None => (true, parsed, to_be_parsed, Vec::new()),	unit	command_suggestions
+control-user-input-rename	crates/mm-app/src/command_suggestions.rs	let user_input = format!("{}{}", fetch.parsed, fetch.to_be_parsed);	let input = format!("{}{}", fetch.parsed, fetch.to_be_parsed);\n        let user_input = input;	api	plugin_hooks::a_clients_plugin_request
+control-reader-rename	crates/mm-app/src/plugin_requests.rs	let reader = body.into_reader();	let stream = body.into_reader();\n        let reader = stream;	api	plugin_hooks::a_clients_plugin_request

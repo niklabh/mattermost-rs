@@ -8627,6 +8627,818 @@ fn assert_files_answers_are_gos(
     );
 }
 
+// ---------------------------------------------------------------------------------------------
+// A client's request to a plugin's ServeHTTP
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the plugin HTTP tranche; see `second_server_ports`.
+const SERVE_HOST_PORT: u16 = 8161;
+/// Its Go server.
+const SERVE_GO_OFFSET: u16 = 98;
+/// A plugin whose bundle is installed on both hosts and never enabled.
+const SERVE_INACTIVE: &str = "mmrs.servehttpoff";
+
+/// The users the tranche makes, for the cleanup.
+static SERVE_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for `/plugins/{plugin_id}/*`: a client's HTTP request to the recorder's
+/// `ServeHTTP` (`mm_app::plugin_requests`, `mm_api::plugin_requests`).
+///
+/// Each case goes to the Go host and to the Rust host with one user's one session, so the
+/// `Mattermost-User-Id` and `SessionId` each host hands the plugin are the same value. Compared:
+/// the status, every response header but `Date` (and this server's `x-mmrs-served-by` marker),
+/// the body byte for byte, and the recorder's transcript entry — the method, the URL after the
+/// scrub, the header the plugin was handed, `RequestURI`, the body's first 64 KiB, length and
+/// hash, and the `plugin.Context`. Masks: the request's `Host` and `RemoteAddr` (each host has
+/// its own port, and each connection its own), and [`normalise`]'s `RequestId`.
+#[tokio::test]
+async fn a_clients_plugin_request_is_served_as_go_serves_it() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_serve_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *SERVE_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in users {
+        common::delete_plain_user(&client, &admin, &id).await;
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// The recorder under another id, for an installed plugin that never runs.
+fn inactive_bundle() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            pack_bundle(
+                "plugin-hooks-bundle-inactive",
+                &format!(
+                    r#"{{"id": "{SERVE_INACTIVE}", "name": "Never Enabled", "version": "0.1.0", "server": {{"executable": "plugin"}}}}"#
+                ),
+            )
+        })
+        .clone()
+}
+
+/// One request of the tranche.
+struct ServeCase {
+    name: &'static str,
+    method: reqwest::Method,
+    path: String,
+    headers: Vec<(&'static str, String)>,
+    body: Vec<u8>,
+    /// The request reaches the recorder.
+    reaches: bool,
+}
+
+/// What a client received.
+#[derive(Debug, PartialEq)]
+struct Received {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+async fn send_case(client: &reqwest::Client, base: &str, case: &ServeCase, rust: bool) -> Received {
+    let mut request = client.request(case.method.clone(), format!("{base}{}", case.path));
+    for (name, value) in &case.headers {
+        request = request.header(*name, value);
+    }
+    if !case.body.is_empty() {
+        request = request.body(case.body.clone());
+    }
+    let response = request
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{}: {base} is unreachable: {e}", case.name));
+    let status = response.status().as_u16();
+    let served_by = response
+        .headers()
+        .get("x-mmrs-served-by")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    if rust {
+        assert_eq!(
+            served_by.as_deref(),
+            Some("rust"),
+            "{}: forwarded",
+            case.name
+        );
+    }
+    let mut headers: Vec<(String, String)> = response
+        .headers()
+        .iter()
+        .filter(|(name, _)| *name != "date" && *name != "x-mmrs-served-by")
+        .map(|(name, value)| {
+            (
+                name.as_str().to_owned(),
+                String::from_utf8_lossy(value.as_bytes()).into_owned(),
+            )
+        })
+        .collect();
+    headers.sort();
+    let body = response.bytes().await.expect("the body").to_vec();
+    Received {
+        status,
+        headers,
+        body,
+    }
+}
+
+/// The `ServeHTTP` entries so far, with the host's port and the peer's taken out.
+fn served_entries(log: &Path, host: &str) -> Vec<Json> {
+    transcript_of(log, &[(host.to_owned(), "<host>".to_owned())])
+        .into_iter()
+        .filter(|e| e["hook"] == "ServeHTTP")
+        .map(|mut e| {
+            if let Some(remote) = e["args"]["RemoteAddr"].as_str() {
+                let masked = match remote.rsplit_once(':') {
+                    Some((ip, _)) => format!("{ip}:<port>"),
+                    None => remote.to_owned(),
+                };
+                e["args"]["RemoteAddr"] = Json::String(masked);
+            }
+            e
+        })
+        .collect()
+}
+
+async fn served_count_reaches(log: &Path, host: &str, count: usize, side: &str) -> Vec<Json> {
+    for _ in 0..100 {
+        let entries = served_entries(log, host);
+        if entries.len() >= count {
+            return entries;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let entries = served_entries(log, host);
+    assert!(
+        entries.len() >= count,
+        "{side}: waited for {count} ServeHTTP entries, have {}",
+        entries.len()
+    );
+    entries
+}
+
+async fn run_the_serve_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-serve");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+    for run in [&go_run, &rs_run] {
+        std::fs::copy(
+            inactive_bundle(),
+            run.join("data/plugins")
+                .join(format!("{SERVE_INACTIVE}.tar.gz")),
+        )
+        .expect("the inactive bundle reaches the file store");
+    }
+    plant_state(client, admin, Some(true)).await;
+
+    // One user, one login session (which carries a CSRF token), used on both hosts.
+    let team = common::create_team(client, admin, "hookserve").await;
+    let own = common::create_plain_user(client, admin, &team, "hookserve").await;
+    SERVE_USERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(own.id.clone());
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let (props,): (String,) = sqlx::query_as("SELECT props::text FROM sessions WHERE token = $1")
+        .bind(&own.token)
+        .fetch_one(&pool)
+        .await
+        .expect("the session row");
+    let csrf = serde_json::from_str::<Json>(&props).expect("the props")["csrf"]
+        .as_str()
+        .expect("a login session has a CSRF token")
+        .to_owned();
+
+    let common_env = [
+        ("HOOK_RECORDER_HTTP", "1"),
+        // `/hookrec` and its autocomplete tree, for the dynamic list ([D-1021]).
+        ("HOOK_RECORDER_COMMANDS", "1"),
+        ("HOOK_RECORDER_COMMAND_TEAM", team.as_str()),
+    ];
+    let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let rust_site = format!("http://localhost:{}", SERVE_HOST_PORT + offset);
+    let go_site = format!("http://localhost:{}", go_port() + SERVE_GO_OFFSET);
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    env.extend(common_env);
+    let go = start_go(&go_run, &env, SERVE_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+        ("MM_SERVICESETTINGS_SITEURL", rust_site.as_str()),
+    ];
+    env.extend(common_env);
+    let rust = SecondServer::start_in(SERVE_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let big: Vec<u8> = (0..3 * 1024 * 1024u32)
+        .map(|i| b'a' + (i % 23) as u8)
+        .collect();
+    let p = |rest: &str| format!("/plugins/{PLUGIN_ID}{rest}");
+    let bearer = ("Authorization", format!("Bearer {}", own.token));
+    let cookie = (
+        "Cookie",
+        format!("theme=dark; MMAUTHTOKEN={}; lang=\"en gb\"", own.token),
+    );
+    let case =
+        |name, method, path: String, headers: Vec<(&'static str, String)>, body: &[u8], reaches| {
+            ServeCase {
+                name,
+                method,
+                path,
+                headers,
+                body: body.to_vec(),
+                reaches,
+            }
+        };
+    use reqwest::Method as M;
+    let cases = vec![
+        case(
+            "bearer",
+            M::GET,
+            p("/echo?b=2&a=1"),
+            vec![bearer.clone(), ("X-Hookrec", "hi".into())],
+            b"",
+            true,
+        ),
+        case(
+            "the server headers are scrubbed",
+            M::POST,
+            p("/echo"),
+            vec![
+                bearer.clone(),
+                ("Mattermost-User-Id", "spoofedspoofedspoofedspoof".into()),
+                ("Mattermost-Plugin-ID", "spoofed".into()),
+                ("Referer", "http://elsewhere/".into()),
+            ],
+            b"posted",
+            true,
+        ),
+        case(
+            "bearer beats a cookie",
+            M::POST,
+            p("/echo"),
+            vec![
+                bearer.clone(),
+                ("Cookie", "MMAUTHTOKEN=notasessionnotasessionnota".into()),
+            ],
+            b"",
+            true,
+        ),
+        case(
+            "a spoofed user without a session",
+            M::GET,
+            p("/echo"),
+            vec![
+                ("Mattermost-User-Id", "spoofedspoofedspoofedspoof".into()),
+                ("Mattermost-Plugin-ID", "spoofed".into()),
+            ],
+            b"",
+            true,
+        ),
+        case(
+            "cookie and CSRF header",
+            M::POST,
+            p("/echo"),
+            vec![cookie.clone(), ("X-CSRF-Token", csrf.clone())],
+            b"with csrf",
+            true,
+        ),
+        case(
+            "cookie without CSRF",
+            M::POST,
+            p("/echo"),
+            vec![cookie.clone()],
+            b"no csrf",
+            true,
+        ),
+        case(
+            "cookie with the legacy header",
+            M::POST,
+            p("/echo"),
+            vec![
+                cookie.clone(),
+                ("X-Requested-With", "XMLHttpRequest".into()),
+            ],
+            b"legacy",
+            true,
+        ),
+        case(
+            "cookie with a CSRF form field",
+            M::POST,
+            p("/echo"),
+            vec![
+                cookie.clone(),
+                ("Content-Type", "application/x-www-form-urlencoded".into()),
+            ],
+            format!("x=1&csrf={csrf}").as_bytes(),
+            true,
+        ),
+        case(
+            "cookie GET is not checked",
+            M::GET,
+            p("/echo"),
+            vec![cookie.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "access_token query",
+            M::GET,
+            p(&format!("/echo?z=1&access_token={}&y=2", own.token)),
+            vec![],
+            b"",
+            true,
+        ),
+        case("no session", M::GET, p("/echo"), vec![], b"", true),
+        case(
+            "an invalid bearer",
+            M::GET,
+            p("/echo"),
+            vec![("Authorization", "Bearer notasessionnotasessionnota".into())],
+            b"",
+            true,
+        ),
+        case(
+            "the bare plugin path",
+            M::GET,
+            p(""),
+            vec![bearer.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "an escaped subpath",
+            M::GET,
+            p("/a/b%2Fc%20d?q=%2F"),
+            vec![bearer.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "a large body, streamed",
+            M::POST,
+            p("/big"),
+            vec![bearer.clone()],
+            &big,
+            true,
+        ),
+        case(
+            "a large body the CSRF check reads",
+            M::PUT,
+            p("/big"),
+            vec![cookie.clone()],
+            &big,
+            true,
+        ),
+        case(
+            "a status and no body",
+            M::GET,
+            p("/status"),
+            vec![bearer.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "a late status",
+            M::GET,
+            p("/late"),
+            vec![bearer.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "a header and nothing written",
+            M::DELETE,
+            p("/silent"),
+            vec![bearer.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "a sniffed page",
+            M::GET,
+            p("/html"),
+            vec![bearer.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "a sniffed page, HEAD",
+            M::HEAD,
+            p("/html"),
+            vec![bearer.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "a flush",
+            M::GET,
+            p("/flushed"),
+            vec![bearer.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "the plugin's own 404",
+            M::GET,
+            p("/nowhere"),
+            vec![bearer.clone()],
+            b"",
+            true,
+        ),
+        case(
+            "an inactive plugin",
+            M::GET,
+            format!("/plugins/{SERVE_INACTIVE}/echo"),
+            vec![bearer.clone()],
+            b"",
+            false,
+        ),
+        case(
+            "an unknown plugin",
+            M::POST,
+            "/plugins/mmrs.nosuchplugin/echo".to_owned(),
+            vec![bearer.clone()],
+            b"x",
+            false,
+        ),
+        case(
+            "a public file that is not there",
+            M::GET,
+            p("/public/nothing.txt"),
+            vec![],
+            b"",
+            false,
+        ),
+        case(
+            "a public directory's slash",
+            M::GET,
+            p("/public/"),
+            vec![],
+            b"",
+            false,
+        ),
+    ];
+
+    let go_host = go.base.trim_start_matches("http://").to_owned();
+    let rust_host = rust.base.trim_start_matches("http://").to_owned();
+    let mut reached = 0;
+    let mut go_answers = Vec::new();
+    for case in &cases {
+        let go_answer = send_case(client, &go.base, case, false).await;
+        let rust_answer = send_case(client, &rust.base, case, true).await;
+        if case.reaches {
+            reached += 1;
+        }
+        let go_entries = served_count_reaches(&go_log, &go_host, reached, "Go").await;
+        let rust_entries = served_count_reaches(&rust_log, &rust_host, reached, "Rust").await;
+        assert_eq!(
+            go_entries.len(),
+            reached,
+            "{}: Go's plugin was called",
+            case.name
+        );
+        assert_eq!(
+            rust_entries.len(),
+            reached,
+            "{}: Rust's plugin was called",
+            case.name
+        );
+        assert_eq!(
+            (go_answer.status, &go_answer.headers),
+            (rust_answer.status, &rust_answer.headers),
+            "{}: the head",
+            case.name
+        );
+        assert!(
+            go_answer.body == rust_answer.body,
+            "{}: the body: go {} bytes {:?}…, rust {} bytes {:?}…",
+            case.name,
+            go_answer.body.len(),
+            String::from_utf8_lossy(&go_answer.body[..go_answer.body.len().min(80)]),
+            rust_answer.body.len(),
+            String::from_utf8_lossy(&rust_answer.body[..rust_answer.body.len().min(80)]),
+        );
+        if case.reaches {
+            assert_eq!(
+                go_entries[reached - 1],
+                rust_entries[reached - 1],
+                "{}: what the plugin saw",
+                case.name
+            );
+        }
+        let seen = case.reaches.then(|| go_entries[reached - 1].clone());
+        go_answers.push((case.name, go_answer, seen));
+    }
+
+    assert_serve_answers_are_gos(&go_answers, &own.id, &own.token, &csrf, big.len());
+
+    // A dynamic list the plugin serves ([D-1021]): the server's own request to the plugin's
+    // `ServeHTTP`, whose answer becomes the suggestions. The request id in the query is each
+    // host's own; the site URL is each host's configured one.
+    let site_pairs = |site: &str, host: &str| -> Vec<(String, String)> {
+        vec![
+            (site.to_owned(), "<site>".to_owned()),
+            (mm_model::go_url::query_escape(site), "<site>".to_owned()),
+            (host.to_owned(), "<host>".to_owned()),
+        ]
+    };
+    let mut suggestions = Vec::new();
+    for input in ["/hookrec fetch ", "/hookrec fetch t", "/hookrec fetch two "] {
+        let path = format!(
+            "/api/v4/teams/{team}/commands/autocomplete_suggestions?user_input={}&channel_id=chanchanchanchanchanchanch",
+            mm_model::go_url::query_escape(input)
+        );
+        let (gs, gb, _) = request_raw(
+            client,
+            &go.base,
+            reqwest::Method::GET,
+            Some(&own.token),
+            &path,
+            None,
+        )
+        .await;
+        let (rs, rb, served_by) = request_raw(
+            client,
+            &rust.base,
+            reqwest::Method::GET,
+            Some(&own.token),
+            &path,
+            None,
+        )
+        .await;
+        assert_eq!(
+            served_by.as_deref(),
+            Some("rust"),
+            "{input:?} was forwarded"
+        );
+        assert_eq!(
+            (gs, String::from_utf8_lossy(&gb)),
+            (rs, String::from_utf8_lossy(&rb)),
+            "{input:?}: the suggestions"
+        );
+        reached += 1;
+        let fetched = |log: &Path, site: &str, host: &str| {
+            let text = std::fs::read_to_string(log).unwrap_or_default();
+            let line = text
+                .lines()
+                .filter(|l| l.contains(r#""hook":"ServeHTTP""#))
+                .nth(reached - 1)
+                .map(|l| scrub(l, &site_pairs(site, host)))
+                .unwrap_or_default();
+            let mut entry: Json = serde_json::from_str(&line).unwrap_or(Json::Null);
+            normalise(&mut entry);
+            let url = entry["args"]["URL"].as_str().unwrap_or_default().to_owned();
+            let masked: Vec<String> = url
+                .split('&')
+                .map(|pair| match pair.split_once('=') {
+                    Some(("request_id", id)) if id.len() == 26 => "request_id=<id>".to_owned(),
+                    _ => pair.to_owned(),
+                })
+                .collect();
+            entry["args"]["URL"] = Json::String(masked.join("&"));
+            entry
+        };
+        served_count_reaches(&go_log, &go_host, reached, "Go").await;
+        served_count_reaches(&rust_log, &rust_host, reached, "Rust").await;
+        let (go_seen, rust_seen) = (
+            fetched(&go_log, &go_site, &go_host),
+            fetched(&rust_log, &rust_site, &rust_host),
+        );
+        assert_eq!(go_seen, rust_seen, "{input:?}: what the plugin saw");
+        suggestions.push((
+            serde_json::from_slice::<Json>(&gb).unwrap_or(Json::Null),
+            go_seen,
+        ));
+    }
+    let items = |n: usize| -> Vec<(String, String, String)> {
+        suggestions[n]
+            .0
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|s| {
+                (
+                    s["Suggestion"].as_str().unwrap_or_default().to_owned(),
+                    s["Hint"].as_str().unwrap_or_default().to_owned(),
+                    s["Description"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect()
+    };
+    let t = |a: &str, b: &str, c: &str| (a.to_owned(), b.to_owned(), c.to_owned());
+    assert_eq!(
+        items(0),
+        [
+            t("one", "h1", "first"),
+            t("two", "h2", ""),
+            t("", "", ""),
+            t("", "", ""),
+            t("three words", "", ""),
+        ],
+        "Go's decoding: folded keys, a non-string field empty, a null and a string as zero items"
+    );
+    assert_eq!(items(1), [t("two", "h2", ""), t("three words", "", "")]);
+    assert!(items(2).is_empty(), "a finished item is consumed");
+    let seen = &suggestions[0].1;
+    let url = seen["args"]["URL"].as_str().unwrap_or_default();
+    assert!(url.starts_with("/suggest/fetch?"), "{url}");
+    for pair in [
+        "user_input=hookrec+fetch+",
+        "parsed=hookrec+fetch+",
+        "channel_id=chanchanchanchanchanchanch",
+        "root_id=&",
+        "site_url=<site>",
+        "request_id=<id>",
+    ] {
+        assert!(url.contains(pair), "{pair} in {url}");
+    }
+    assert!(url.contains(&format!("user_id={}", own.id)), "{url}");
+    assert_eq!(
+        seen["args"]["Header"]["Mattermost-User-Id"],
+        serde_json::json!([own.id])
+    );
+    assert_eq!(
+        seen["args"]["RequestURI"], "",
+        "the server's own request has no target"
+    );
+
+    drop(rust);
+    drop(go);
+}
+
+/// What parity alone would not pin, read off Go's answers and Go's transcript.
+fn assert_serve_answers_are_gos(
+    answers: &[(&str, Received, Option<Json>)],
+    user: &str,
+    token: &str,
+    csrf: &str,
+    big: usize,
+) {
+    let by = |name: &str| {
+        answers
+            .iter()
+            .find(|(n, _, _)| *n == name)
+            .unwrap_or_else(|| panic!("no case {name}"))
+    };
+    let seen = |name: &str| by(name).2.clone().unwrap_or(Json::Null);
+    let header = |name: &str, key: &str| seen(name)["args"]["Header"][key].clone();
+    let user_id = |name: &str| header(name, "Mattermost-User-Id");
+    let authenticated = serde_json::json!([user]);
+    for name in [
+        "bearer",
+        "bearer beats a cookie",
+        "the server headers are scrubbed",
+        "cookie and CSRF header",
+        "cookie with the legacy header",
+        "cookie with a CSRF form field",
+        "cookie GET is not checked",
+        "access_token query",
+    ] {
+        assert_eq!(user_id(name), authenticated, "{name}: the user");
+        assert_eq!(
+            seen(name)["args"]["A"]["SessionId"].as_str().map(str::len),
+            Some(26),
+            "{name}"
+        );
+        assert!(
+            header(name, "Authorization").is_null(),
+            "{name}: the token is not handed on"
+        );
+    }
+    for name in [
+        "cookie without CSRF",
+        "no session",
+        "an invalid bearer",
+        "a spoofed user without a session",
+    ] {
+        assert!(user_id(name).is_null(), "{name}: no user");
+        // gob leaves an empty string out, and the rendering with it.
+        assert_eq!(
+            seen(name)["args"]["A"]["SessionId"]
+                .as_str()
+                .unwrap_or_default(),
+            "",
+            "{name}"
+        );
+    }
+    assert_eq!(
+        header("an invalid bearer", "Authorization"),
+        serde_json::json!(["Bearer notasessionnotasessionnota"]),
+        "an unresolved token keeps its header"
+    );
+    assert_eq!(
+        header("cookie without CSRF", "Cookie"),
+        serde_json::json!(["theme=dark; lang=\"en gb\""]),
+        "the session cookie goes, the rest are rebuilt on one line"
+    );
+    assert!(
+        header("a spoofed user without a session", "Mattermost-Plugin-Id").is_null(),
+        "the spoofed plugin id goes too"
+    );
+    assert!(
+        header("bearer beats a cookie", "Cookie").is_null(),
+        "the session cookie goes even when the header won"
+    );
+    let scrubbed = seen("the server headers are scrubbed");
+    assert!(scrubbed["args"]["Header"]["Mattermost-Plugin-Id"].is_null());
+    assert!(scrubbed["args"]["Header"]["Referer"].is_null());
+    let query = seen("access_token query");
+    assert_eq!(
+        query["args"]["URL"], "/echo?y=2&z=1",
+        "the token is gone and the query sorted"
+    );
+    assert!(
+        query["args"]["RequestURI"]
+            .as_str()
+            .is_some_and(|u| u.contains(token)),
+        "RequestURI is the raw target, token and all"
+    );
+    assert_eq!(seen("the bare plugin path")["args"]["URL"], "");
+    assert_eq!(
+        seen("an escaped subpath")["args"]["URL"],
+        "/a/b/c%20d?q=%2F"
+    );
+    assert_eq!(seen("a large body, streamed")["args"]["BodyLen"], big);
+    assert_eq!(
+        seen("a large body the CSRF check reads")["args"]["BodyLen"],
+        big
+    );
+    assert!(user_id("a large body the CSRF check reads").is_null());
+    assert!(!csrf.is_empty());
+
+    let answer = |name: &str| &by(name).1;
+    let head = |name: &str, key: &str| {
+        answer(name)
+            .headers
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+    };
+    assert_eq!(answer("bearer").status, 202);
+    assert_eq!(answer("bearer").body, b"echo:  a=1&b=2");
+    assert_eq!(
+        head("a large body, streamed", "transfer-encoding").as_deref(),
+        Some("chunked")
+    );
+    assert_eq!(answer("a large body, streamed").body.len(), 300_000);
+    assert_eq!(
+        head("a sniffed page", "content-type").as_deref(),
+        Some("text/html; charset=utf-8")
+    );
+    assert_eq!(
+        head("a sniffed page", "content-length").as_deref(),
+        Some("33")
+    );
+    assert_eq!(
+        head("a flush", "transfer-encoding").as_deref(),
+        Some("chunked")
+    );
+    assert_eq!(answer("a status and no body").status, 418);
+    assert_eq!(answer("a late status").status, 200);
+    for name in [
+        "an inactive plugin",
+        "an unknown plugin",
+        "a public file that is not there",
+        "a public directory's slash",
+        "the plugin's own 404",
+    ] {
+        assert_eq!(answer(name).status, 404, "{name}");
+        assert_eq!(answer(name).body, b"404 page not found\n", "{name}");
+    }
+}
+
 /// The rendering the transcript is written in is a pure function of the value, so the
 /// normalisation this suite compares through can be checked without a stack.
 #[test]

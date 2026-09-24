@@ -770,7 +770,7 @@ func main() {
 	rustOutMarkdown := flag.String("rust-out-markdown", "../../crates/mm-markdown/src", "directory to write mm-markdown's generated Rust into")
 	// -only=imaging writes just the image-pipeline fixtures and exits. The full run takes minutes;
 	// iterating on one oracle should not.
-	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet) and exit")
+	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet, plugin_requests) and exit")
 	flag.Parse()
 
 	if *only == "imaging" {
@@ -802,6 +802,12 @@ func main() {
 		}
 		if err := writeSupportPacketBehaviourFixture(*out); err != nil {
 			fmt.Fprintf(os.Stderr, "FAIL: support packet behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "plugin_requests" {
+		if err := writePluginRequestsBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: plugin requests behaviour fixture: %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -972,6 +978,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_url.json"))
+
+	if err := writePluginRequestsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: plugin requests behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_plugin_requests.json"))
 
 	if err := writeIntegrationActionBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: integration action behaviour fixture: %v\n", err)

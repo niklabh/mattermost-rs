@@ -984,6 +984,12 @@ impl Values {
         self.0.remove(key.as_bytes());
     }
 
+    /// Every key and its values, sorted by key — Go's `range` over the map, in the one order
+    /// `Encode` would put it in.
+    pub fn iter(&self) -> impl Iterator<Item = (&[u8], &[Vec<u8>])> {
+        self.0.iter().map(|(k, v)| (k.as_slice(), v.as_slice()))
+    }
+
     /// Port of `Values.Add` — appends.
     pub fn add(&mut self, key: &[u8], value: &[u8]) {
         self.0.entry(key.to_vec()).or_default().push(value.to_vec());

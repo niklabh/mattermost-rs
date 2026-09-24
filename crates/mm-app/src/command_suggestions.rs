@@ -6,8 +6,11 @@
 //!
 //! A **dynamic list** argument is fetched when the parser reaches it: a `builtin:` URL asks the
 //! provider (`/secure-connection remove`, `/share-channel invite` — both read remote clusters and
-//! permissions), any other URL is a plugin HTTP request. Neither is ported, so reaching one is
-//! [`NeedsGo`] and the handler forwards the whole request. So is the one input shape where Go
+//! permissions), any other URL is a plugin HTTP request. The parser stops there with
+//! [`Halt::Fetch`]; the caller fetches and parses again from the start with the answers so far
+//! ([`get_suggestions_with`], and `App::autocomplete_suggestions` for a plugin under the Rust
+//! host), so each fetch happens once and in Go's order. A provider is not ported and is
+//! [`NeedsGo`], which forwards the whole request. So is the one input shape where Go
 //! would slice a string at a byte offset that is not a character boundary: `strings.ToLower`
 //! can change a character's byte length (the Kelvin sign lowercases to ASCII `k`), and Go's
 //! `namedArg[len(in):]` then indexes by the *unlowered* length — a mismatch Go survives or panics
@@ -30,6 +33,38 @@ use mm_model::utils::go_to_lower;
 /// The parser reached something only Go can answer — see the module docs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NeedsGo;
+
+/// A dynamic list the parser reached, with what `getDynamicListArgument` sends for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynamicListFetch {
+    pub fetch_url: String,
+    pub parsed: String,
+    pub to_be_parsed: String,
+}
+
+/// Why a parse stopped short of an answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Halt {
+    NeedsGo,
+    /// The next dynamic list to fetch, in the order Go fetches them.
+    Fetch(DynamicListFetch),
+}
+
+impl From<NeedsGo> for Halt {
+    fn from(_: NeedsGo) -> Self {
+        Halt::NeedsGo
+    }
+}
+
+/// A fetched dynamic list: the items Go decoded (none when the answer was not a JSON list), or
+/// `None` when the request itself failed, which Go answers as "not found" without parsing.
+pub type Fetched = Option<Vec<AutocompleteListItem>>;
+
+/// The fetches made so far, and how many of them this parse has used.
+struct Cursor<'a> {
+    fetched: &'a [Fetched],
+    next: usize,
+}
 
 /// What each parse step hands to the next: `(found, alreadyParsed, yetToBeParsed, suggestions)`.
 ///
@@ -68,6 +103,16 @@ pub fn get_suggestions(
     user_input: &str,
     role_id: &str,
 ) -> Result<Vec<AutocompleteSuggestion>, NeedsGo> {
+    get_suggestions_with(commands, user_input, role_id, &[]).map_err(|_| NeedsGo)
+}
+
+/// [`get_suggestions`] with the dynamic lists fetched so far: [`Halt::Fetch`] names the next one.
+pub fn get_suggestions_with(
+    commands: &mut [Command],
+    user_input: &str,
+    role_id: &str,
+    fetched: &[Fetched],
+) -> Result<Vec<AutocompleteSuggestion>, Halt> {
     commands.sort_by_key(|command| go_to_lower(&command.trigger));
 
     let data: Vec<AutocompleteData> = commands
@@ -83,7 +128,8 @@ pub fn get_suggestions(
         })
         .collect();
 
-    let mut suggestions = suggestions_for(&data, "", user_input, role_id)?;
+    let mut cursor = Cursor { fetched, next: 0 };
+    let mut suggestions = suggestions_for(&data, "", user_input, role_id, &mut cursor)?;
     for suggestion in &mut suggestions {
         if let Some(command) = commands
             .iter()
@@ -103,7 +149,8 @@ fn suggestions_for(
     parsed: &str,
     to_be_parsed: &str,
     role_id: &str,
-) -> Result<Vec<AutocompleteSuggestion>, NeedsGo> {
+    cursor: &mut Cursor<'_>,
+) -> Result<Vec<AutocompleteSuggestion>, Halt> {
     let mut suggestions = Vec::new();
 
     let Some(index) = to_be_parsed.find(' ') else {
@@ -143,12 +190,17 @@ fn suggestions_for(
                 &now_parsed,
                 rest,
                 role_id,
+                cursor,
             )?);
             continue;
         }
 
-        let (found, _, _, found_suggestions) =
-            parse_arguments(command.arguments_slice(), now_parsed, rest.to_owned())?;
+        let (found, _, _, found_suggestions) = parse_arguments(
+            command.arguments_slice(),
+            now_parsed,
+            rest.to_owned(),
+            cursor,
+        )?;
         if found {
             suggestions.extend(found_suggestions);
         }
@@ -166,14 +218,15 @@ fn parse_arguments(
     args: &[AutocompleteArg],
     parsed: String,
     to_be_parsed: String,
-) -> Result<Parsed, NeedsGo> {
+    cursor: &mut Cursor<'_>,
+) -> Result<Parsed, Halt> {
     let Some((first, others)) = args.split_first() else {
         return Ok((false, parsed, to_be_parsed, Vec::new()));
     };
 
     if first.required {
         let (found, changed_parsed, changed_to_be_parsed, found_suggestions) =
-            parse_argument(first, parsed, to_be_parsed)?;
+            parse_argument(first, parsed, to_be_parsed, cursor)?;
         if found {
             return Ok((
                 true,
@@ -182,7 +235,7 @@ fn parse_arguments(
                 found_suggestions,
             ));
         }
-        return parse_arguments(others, changed_parsed, changed_to_be_parsed);
+        return parse_arguments(others, changed_parsed, changed_to_be_parsed, cursor);
     }
 
     let mut suggestions = Vec::new();
@@ -190,12 +243,12 @@ fn parse_arguments(
     // The optional argument as present. `parsed`/`to_be_parsed` are needed again below for the
     // absent branch, so this branch takes copies.
     let (mut found_with, mut parsed_with, mut to_be_parsed_with, with_suggestions) =
-        parse_argument(first, parsed.clone(), to_be_parsed.clone())?;
+        parse_argument(first, parsed.clone(), to_be_parsed.clone(), cursor)?;
     if found_with {
         suggestions.extend(with_suggestions);
     } else {
         let (found_rest, parsed_rest, to_be_parsed_rest, rest_suggestions) =
-            parse_arguments(others, parsed_with, to_be_parsed_with)?;
+            parse_arguments(others, parsed_with, to_be_parsed_with, cursor)?;
         if found_rest {
             suggestions.extend(rest_suggestions);
         }
@@ -206,7 +259,7 @@ fn parse_arguments(
 
     // The optional argument as absent — copies again, for the comparisons after it.
     let (found_without, parsed_without, to_be_parsed_without, without_suggestions) =
-        parse_arguments(others, parsed.clone(), to_be_parsed.clone())?;
+        parse_arguments(others, parsed.clone(), to_be_parsed.clone(), cursor)?;
     if found_without {
         suggestions.extend(without_suggestions);
     }
@@ -237,7 +290,8 @@ fn parse_argument(
     arg: &AutocompleteArg,
     mut parsed: String,
     mut to_be_parsed: String,
-) -> Result<Parsed, NeedsGo> {
+    cursor: &mut Cursor<'_>,
+) -> Result<Parsed, Halt> {
     if !arg.name.is_empty() {
         let (found, changed_parsed, changed_to_be_parsed, named) =
             parse_named_argument(arg, &parsed, &to_be_parsed)?;
@@ -287,8 +341,28 @@ fn parse_argument(
             parsed = changed_parsed;
             to_be_parsed = changed_to_be_parsed;
         }
-        // `getDynamicListArgument` — a provider or a plugin answers. Not ported.
-        AutocompleteArgData::DynamicList(_) => return Err(NeedsGo),
+        // `getDynamicListArgument`: the caller fetches, and the parse starts again.
+        AutocompleteArgData::DynamicList(data) => {
+            let index = cursor.next;
+            cursor.next += 1;
+            let Some(fetched) = cursor.fetched.get(index) else {
+                return Err(Halt::Fetch(DynamicListFetch {
+                    fetch_url: data.fetch_url.clone(),
+                    parsed,
+                    to_be_parsed,
+                }));
+            };
+            let (found, changed_parsed, changed_to_be_parsed, list) = match fetched {
+                // "Can't fetch dynamic list arguments": not found, nothing consumed.
+                None => (false, parsed, to_be_parsed, Vec::new()),
+                Some(items) => parse_list_items(items, &parsed, &to_be_parsed)?,
+            };
+            if found {
+                return Ok((true, changed_parsed, changed_to_be_parsed, list));
+            }
+            parsed = changed_parsed;
+            to_be_parsed = changed_to_be_parsed;
+        }
         AutocompleteArgData::None => {}
     }
 
@@ -410,8 +484,8 @@ fn parse_input_text_argument(
     )
 }
 
-/// Port of `parseListItems` (command_autocomplete.go:290) — reached here only through a static
-/// list, which no built-in command declares.
+/// Port of `parseListItems` (command_autocomplete.go:290) — a static list, which no built-in
+/// command declares, or a dynamic list a plugin answered.
 fn parse_list_items(
     items: &[AutocompleteListItem],
     parsed: &str,
@@ -458,6 +532,124 @@ fn parse_list_items(
         String::new(),
         suggestions,
     ))
+}
+
+/// What `getDynamicListArgument` sends a plugin besides the input: the API request's
+/// `pluginContext` and the `CommandArgs` the handler built from the query and the session.
+pub struct SuggestionRequest<'a> {
+    pub session: &'a mm_model::session::Session,
+    /// The API request's plugin context (its request id, session, address and browser headers).
+    pub context: &'a crate::plugin_hooks::HookContext,
+    pub channel_id: &'a str,
+    pub team_id: &'a str,
+    pub root_id: &'a str,
+}
+
+/// The fields of `model.AutocompleteListItem`, for Go's case-insensitive key matching.
+const LIST_ITEM_FIELDS: mm_model::go_json::GoFields = mm_model::go_json::GoFields {
+    names: &["Item", "Hint", "HelpText"],
+    nested: &[],
+};
+
+/// `json.NewDecoder(resp.Body).Decode(&listItems)`: the **first** JSON value in the body (what
+/// follows it is never read). A value that is not a list decodes to none; each element that is
+/// not an object is a zero item, and a field that is not a string stays empty — Go records the
+/// type error and carries on filling the rest.
+pub fn decode_list_items(body: &[u8]) -> Vec<AutocompleteListItem> {
+    let first = serde_json::Deserializer::from_slice(body)
+        .into_iter::<serde_json::Value>()
+        .next();
+    let Some(Ok(serde_json::Value::Array(elements))) = first else {
+        return Vec::new();
+    };
+    elements
+        .into_iter()
+        .map(|mut element| {
+            mm_model::go_json::remap_object_keys(&mut element, &LIST_ITEM_FIELDS);
+            let field = |name: &str| {
+                element
+                    .get(name)
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            AutocompleteListItem {
+                item: field("Item"),
+                hint: field("Hint"),
+                help_text: field("HelpText"),
+            }
+        })
+        .collect()
+}
+
+impl crate::App {
+    /// [`get_suggestions`] under the Rust plugin host: each dynamic list a plugin serves is
+    /// fetched as the parser reaches it (`getDynamicListArgument`, command_autocomplete.go:242),
+    /// through the plugin's `ServeHTTP`. A `builtin:` provider is still [`NeedsGo`].
+    pub async fn autocomplete_suggestions(
+        &self,
+        commands: &mut [Command],
+        user_input: &str,
+        role_id: &str,
+        request: &SuggestionRequest<'_>,
+    ) -> Result<Vec<AutocompleteSuggestion>, NeedsGo> {
+        let mut fetched: Vec<Fetched> = Vec::new();
+        loop {
+            match get_suggestions_with(commands, user_input, role_id, &fetched) {
+                Ok(suggestions) => return Ok(suggestions),
+                Err(Halt::NeedsGo) => return Err(NeedsGo),
+                Err(Halt::Fetch(fetch)) => {
+                    if fetch.fetch_url.starts_with("builtin:") {
+                        return Err(NeedsGo);
+                    }
+                    fetched.push(self.get_dynamic_list_argument(&fetch, request).await);
+                }
+            }
+        }
+    }
+
+    /// The plugin half of `getDynamicListArgument`: the parameters, `doPluginRequest`, and the
+    /// body decoded whatever the status. A request that could not be made is `None`.
+    async fn get_dynamic_list_argument(
+        &self,
+        fetch: &DynamicListFetch,
+        request: &SuggestionRequest<'_>,
+    ) -> Fetched {
+        let mut params = mm_model::go_url::Values::new();
+        let user_input = format!("{}{}", fetch.parsed, fetch.to_be_parsed);
+        let site_url = self.config().site_url.clone().unwrap_or_default();
+        let context = request.context;
+        let pairs: [(&str, &str); 11] = [
+            ("user_input", &user_input),
+            ("parsed", &fetch.parsed),
+            ("request_id", &context.request_id),
+            ("session_id", &context.session_id),
+            ("ip_address", &context.ip_address),
+            ("accept_language", &context.accept_language),
+            ("user_agent", &context.user_agent),
+            ("channel_id", request.channel_id),
+            ("team_id", request.team_id),
+            ("root_id", request.root_id),
+            ("user_id", &request.session.user_id),
+        ];
+        for (key, value) in pairs {
+            params.add(key.as_bytes(), value.as_bytes());
+        }
+        // "Use configured SiteURL to prevent SSRF via Host header spoofing (MM-67142)".
+        if !site_url.is_empty() {
+            params.add(b"site_url", site_url.as_bytes());
+        }
+        match self
+            .do_plugin_request(request.session, "GET", &fetch.fetch_url, params, Vec::new())
+            .await
+        {
+            Ok((_, _, body)) => Some(decode_list_items(&body)),
+            Err(err) => {
+                tracing::error!(url = %fetch.fetch_url, error = %err, "Can't fetch dynamic list arguments for");
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -576,6 +768,77 @@ mod tests {
             get_suggestions(&mut commands, "tool --\u{212A}in", SYSTEM_USER_ROLE_ID),
             Err(NeedsGo)
         );
+    }
+
+    /// A dynamic list halts the parse with what Go would send, and a parse given the answers
+    /// goes on: a failed request is "not found" and consumes nothing, a list is a static one.
+    #[test]
+    fn a_dynamic_list_is_fetched_once_and_parsed_as_a_list() {
+        let mut root = AutocompleteData::new("tool", "", "");
+        root.add_dynamic_list_argument("which", "plugins/p/fetch", true);
+        root.add_text_argument("then", "[then]", "");
+        let mut commands = vec![command("tool", Some(root))];
+        assert_eq!(
+            get_suggestions_with(&mut commands, "tool ab", SYSTEM_USER_ROLE_ID, &[]),
+            Err(Halt::Fetch(DynamicListFetch {
+                fetch_url: "plugins/p/fetch".into(),
+                parsed: "tool ".into(),
+                to_be_parsed: "ab".into(),
+            }))
+        );
+        assert_eq!(
+            get_suggestions(&mut commands, "tool ab", SYSTEM_USER_ROLE_ID),
+            Err(NeedsGo),
+            "without the fetch, Go's"
+        );
+        let got =
+            get_suggestions_with(&mut commands, "tool ab", SYSTEM_USER_ROLE_ID, &[None]).unwrap();
+        assert_eq!(
+            completes(&got),
+            ["tool ab"],
+            "a failed fetch consumes nothing, and the next argument takes the input"
+        );
+        let items = vec![
+            AutocompleteListItem {
+                item: "abc".into(),
+                ..Default::default()
+            },
+            AutocompleteListItem {
+                item: "xyz".into(),
+                ..Default::default()
+            },
+        ];
+        let got = get_suggestions_with(
+            &mut commands,
+            "tool ab",
+            SYSTEM_USER_ROLE_ID,
+            &[Some(items)],
+        )
+        .unwrap();
+        assert_eq!(completes(&got), ["tool abc"]);
+    }
+
+    /// Go's `json.Decoder`: the first value only, folded keys, non-strings left empty, and a
+    /// non-object element a zero item; anything but a list is none.
+    #[test]
+    fn a_plugins_list_decodes_as_go_decodes_it() {
+        let items = decode_list_items(
+            br#" [{"item":"a","HINT":"h","HelpText":5},null,7,{"Item":"b","Other":1}] trailing"#,
+        );
+        let item = |i: &str, h: &str| AutocompleteListItem {
+            item: i.into(),
+            hint: h.into(),
+            help_text: String::new(),
+        };
+        assert_eq!(
+            items,
+            [item("a", "h"), item("", ""), item("", ""), item("b", "")]
+        );
+        assert!(decode_list_items(b"404 page not found\n").is_empty());
+        assert!(decode_list_items(br#"{"Item":"a"}"#).is_empty());
+        assert!(decode_list_items(b"null").is_empty());
+        assert!(decode_list_items(b"[1,").is_empty());
+        assert!(decode_list_items(b"").is_empty());
     }
 
     /// A static list: partial input suggests matching items; a finished item is consumed.

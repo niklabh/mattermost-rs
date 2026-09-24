@@ -75,6 +75,7 @@ pub mod oauth;
 pub mod outgoing_oauth_writes;
 pub mod permissions;
 pub mod plugin_context;
+pub mod plugin_requests;
 pub mod post_acks;
 pub mod post_search;
 pub mod post_writes;
