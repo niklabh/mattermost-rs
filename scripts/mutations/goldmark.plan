@@ -1,0 +1,59 @@
+# gogoldmark mutations: MUTATE_PACKAGE=gogoldmark MMRS_STACK_LOCKED=1 scripts/mutate-batch.sh scripts/mutations/goldmark.plan
+# (suite pkg touches no stack, so the stack lock is not needed).
+# Control no-ops first: if either fails, the harness is noisy and nothing below means anything.
+control-type-annotation	crates/gogoldmark/src/parser/inline.rs	    let mut run = 0;	    let mut run: usize = 0;	pkg
+control-field-order	crates/gogoldmark/src/parser/mod.rs	            block_offset: -1,\n            block_indent: -1,	            block_indent: -1,\n            block_offset: -1,	pkg
+# Delimiter runs: flanking, the underscore rules, the rule of three, consumption.
+flank-left-before-punct	crates/gogoldmark/src/parser/inline.rs	(!after_is_punctuation || before_is_whitespace || before_is_punctuation)	(!after_is_punctuation || before_is_whitespace)	pkg
+flank-right-after-punct	crates/gogoldmark/src/parser/inline.rs	(!before_is_punctuation || after_is_whitespace || after_is_punctuation)	(!before_is_punctuation || after_is_whitespace)	pkg
+underscore-open	crates/gogoldmark/src/parser/inline.rs	is_left && (!is_right || before_is_punctuation),	is_left && !is_right,	pkg
+underscore-close	crates/gogoldmark/src/parser/inline.rs	is_right && (!is_left || after_is_punctuation),	is_right,	pkg
+rule-of-three-closer-mod	crates/gogoldmark/src/parser/inline.rs	        && closer.original_length % 3 != 0\n	\n	pkg
+consume-two-needs-both	crates/gogoldmark/src/parser/inline.rs	if d.length >= 2 && closer.length >= 2 {	if d.length >= 2 || closer.length >= 2 {	pkg
+strike-after-tilde	crates/gogoldmark/src/parser/inline.rs	(d.original_length > 2 || before == '~')	(d.original_length > 2)	pkg
+typed-nil-link-bottom	crates/gogoldmark/src/parser/inline.rs	LinkBottom::One(x) => Bottom::Node(x),	LinkBottom::One(x) => x.map_or(Bottom::Nil, |v| Bottom::Node(Some(v))),	pkg
+# Link destination and title.
+dest-paren-balance	crates/gogoldmark/src/parser/inline.rs	            opened -= 1;\n            if opened < 0 {	            opened -= 1;\n            if opened < 1 {	pkg
+dest-angle-keeps-lt	crates/gogoldmark/src/parser/inline.rs	return Some(line[1..i].to_vec());	return Some(line[0..i].to_vec());	pkg
+dest-escape-width	crates/gogoldmark/src/parser/inline.rs	            i += 2;\n            continue;\n        } else if c == b'(' {	            i += 1;\n            continue;\n        } else if c == b'(' {	pkg
+title-paren-closer	crates/gogoldmark/src/parser/inline.rs	    let closer = if opener == b'(' { b')' } else { opener };\n    block.advance(1);\n    let segments: Segments	    let closer = opener;\n    block.advance(1);\n    let segments: Segments	pkg
+refdef-title-needs-space	crates/gogoldmark/src/parser/mod.rs	    if spaces == 0 {\n        return None;	    if spaces == 0 && false {\n        return None;	pkg
+# List tightness and blank-line bookkeeping.
+tight-item-blank	crates/gogoldmark/src/parser/mod.rs	if Some(cn) != first && ast.has_blank_previous_lines(cn) {	if ast.has_blank_previous_lines(cn) {	pkg
+tight-child-blank	crates/gogoldmark/src/parser/mod.rs	                if ast.has_blank_previous_lines(x) {	                if ast.has_blank_previous_lines(x) && false {	pkg
+blank-line-level	crates/gogoldmark/src/parser/mod.rs	if s.line_num == line_num && s.level <= level {	if s.line_num == line_num && s.level < level {	pkg
+empty-item-blank-close	crates/gogoldmark/src/parser/mod.rs	    if pc.empty_list_item_with_blank_lines {\n        return STATE_CLOSE;	    if pc.empty_list_item_with_blank_lines && false {\n        return STATE_CLOSE;	pkg
+setext-alias-snapshot	crates/gogoldmark/src/parser/mod.rs	                        if seen != last_node {\n                            last_index -= 1;	                        if seen != last_node {\n                            last_index -= 0;	pkg
+child-count-drift	crates/gogoldmark/src/ast.rs	        let Some(c) = v1 else {\n            self.append_child(parent, insertee);	        let Some(c) = v1 else {\n            self.node_mut(parent).child_count -= 1;\n            self.append_child(parent, insertee);	pkg
+# Setext and ATX headings.
+setext-indent	crates/gogoldmark/src/parser/mod.rs	    if space > 3 {	    if space > 4 {	pkg
+setext-level	crates/gogoldmark/src/parser/mod.rs	let level = if c == b'-' { 2 } else { 1 };	let level = if c == b'-' { 1 } else { 2 };	pkg
+setext-dash-run-whole-line	crates/gogoldmark/src/parser/mod.rs	|| (level2 > 0 && start + level2 == end)) {	|| (level2 > 0)) {	pkg
+atx-level-cap	crates/gogoldmark/src/parser/mod.rs	if i == pos || level > 6 {	if i == pos || level > 7 {	pkg
+atx-needs-space	crates/gogoldmark/src/parser/mod.rs	    let l = util::trim_left_space_length(&line[i..]);\n    if l == 0 {	    let l = util::trim_left_space_length(&line[i..]);\n    if l == 0 && false {	pkg
+atx-closing-needs-space	crates/gogoldmark/src/parser/mod.rs	if i != stop - 1 && util::is_space(hv[i]) {	if util::is_space(hv[i]) {	pkg
+atx-all-hashes	crates/gogoldmark/src/parser/mod.rs	if i == 0 && hv[0] == b'#' {	if i == 0 {	pkg
+# Linkify boundaries.
+linkify-trailing-dot	crates/gogoldmark/src/parser/inline.rs	        if last_char == b'.' {\n            *end -= 1;	        if last_char == b'.' {\n            *end -= 0;	pkg
+linkify-paren-balance	crates/gogoldmark/src/parser/inline.rs	if closing > 0 {	if closing > 1 {	pkg
+linkify-entity-semicolon	crates/gogoldmark/src/parser/inline.rs	line[i as usize] == b'&' {	line[i as usize] == b'#' {	pkg
+linkify-trailing-tilde	crates/gogoldmark/src/parser/inline.rs	b':' | b'*' | b'_' | b'~' => i -= 1,	b':' | b'*' | b'_' => i -= 1,	pkg
+linkify-domain-cap	crates/gogoldmark/src/parser/inline.rs	let max_k = run.min(256);	let max_k = run.min(255);	pkg
+linkify-port-digit	crates/gogoldmark/src/parser/inline.rs	&& line[end] == b':' && line[end + 1].is_ascii_digit() {	&& line[end] == b':' {	pkg
+linkify-email-next-underscore	crates/gogoldmark/src/parser/inline.rs	if next_char == b'-' || next_char == b'_' {	if next_char == b'-' {	pkg
+linkify-in-label	crates/gogoldmark/src/parser/inline.rs	    if pc.link_label_state.is_some() {\n        return None;	    if pc.link_label_state.is_some() && false {\n        return None;	pkg
+# Tables.
+table-align-left	crates/gogoldmark/src/parser/table.rs	(true, false) => Alignment::Left,	(true, false) => Alignment::Right,	pkg
+table-align-center	crates/gogoldmark/src/parser/table.rs	(true, true) => Alignment::Center,	(true, true) => Alignment::None,	pkg
+table-vtab-not-re-space	crates/gogoldmark/src/parser/table.rs	matches!(c, b'\\t' | b'\\n' | b'\\x0c' | b'\\r' | b' ')	matches!(c, b'\\t' | b'\\n' | b'\\x0b' | b'\\x0c' | b'\\r' | b' ')	pkg
+table-header-count	crates/gogoldmark/src/parser/table.rs	if alignments.len() as isize != ast.child_count(header) {	if alignments.len() as isize > ast.child_count(header) {	pkg
+table-escaped-pipe	crates/gogoldmark/src/parser/table.rs	if closure == 0 || line[closure - 1] != b'\\\\' {	if closure == 0 || line[closure - 1] != b'|' {	pkg
+table-style-text	crates/gogoldmark/src/html.rs	style.extend_from_slice(b"text-align:");	style.extend_from_slice(b"text-align: ");	pkg
+# HTML, code spans, references, the writer.
+html7-no-interrupt	crates/gogoldmark/src/parser/html.rs	            && !last.is_some_and(|l| ast.kind(l) == NodeKind::Paragraph)\n	\n	pkg
+html1-long-s-fold	crates/gogoldmark/src/parser/html.rs	} else if ch == b's' && c == 0xC5	} else if ch == b'x' && c == 0xC5	pkg
+codespan-newline-trim	crates/gogoldmark/src/parser/inline.rs	    c == b' ' || c == b'\\n'	    c == b' '	pkg
+url-escape-hex-check	crates/gogoldmark/src/util.rs	is_hex_decimal(v[i + 1]) && is_hex_decimal(v[i + 1]) {	is_hex_decimal(v[i + 1]) && is_hex_decimal(v[i + 2]) {	pkg
+numeric-ref-octal	crates/gogoldmark/src/util.rs	            (&s[1..], 8)	            (&s[1..], 10)	pkg
+writer-hex-cap	crates/gogoldmark/src/html.rs	source[j] == b';' && j - start < 7 {	source[j] == b';' && j - start < 8 {	pkg
+tab-width	crates/gogoldmark/src/util.rs	    4 - current_pos % 4	    4 - current_pos % 8	pkg

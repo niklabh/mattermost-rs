@@ -74,7 +74,7 @@ fn go_expand(template: &str, groups: &[&str]) -> String {
                 !(mm_model::utils::is_go_letter(c) || mm_model::utils::is_go_digit(c) || c == '_')
             })
             .map_or(body.len(), |(i, _)| i);
-        if name_len == 0 || (brace && body[name_len..].chars().next() != Some('}')) {
+        if name_len == 0 || (brace && !body[name_len..].starts_with('}')) {
             out.push('$');
             continue;
         }
