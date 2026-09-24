@@ -424,7 +424,7 @@ async fn serve_login(
 /// fresh clock read, so it is a second or two later than the session's own `ExpiresAt`.
 ///
 /// The cloud cookie (`a.License().IsCloud()`) is unreachable: a cloud licence is forwarded.
-fn session_cookies(
+pub(crate) fn session_cookies(
     state: &AppState,
     headers: &HeaderMap,
     session: &mm_model::session::Session,

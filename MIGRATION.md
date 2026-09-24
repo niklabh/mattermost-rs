@@ -9241,8 +9241,8 @@ first. The same request — another user's id, `not json` — is a 403 on one an
 
 ### Three things this port does not do on these routes
 
-* **`ExtendSessionExpiryIfNeeded`** ([D-214]). Off on every persisted configuration document, so
-  both servers do nothing here today; it is a `Set-Cookie` when it is on.
+* **`ExtendSessionExpiryIfNeeded`** — ported 2026-09-24 ([D-214], closed); see *Sliding session
+  expiry* below.
 * **`clearPushNotification`** ([D-215]). There is no hub. The channel list it would consume is
   computed in full anyway, because its notify-prop fall-through is three branches deep and would
   be invisible until there *is* a hub.
@@ -14756,3 +14756,11 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `ServiceSettings.TrustedProxyIPHeader`, `utils.GetIPAddress` (utils.go:94), its `web.Handler.ServeHTTP` call | `mm_app::config`, `mm_api::client_ip` (a middleware on both routers), `plugin_context` | DONE, closes [D-930] | `go_parity` (70 rows, `behaviour_ip_address.json`) + 3 unit + 2 config; `parity::plugin_hooks` walks two trusted headers | The address is returned as written, not re-formatted; the plugin hook context is the only reader this server has (audit rows, session attributes and rate limiting are unported). |
 | `config.GetEnvironment`, `applyEnvKey` (config/environment.go:16, :28) — the whole overlay, audited | `mm_app::config` (`split_env_list`, `process_lookup`, `decode_env_plugin_states`) | DONE, closes [D-1141]; opens [D-1160] | `env_go_parity` (60 rows, `behaviour_env_override.json`, Go's own `Store.Load`) + 8 unit | Slices split on single spaces (`""` is `[""]`), names match case-insensitively and a leaf ignores leftover key parts, and `PluginStates` from the environment replaces the map whole with `encoding/json`'s fold and last-key-wins rules; bools and ints already matched. |
 | `model.FeatureFlags` in `Config` (config.go:4226, `SetDefaults`, the `MM_FEATUREFLAGS_*` overlay), `ExportLinkProvider.GetCommand` (command_exportlink.go:35), `GeneratePresignURLForExport`'s gates, `validateCommandTriggerUniqueness` via the providers | `mm_app::config` (`feature_flags`), `command_provider`, `command`, `filestore::generates_links`, `export` | DONE, closes [D-260]; opens [D-1161] | `config_feature_flags.json` (Go's running flags, from `dump-config-fixture.sh`), `behaviour_export_link.json` go_parity, 7 unit | The flags are read from the document when a row has the section (a partial one zeroes the rest, as in Go) and the row on this stack has none. `/exportlink` asks the export backend built at boot, as Go does; the flag is settable only by environment at Go's start, so there is no two-server parity test of the reserved branch. |
+
+## Sliding session expiry (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `Context.ExtendSessionExpiryIfNeeded`, `App.ExtendSessionExpiryIfNeeded`, `GetSessionLengthInMillis`, `platform.ExtendSessionExpiry`, `AttachSessionCookies` + `AttachCloudSessionCookie` | `mm_app::session::{session_extension_due, session_length_in_millis, extension_threshold}`, `mm_api::session_expiry` | DONE | 22 unit + cloud-cookie oracle; `parity::session_expiry` (3) | On `viewChannel`, `createPost` and `user_typing` (no cookies); a bot's expiring token session is never due, a never-expiring session always is. No session cache to update here (D-087). |
+| `Context.SessionRequired` (web/context.go:138) | `mm_api::auth::session_required` | DONE | 5 unit + `parity::session_expiry::a_humans_token_session_is_refused_while_tokens_are_off` | Was missing: a non-bot token session with `EnableUserAccessTokens` off got a 200 here and a 401 from Go. |
+| `net/http` `Cookie.String` domain and value rules | `mm_api::sessions::{valid_cookie_domain, cookie_value}` | DONE | `behaviour_session_write.json` (+28 rows) | An invalid `Domain` (an IPv6 SiteURL's hostname) is dropped, a leading dot stripped, a value with a space or comma quoted. |
