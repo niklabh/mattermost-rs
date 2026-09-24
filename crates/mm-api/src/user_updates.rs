@@ -285,6 +285,7 @@ pub async fn update_user(
     }
     tracing::Span::current().record("user_id", &user_id);
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request, "user").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -368,7 +369,11 @@ pub async fn update_user(
     }
 
     match state.app.update_user_as_user(&user).await {
-        Ok(ruser) => user_response("updateUser", &ruser),
+        Ok(ruser) => {
+            // `c.LogAudit("")`, on success only.
+            audit.log(&state.app, Some(&session.0), "").await;
+            user_response("updateUser", &ruser)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -417,6 +422,7 @@ pub async fn patch_user(
     }
     tracing::Span::current().record("user_id", &user_id);
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request, "user").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -527,6 +533,8 @@ pub async fn patch_user(
         tracing::error!(error = %err, "the auto-responder transition was not applied");
     }
 
+    // `c.LogAudit("")`, on success only.
+    audit.log(&state.app, Some(&session.0), "").await;
     user_response("patchUser", &ruser)
 }
 
@@ -573,6 +581,7 @@ pub async fn update_user_active(
     }
     tracing::Span::current().record("user_id", &user_id);
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request, "active").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -699,6 +708,15 @@ pub async fn update_user_active(
         }
     }
 
+    // `c.LogAudit(fmt.Sprintf("user_id=%s active=%v", user.Id, active))`, before the e-mail.
+    audit
+        .log(
+            &state.app,
+            Some(&session.0),
+            &format!("user_id={} active={active}", user.id),
+        )
+        .await;
+
     // `SendDeactivateAccountEmail` in a `Srv().Go` goroutine, to the address the account had
     // before the write; a failure is `LogErrorByCode` and nothing else.
     if is_self_deactivate {
@@ -772,6 +790,7 @@ pub async fn update_user_roles(
     }
     tracing::Span::current().record("user_id", &user_id);
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     // The parts are kept by `split_body` for a forward this route no longer makes.
     let (_request, bytes) = match split_body(request, "roles").await {
         Ok(pair) => pair,
@@ -826,7 +845,17 @@ pub async fn update_user_roles(
         .update_user_roles(&user_id, &new_roles, true)
         .await
     {
-        Ok(_) => status_ok(),
+        Ok(_) => {
+            // `c.LogAudit(fmt.Sprintf("user=%s roles=%s", c.Params.UserId, newRoles))`.
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("user={user_id} roles={new_roles}"),
+                )
+                .await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }

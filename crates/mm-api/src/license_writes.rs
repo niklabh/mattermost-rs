@@ -251,35 +251,44 @@ fn encoded_license(license: &License) -> Response {
 pub async fn add_license(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     tracing::Span::current().record("forwarded", false);
-    if let Err(err) = require_manage_license_information(&state, &session.0).await {
-        return err.into_response();
-    }
-    let (parts, bytes) = match read_body(request).await {
-        Ok(read) => read,
-        Err(err) => return err.into_response(),
-    };
-    let signed = match parse_license_file_from_request(&parts, &bytes) {
-        Ok(signed) => signed,
-        Err(err) => return err.into_response(),
-    };
-    let license = match state.app.license_from_bytes(&signed) {
-        Ok(license) => license,
-        Err(err) => {
-            return ApiError::from(license_validation_app_error("LicenseFromBytes", &err))
-                .into_response();
+    match serve_add_license(&state, &session, request).await {
+        Ok((parts, bytes)) => {
+            // Go writes its own `"attempt"` and whatever `SaveLicense` earns.
+            tracing::Span::current().record("forwarded", true);
+            proxy::forward_to_go(State(state), Request::from_parts(parts, Body::from(bytes))).await
         }
-    };
+        Err(err) => {
+            // `c.LogAudit("attempt")` is `addLicense`'s first statement, so every refusal served
+            // here carries it — and only it: the `"failed - …"` rows follow `SaveLicense`.
+            audit.log(&state.app, Some(&session.0), "attempt").await;
+            err.into_response()
+        }
+    }
+}
+
+/// Everything `addLicense` does before `SaveLicense`: the request to forward, or the refusal.
+async fn serve_add_license(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    request: Request,
+) -> Result<(axum::http::request::Parts, axum::body::Bytes), ApiError> {
+    require_manage_license_information(state, &session.0).await?;
+    let (parts, bytes) = read_body(request).await?;
+    let signed = parse_license_file_from_request(&parts, &bytes)?;
+    let license = state
+        .app
+        .license_from_bytes(&signed)
+        .map_err(|err| ApiError::from(license_validation_app_error("LicenseFromBytes", &err)))?;
 
     if !license.is_sanctioned_trial() && license.is_trial_license() {
         // `c.App.Srv().Platform().LicenseManager()` is nil without the enterprise build.
-        return upgrade_needed_error("addLicense", 500).into_response();
+        return Err(upgrade_needed_error("addLicense", 500));
     }
-
-    tracing::Span::current().record("forwarded", true);
-    proxy::forward_to_go(State(state), Request::from_parts(parts, Body::from(bytes))).await
+    Ok((parts, bytes))
 }
 
 /// Port of `previewLicense` (license.go:181): the parsed licence, encoded, saved nowhere.
@@ -315,10 +324,21 @@ pub async fn preview_license(
 /// return nil }` is `ReturnStatusOK` with nothing written; a licence in force is forwarded so
 /// the Go process drops its own copy. Shared by both routers; the socket's forward goes over
 /// the socket because the request carries [`GoLocalSocket`].
-async fn serve_remove_license(state: AppState, request: Request) -> Response {
+///
+/// `audit_session` is the session `"attempt"` and `"success"` are written under — the caller's,
+/// or none on the socket. Both rows are written only when this answers; a forward leaves them to
+/// Go.
+async fn serve_remove_license(
+    state: AppState,
+    request: Request,
+    audit_session: Option<&Session>,
+) -> Response {
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     match state.app.license().await {
         Ok(None) => {
             tracing::Span::current().record("forwarded", false);
+            audit.log(&state.app, audit_session, "attempt").await;
+            audit.log(&state.app, audit_session, "success").await;
             status_ok()
         }
         Ok(Some(_)) => {
@@ -327,6 +347,7 @@ async fn serve_remove_license(state: AppState, request: Request) -> Response {
         }
         Err(err) => {
             tracing::Span::current().record("forwarded", false);
+            audit.log(&state.app, audit_session, "attempt").await;
             ApiError::from(err).into_response()
         }
     }
@@ -341,9 +362,12 @@ pub async fn remove_license(
 ) -> Response {
     if let Err(err) = require_manage_license_information(&state, &session.0).await {
         tracing::Span::current().record("forwarded", false);
+        crate::audit_log::AuditRequest::of_request(&request)
+            .log(&state.app, Some(&session.0), "attempt")
+            .await;
         return err.into_response();
     }
-    serve_remove_license(state, request).await
+    serve_remove_license(state, request, Some(&session.0)).await
 }
 
 /// Port of `requestTrialLicense` (license.go:218) on a build with no licence manager: the
@@ -355,7 +379,10 @@ pub async fn remove_license(
 pub async fn request_trial_license(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
+    // `c.LogAudit("attempt")` first; neither answer here reaches `"success"`.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
     if let Err(err) = require_manage_license_information(&state, &session.0).await {
         return err.into_response();
     }
@@ -395,20 +422,32 @@ fn plain_text_400(message: &str) -> Response {
 async fn local_add_license(
     State(state): State<AppState>,
     Extension(go): Extension<GoLocalSocket>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     tracing::Span::current().record("forwarded", false);
+    // `c.LogAudit("attempt")` is the first statement, before the form is parsed; it is written
+    // here on every answer served, and left to Go on every forward.
+    let attempt = || audit.log(&state.app, None, "attempt");
     let (parts, bytes) = match read_body(request).await {
         Ok(read) => read,
-        Err(err) => return err.into_response(),
+        Err(err) => {
+            attempt().await;
+            return err.into_response();
+        }
     };
     let signed = match license_part(&parts, &bytes) {
         Ok(signed) => signed,
-        Err(PartFailure::NoFile) => return no_file_error("addLicense").into_response(),
+        Err(PartFailure::NoFile) => {
+            attempt().await;
+            return no_file_error("addLicense").into_response();
+        }
         Err(PartFailure::Unparseable(MultipartError::NotMultipart)) => {
+            attempt().await;
             return plain_text_400(ERR_NOT_MULTIPART);
         }
         Err(PartFailure::Unparseable(MultipartError::MissingBoundary)) => {
+            attempt().await;
             return plain_text_400(ERR_MISSING_BOUNDARY);
         }
         Err(PartFailure::Unparseable(err)) => {
@@ -420,7 +459,12 @@ async fn local_add_license(
     if let Err(err) = state.app.validate_license_bytes(&signed) {
         // `SaveLicense`'s first line; a `Json` variant cannot come from the validator alone.
         let err: LicenseValidationError = err;
-        return ApiError::from(license_validation_app_error("addLicense", &err)).into_response();
+        let refusal = license_validation_app_error("addLicense", &err);
+        attempt().await;
+        audit
+            .log(&state.app, None, save_license_failure(&refusal.id))
+            .await;
+        return ApiError::from(refusal).into_response();
     }
     tracing::Span::current().record("forwarded", true);
     forward_over_unix(&go.0, Request::from_parts(parts, Body::from(bytes))).await
@@ -430,12 +474,44 @@ async fn local_add_license(
 /// permission in front of it.
 #[tracing::instrument(skip_all, fields(forwarded))]
 async fn local_remove_license(State(state): State<AppState>, request: Request) -> Response {
-    serve_remove_license(state, request).await
+    serve_remove_license(state, request, None).await
+}
+
+/// The row `addLicense` and `localAddLicense` write when `SaveLicense` fails, chosen by the
+/// error's id (license.go:141, license_local.go:70).
+fn save_license_failure(id: &str) -> &'static str {
+    match id {
+        mm_model::license::EXPIRED_LICENSE_ERROR => "failed - expired or non-started license",
+        mm_model::license::INVALID_LICENSE_ERROR => "failed - invalid license",
+        _ => "failed - unable to save license",
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `SaveLicense`'s refusal picks the row by id: the expired id, the invalid id, and anything
+    /// else — the two wrong-environment ids the validator produces among them — as "unable to save".
+    #[test]
+    fn a_save_failure_is_audited_by_its_id() {
+        assert_eq!(
+            save_license_failure(mm_model::license::EXPIRED_LICENSE_ERROR),
+            "failed - expired or non-started license"
+        );
+        assert_eq!(
+            save_license_failure(mm_model::license::INVALID_LICENSE_ERROR),
+            "failed - invalid license"
+        );
+        assert_eq!(
+            save_license_failure(mm_model::license::WRONG_ENVIRONMENT_TEST_LICENSE_ERROR),
+            "failed - unable to save license"
+        );
+        assert_eq!(
+            save_license_failure("api.unmarshal_error"),
+            "failed - unable to save license"
+        );
+    }
 
     fn parts_with(content_type: Option<&str>) -> axum::http::request::Parts {
         let mut builder = axum::http::Request::builder()

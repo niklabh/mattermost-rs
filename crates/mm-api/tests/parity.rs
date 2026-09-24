@@ -274,6 +274,7 @@ mod parity {
     pub mod postrest;
     // Appended 2026-09-15: the searchmisc family.
     pub mod agents;
+    pub mod audit_rows;
     pub mod file_search;
     // Appended 2026-09-16: the configuration projection follows a write (D-701).
     pub mod config_reload;

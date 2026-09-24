@@ -7,6 +7,7 @@
 
 pub mod access_control;
 pub mod access_control_policies;
+pub mod audit_log;
 pub mod audits;
 pub mod auth;
 pub mod auth_writes;

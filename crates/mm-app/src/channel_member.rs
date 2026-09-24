@@ -34,10 +34,10 @@
 //!
 //! Every branch that needs machinery this server does not have is refused as
 //! [`MemberWrite::Forward`] and the handler hands the whole request to Go, so the answer is Go's
-//! own. The reasons are enumerated on each function; the recurring ones are group-constrained
-//! channels on the add paths, attribute-based access control, shared channels (on removal only
-//! while Go's shared-channel service runs), guest sessions, `post_root_id` (a `ThreadMemberships`
-//! write) and a channel carrying a `default_category_name` (a `SidebarChannels` write).
+//! own. The reasons are enumerated on each function; the recurring ones are attribute-based
+//! access control, shared channels (on removal only while Go's shared-channel service runs),
+//! guest sessions, `post_root_id` (a `ThreadMemberships` write) and a channel carrying a
+//! `default_category_name` (a `SidebarChannels` write).
 
 use mm_model::channel::Channel;
 use mm_model::channel_member::{ChannelMember, get_default_channel_notify_props};
@@ -148,6 +148,28 @@ pub struct ChannelMemberOpts {
     pub user_requestor_id: String,
     pub post_root_id: String,
     pub skip_team_member_integrity_check: bool,
+}
+
+/// `api.channel.add_members.user_denied` at 400, naming the users no linked group vouches for —
+/// the refusal `addUserToChannel`, `addChannelMember` and `localAddChannelMember` share, each
+/// with its own `where`.
+pub fn user_denied(where_: &str, non_members: Vec<String>) -> Box<AppError> {
+    let params = std::collections::HashMap::from([(
+        "UserIDs".to_owned(),
+        serde_json::Value::Array(
+            non_members
+                .into_iter()
+                .map(serde_json::Value::String)
+                .collect(),
+        ),
+    )]);
+    AppError::boxed(
+        where_,
+        "api.channel.add_members.user_denied",
+        Some(params),
+        String::new(),
+        400,
+    )
 }
 
 impl App {
@@ -689,9 +711,14 @@ impl App {
     /// for that user. Both carry `user_id` and `team_id` in `data`. Publishing only the first
     /// leaves the joining client waiting for an event it never gets.
     ///
+    /// # A group-constrained channel admits only whom its groups vouch for
+    ///
+    /// After the already-a-member shortcut, `FilterNonGroupChannelMembers` on the one user: a user
+    /// in no linked group (and not a bot) is 400 `api.channel.add_members.user_denied`, and a
+    /// failure of the filter itself is a 500 `api.channel.add_user_to_channel.type.app_error`.
+    ///
     /// # What is forwarded
     ///
-    /// - a **group-constrained** channel (`FilterNonGroupChannelMembers`),
     /// - a **private** channel under attribute-based access control,
     /// - a **shared** channel (`NotifyMembershipChanged`),
     /// - a channel with a **`default_category_name`** (`addChannelToDefaultCategory` writes
@@ -837,10 +864,25 @@ impl App {
             }
         }
 
+        // `FilterNonGroupChannelMembers` on the one user: a user no linked group vouches for is
+        // refused, and either failure of the filter is this function's own 500.
         if channel.is_group_constrained() {
-            return Ok(MemberWrite::Forward(
-                "FilterNonGroupChannelMembers needs the group syncable store",
-            ));
+            let non_members = self
+                .filter_non_group_channel_members(std::slice::from_ref(&user.id), channel)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "the group filter failed");
+                    AppError::boxed(
+                        "addUserToChannel",
+                        "api.channel.add_user_to_channel.type.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                })?;
+            if !non_members.is_empty() {
+                return Err(user_denied("addUserToChannel", non_members));
+            }
         }
 
         if channel.channel_type == mm_model::channel::CHANNEL_TYPE_PRIVATE

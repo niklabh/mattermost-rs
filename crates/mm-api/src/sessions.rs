@@ -158,6 +158,7 @@ pub async fn revoke_session(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     bytes: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
     // `RequireUserId` resolves `me` before it validates (web/context.go:301).
@@ -197,6 +198,8 @@ pub async fn revoke_session(
 
     state.app.revoke_session(&target).await?;
 
+    // `c.LogAudit("")`, on success only.
+    audit.log(&state.app, Some(&session.0), "").await;
     Ok(status_ok())
 }
 
@@ -215,6 +218,7 @@ pub async fn revoke_all_sessions_for_user(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
     let user_id = if user_id == ME {
         session.0.user_id.clone()
@@ -236,6 +240,8 @@ pub async fn revoke_all_sessions_for_user(
 
     state.app.revoke_all_sessions(&user_id).await?;
 
+    // `c.LogAudit("")` — under the caller's session even when that session was just revoked.
+    audit.log(&state.app, Some(&session.0), "").await;
     Ok(status_ok())
 }
 
@@ -251,8 +257,7 @@ pub async fn revoke_all_sessions_for_user(
 /// button that logs out the entire server.
 ///
 /// This is also the only one of the four whose permission check runs **before**
-/// `MakeAuditRecord`, so a refused call leaves no audit row. Not observable on the wire; noted
-/// because the audit port will otherwise put the record in the wrong place.
+/// `MakeAuditRecord`; the `LogAudit("")` row is written on success only, as on the other two.
 ///
 /// # Which permission this names cannot be tested through the API here
 ///
@@ -272,6 +277,7 @@ pub async fn revoke_all_sessions_for_user(
 pub async fn revoke_all_sessions_all_users(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
     if !state
         .app
@@ -286,6 +292,7 @@ pub async fn revoke_all_sessions_all_users(
 
     state.app.revoke_sessions_from_all_users().await?;
 
+    audit.log(&state.app, Some(&session.0), "").await;
     Ok(status_ok())
 }
 
@@ -332,6 +339,7 @@ pub async fn handle_device_props(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     bytes: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
     let mut session = session.0;
@@ -350,6 +358,8 @@ pub async fn handle_device_props(
             attach_device_ids(&state, &headers, &mut session, device_id, voip_device_id).await?,
         );
         tracing::Span::current().record("attached", true);
+        // `attachDeviceIds`' `c.LogAudit("")`, after its write and before the props are.
+        audit.log(&state.app, Some(&session), "").await;
     }
 
     state

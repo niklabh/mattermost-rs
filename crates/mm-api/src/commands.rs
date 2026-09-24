@@ -161,10 +161,14 @@ async fn command_from_body(request: Request, parameter: &str) -> Result<Command,
 /// the 404, and "neither the creator nor a holder of `manage_others_slash_commands`" is a 403.
 /// Collapsing them would either leak a command's existence or hide a refusal a client must be
 /// able to tell from a miss.
+///
+/// Both rungs write Go's `"fail - inappropriate permissions"` row before refusing; every caller
+/// has already written its `"attempt"`.
 async fn refuse_unless_the_caller_may_manage(
     state: &AppState,
     session: &AuthenticatedSession,
     command: &Command,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Option<Response> {
     if !state
         .app
@@ -175,6 +179,9 @@ async fn refuse_unless_the_caller_may_manage(
         )
         .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return Some(command_not_found().into_response());
     }
 
@@ -188,6 +195,9 @@ async fn refuse_unless_the_caller_may_manage(
             )
             .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return Some(permission_error(
             session,
             &PERMISSION_MANAGE_OTHERS_SLASH_COMMANDS,
@@ -196,6 +206,9 @@ async fn refuse_unless_the_caller_may_manage(
 
     None
 }
+
+/// The `ExtraInfo` of every permission refusal `LogAudit` records in command.go.
+const FAIL_PERMISSIONS: &str = "fail - inappropriate permissions";
 
 /// Port of `getCommand` (command.go:321) — `GET /api/v4/commands/{command_id}`.
 ///
@@ -380,12 +393,14 @@ async fn list_commands_inner(
 pub async fn create_command(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     let mut command = match command_from_body(request, "command").await {
         Ok(command) => command,
         Err(err) => return err.into_response(),
     };
+    audit.log(&state.app, Some(&session.0), "attempt").await;
     tracing::Span::current().record("team_id", &command.team_id);
     tracing::Span::current().record("trigger", &command.trigger);
 
@@ -412,6 +427,9 @@ pub async fn create_command(
             )
             .await
         {
+            audit
+                .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+                .await;
             return permission_error(&session, &PERMISSION_MANAGE_OTHERS_SLASH_COMMANDS);
         }
 
@@ -425,10 +443,13 @@ pub async fn create_command(
     command.creator_id = user_id;
 
     match state.app.create_command(command).await {
-        Ok(created) => match encoded(StatusCode::CREATED, &created, "createCommand") {
-            Ok(response) => response,
-            Err(err) => err.into_response(),
-        },
+        Ok(created) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            match encoded(StatusCode::CREATED, &created, "createCommand") {
+                Ok(response) => response,
+                Err(err) => err.into_response(),
+            }
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -453,6 +474,7 @@ pub async fn update_command(
     State(state): State<AppState>,
     Path(command_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     if let Err(err) = require_command_id(&command_id) {
@@ -466,6 +488,7 @@ pub async fn update_command(
     if command.id != command_id {
         return ApiError::invalid_param("command").into_response();
     }
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let Ok(old_command) = state.app.get_command(&command_id).await else {
         return command_not_found().into_response();
@@ -482,16 +505,20 @@ pub async fn update_command(
         .into_response();
     }
 
-    if let Some(refusal) = refuse_unless_the_caller_may_manage(&state, &session, &old_command).await
+    if let Some(refusal) =
+        refuse_unless_the_caller_may_manage(&state, &session, &old_command, &audit).await
     {
         return refusal;
     }
 
     match state.app.update_command(&old_command, command).await {
-        Ok(updated) => match encoded_ok(&updated, "updateCommand") {
-            Ok(response) => response,
-            Err(err) => err.into_response(),
-        },
+        Ok(updated) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            match encoded_ok(&updated, "updateCommand") {
+                Ok(response) => response,
+                Err(err) => err.into_response(),
+            }
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -506,21 +533,29 @@ pub async fn delete_command(
     State(state): State<AppState>,
     Path(command_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     if let Err(err) = require_command_id(&command_id) {
         return err.into_response();
     }
+    // `"attempt"` precedes the fetch here, so an unknown command still leaves a row.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let Ok(command) = state.app.get_command(&command_id).await else {
         return command_not_found().into_response();
     };
 
-    if let Some(refusal) = refuse_unless_the_caller_may_manage(&state, &session, &command).await {
+    if let Some(refusal) =
+        refuse_unless_the_caller_may_manage(&state, &session, &command, &audit).await
+    {
         return refusal;
     }
 
     match state.app.delete_command(&command.id).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -545,6 +580,7 @@ pub async fn move_command(
     State(state): State<AppState>,
     Path(command_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     if let Err(err) = require_command_id(&command_id) {
@@ -567,6 +603,7 @@ pub async fn move_command(
         }
     };
     tracing::Span::current().record("team_id", &move_request.team_id);
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let new_team = match state.app.get_team(&move_request.team_id).await {
         Ok(team) => team,
@@ -582,6 +619,9 @@ pub async fn move_command(
         )
         .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return permission_error(&session, &PERMISSION_MANAGE_OWN_SLASH_COMMANDS);
     }
 
@@ -589,7 +629,9 @@ pub async fn move_command(
         return command_not_found().into_response();
     };
 
-    if let Some(refusal) = refuse_unless_the_caller_may_manage(&state, &session, &command).await {
+    if let Some(refusal) =
+        refuse_unless_the_caller_may_manage(&state, &session, &command, &audit).await
+    {
         return refusal;
     }
 
@@ -602,6 +644,13 @@ pub async fn move_command(
         )
         .await
     {
+        audit
+            .log(
+                &state.app,
+                Some(&session.0),
+                "fail - command creator does not have permission to new team",
+            )
+            .await;
         return ApiError::from(AppError::new(
             "moveCommand",
             "api.command.move_command.creator_no_permission.app_error",
@@ -613,7 +662,10 @@ pub async fn move_command(
     }
 
     match state.app.move_command(&new_team.id, command).await {
-        Ok(_moved) => status_ok(),
+        Ok(_moved) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -631,16 +683,20 @@ pub async fn regen_command_token(
     State(state): State<AppState>,
     Path(command_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     if let Err(err) = require_command_id(&command_id) {
         return err.into_response();
     }
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let Ok(command) = state.app.get_command(&command_id).await else {
         return command_not_found().into_response();
     };
 
-    if let Some(refusal) = refuse_unless_the_caller_may_manage(&state, &session, &command).await {
+    if let Some(refusal) =
+        refuse_unless_the_caller_may_manage(&state, &session, &command, &audit).await
+    {
         return refusal;
     }
 
@@ -648,6 +704,7 @@ pub async fn regen_command_token(
         Ok(regenerated) => regenerated,
         Err(err) => return ApiError::from(err).into_response(),
     };
+    audit.log(&state.app, Some(&session.0), "success").await;
 
     // `model.MapToJSON(map[string]string{"token": …})` — a single-key map, so there is no key
     // order to reproduce, and the token is base32 so the HTML escaping cannot bite.

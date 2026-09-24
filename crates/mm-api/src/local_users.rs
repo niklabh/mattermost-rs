@@ -592,7 +592,8 @@ async fn local_create_user(state: State<AppState>, request: Request) -> Response
 
 /// `sendPasswordReset` through `APILocal` (user_local.go:23) — no session read anywhere in it.
 async fn local_send_password_reset(state: State<AppState>, request: Request) -> Response {
-    user_creates::send_password_reset(state, crate::auth::CsrfGuard, request).await
+    user_creates::send_password_reset(state, OptionalSession(Some(local_session().0)), request)
+        .await
 }
 
 /// `updateUser` through `APILocal` (user_local.go:27). `me` is a 400; the e-mail-change
@@ -668,8 +669,9 @@ async fn local_convert_user_to_bot(
 async fn local_verify_user_email_without_token(
     state: State<AppState>,
     path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
-    user_creates::verify_user_email_without_token(state, path, local_session()).await
+    user_creates::verify_user_email_without_token(state, path, local_session(), audit).await
 }
 
 /// `promoteGuestToUser` through `APILocal` (user_local.go:35). The requestor recorded against

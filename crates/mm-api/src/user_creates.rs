@@ -380,9 +380,11 @@ pub async fn send_verification_email(
 #[tracing::instrument(skip_all, fields(hardened, outcome))]
 pub async fn send_password_reset(
     State(state): State<AppState>,
-    _csrf: crate::auth::CsrfGuard,
+    // The token checks `CsrfGuard` made, plus the session a `"sent="` row is written under.
+    session: crate::auth_writes::OptionalSession,
     request: Request,
 ) -> Response {
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (_request, bytes) = match split_body(request, "email").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -435,8 +437,14 @@ pub async fn send_password_reset(
     // `c.App.GetSiteURL()` — the live `ServiceSettings.SiteURL`.
     let site_url = state.app.live_site_url().await.unwrap_or_default();
     match state.app.send_password_reset_to(&user, &site_url).await {
-        Ok(_sent) => {
+        Ok(sent) => {
             tracing::Span::current().record("outcome", "sent");
+            // `if sent { c.LogAudit("sent=" + email) }`.
+            if sent {
+                audit
+                    .log(&state.app, session.0.as_ref(), &format!("sent={email}"))
+                    .await;
+            }
             status_ok()
         }
         Err(err) => {
@@ -482,6 +490,7 @@ pub async fn verify_user_email_without_token(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     let user_id = if user_id == ME {
         session.0.user_id.clone()
@@ -513,6 +522,10 @@ pub async fn verify_user_email_without_token(
     if let Err(err) = state.app.verify_user_email(&user.id, &user.email).await {
         return ApiError::from(err).into_response();
     }
+    // `c.LogAudit("user verified")`, after the write.
+    audit
+        .log(&state.app, Some(&session.0), "user verified")
+        .await;
 
     state.app.sanitize_profile(&mut user, true);
 

@@ -45,8 +45,6 @@
 //!
 //! - `DELETE /channels/{id}?permanent=true` — `PermanentDeleteChannel` is unported (six store
 //!   deletes across posts, members, hooks and the channel row): [D-610].
-//! - a member add on a **group-constrained** channel — `FilterNonGroupChannelMembers` needs the
-//!   group syncable store, as on the HTTP router.
 //! - a permanent post delete of a post **with files**, or a burn-on-read post — the file backend.
 //! - a patch or privacy change on a **licensed** installation, and the two group lists when
 //!   licensed — the same handovers the HTTP handlers make, for the same app-layer reasons.
@@ -401,7 +399,11 @@ async fn local_groups_common(
 /// `display_name` 400s, no create permission, no discoverability block — so an empty `team_id`
 /// is the **store's** `model.channel.is_valid.team_id.app_error`, not the handler's
 /// `invalid_body_param`. `addMember` is false: the channel has no creator and no members.
-async fn local_create_channel(State(state): State<AppState>, request: Request) -> Response {
+async fn local_create_channel(
+    State(state): State<AppState>,
+    audit: crate::audit_log::AuditRequest,
+    request: Request,
+) -> Response {
     let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
@@ -426,6 +428,10 @@ async fn local_create_channel(State(state): State<AppState>, request: Request) -
     {
         return ApiError::from(err).into_response();
     }
+    // `c.LogAudit("name=" + channel.Name)`: no session on the socket.
+    audit
+        .log(&state.app, None, &format!("name={}", channel.name))
+        .await;
     match channel_creates::created("localCreateChannel", &channel) {
         Ok(response) => response,
         Err(err) => err.into_response(),
@@ -444,6 +450,7 @@ async fn local_delete_channel(
     State(state): State<AppState>,
     Extension(go): Extension<GoLocalSocket>,
     UrlPath(channel_id): UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
@@ -472,7 +479,13 @@ async fn local_delete_channel(
         return forward_over_unix(&go.0, request).await;
     }
     match state.app.delete_channel(&hook_ctx, &channel, "").await {
-        Ok(_) => channel_writes::status_ok(),
+        Ok(_) => {
+            // `c.LogAudit("name=" + channel.Name)`.
+            audit
+                .log(&state.app, None, &format!("name={}", channel.name))
+                .await;
+            channel_writes::status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -535,6 +548,10 @@ async fn local_patch_channel(
     if let Err(err) = state.app.fill_in_channel_props(&mut channel).await {
         return ApiError::from(err).into_response();
     }
+    // `c.LogAudit("")`.
+    crate::audit_log::AuditRequest::of(&parts)
+        .log(&state.app, None, "")
+        .await;
     match channel_writes::channel_response("localPatchChannel", &channel) {
         Ok(response) => response,
         Err(err) => err.into_response(),
@@ -711,6 +728,10 @@ async fn local_update_channel_privacy(
         .await
     {
         Ok(ChannelWrite::Done) => {
+            // `c.LogAudit("name=" + updatedChannel.Name)`.
+            crate::audit_log::AuditRequest::of(&parts)
+                .log(&state.app, None, &format!("name={}", channel.name))
+                .await;
             match channel_writes::channel_response("updateChannelPrivacy", &channel) {
                 Ok(response) => response,
                 Err(err) => err.into_response(),
@@ -754,6 +775,10 @@ async fn local_restore_channel(
     {
         return ApiError::from(err).into_response();
     }
+    // `c.LogAudit("name=" + channel.Name)`.
+    crate::audit_log::AuditRequest::of(&parts)
+        .log(&state.app, None, &format!("name={}", channel.name))
+        .await;
     match channel_writes::channel_response("restoreChannel", &channel) {
         Ok(response) => response,
         Err(err) => err.into_response(),
@@ -848,8 +873,8 @@ async fn local_remove_channel_member(
 /// One user, not a list: `user_id` (400 naming **`user_id`**, where the HTTP handler names
 /// `user_id or user_ids`), then `post_root_id` — a non-empty invalid one is its 400, a valid one
 /// is fetched (`GetSinglePost`'s 404) and must belong to the channel (the same 400) — then the
-/// channel (404), the DM/GM refusal, and the group-constrained filter, which is forwarded here
-/// as on the HTTP router. `AddChannelMember` runs with **no requestor**, so the notice is "X
+/// channel (404), the DM/GM refusal, and the group-constrained filter — see
+/// [`crate::channel_member_writes::group_filter_refusal`]. `AddChannelMember` runs with **no requestor**, so the notice is "X
 /// joined the channel" posted by X, and `post_root_id` reaches nothing further: Go only uses it
 /// for the requestor's "added by" post. A user who is already a member is answered with the
 /// existing row, 201.
@@ -868,6 +893,7 @@ async fn local_add_channel_member(
     let (parts, body) = request.into_parts();
     // See `local_move_channel`: the socket carries no session and no peer address.
     let hook_ctx = crate::plugin_context::hook_context(&parts, None);
+    let audit = crate::audit_log::AuditRequest::of(&parts);
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .unwrap_or_default();
@@ -925,12 +951,16 @@ async fn local_add_channel_member(
         );
         Request::from_parts(parts, Body::from(bytes))
     };
-    if channel.is_group_constrained() {
-        return forward_over_unix(
-            &go.0,
-            forward("FilterNonGroupChannelMembers needs the group syncable store"),
+    if channel.is_group_constrained()
+        && let Some(refusal) = crate::channel_member_writes::group_filter_refusal(
+            &state,
+            "localAddChannelMember",
+            std::slice::from_ref(&user_id.to_owned()),
+            &channel,
         )
-        .await;
+        .await
+    {
+        return refusal.into_response();
     }
 
     let opts = ChannelMemberOpts {
@@ -947,6 +977,14 @@ async fn local_add_channel_member(
         Ok(MemberWrite::Forward(why)) => return forward_over_unix(&go.0, forward(why)).await,
         Err(err) => return ApiError::from(err).into_response(),
     };
+    // `c.LogAudit("name=" + channel.Name + " user_id=" + cm.UserId)` — an existing member too.
+    audit
+        .log(
+            &state.app,
+            None,
+            &format!("name={} user_id={}", channel.name, member.user_id),
+        )
+        .await;
 
     // `json.NewEncoder(w).Encode(cm)` — Go's marshal and its trailing newline.
     match go_json_marshal(&member) {

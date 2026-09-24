@@ -273,6 +273,7 @@ fn json_ok(mut body: Vec<u8>, newline: bool) -> Response {
 pub async fn create_oauth_app(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
@@ -328,7 +329,17 @@ pub async fn create_oauth_app(
         .create_oauth_app_internal(&app, !app_request.is_public)
         .await
     {
-        Ok(saved) => encoded_json(StatusCode::CREATED, &saved),
+        Ok(saved) => {
+            // `c.LogAudit("client_id=" + rapp.Id)`, on success only.
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("client_id={}", saved.id),
+                )
+                .await;
+            encoded_json(StatusCode::CREATED, &saved)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -345,11 +356,14 @@ pub async fn update_oauth_app(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(app_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     if let Err(err) = require_app_id(&app_id) {
         return err.into_response();
     }
+    // `"attempt"` right after the id check, so every later refusal carries it.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     if !state
         .app
@@ -401,7 +415,10 @@ pub async fn update_oauth_app(
     }
 
     match state.app.update_oauth_app(&old_app, &updated).await {
-        Ok(saved) => encoded_json(StatusCode::OK, &saved),
+        Ok(saved) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            encoded_json(StatusCode::OK, &saved)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -412,10 +429,12 @@ pub async fn delete_oauth_app(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(app_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     if let Err(err) = require_app_id(&app_id) {
         return err.into_response();
     }
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     if !state
         .app
@@ -439,7 +458,10 @@ pub async fn delete_oauth_app(
     }
 
     match state.app.delete_oauth_app(&app.id).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -455,6 +477,7 @@ pub async fn regenerate_oauth_app_secret(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(app_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     if let Err(err) = require_app_id(&app_id) {
         return err.into_response();
@@ -493,7 +516,11 @@ pub async fn regenerate_oauth_app_secret(
     }
 
     match state.app.regenerate_oauth_app_secret(&app).await {
-        Ok(saved) => encoded_json(StatusCode::OK, &saved),
+        Ok(saved) => {
+            // Only `"success"`: this route writes no `"attempt"`.
+            audit.log(&state.app, Some(&session.0), "success").await;
+            encoded_json(StatusCode::OK, &saved)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }

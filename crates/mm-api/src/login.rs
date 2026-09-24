@@ -35,7 +35,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_model::session::{
-    LoginOptions, SESSION_COOKIE_CSRF, SESSION_COOKIE_TOKEN, SESSION_COOKIE_USER,
+    LoginOptions, SESSION_COOKIE_CSRF, SESSION_COOKIE_TOKEN, SESSION_COOKIE_USER, Session,
 };
 use mm_model::utils::{AppError, StringMap, get_millis};
 
@@ -169,6 +169,7 @@ pub async fn login(
     // `pluginContext(rctx)` — `APIHandler` resolves any token the request carries, so a login
     // sent with a live session hands that session's id to `UserWillLogIn`.
     let hook_ctx = crate::plugin_context::hook_context_of(&request, session.0.as_ref());
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request).await {
         Ok(pair) => pair,
         Err(err) => return mask_login_error(&state, err).into_response(),
@@ -227,6 +228,7 @@ pub async fn login(
         &state,
         &headers,
         &hook_ctx,
+        (&audit, session.0.as_ref()),
         id,
         login_id,
         password,
@@ -252,6 +254,7 @@ async fn serve_login(
     state: &AppState,
     headers: &HeaderMap,
     hook_ctx: &mm_app::plugin_hooks::HookContext,
+    (audit, caller): (&crate::audit_log::AuditRequest, Option<&Session>),
     id: &str,
     login_id: &str,
     password: &str,
@@ -259,10 +262,34 @@ async fn serve_login(
     device_id: &str,
     voip_device_id: &str,
 ) -> Result<Response, ApiError> {
-    let mut user = state
+    // `c.LogAuditWithUserId(id, "attempt - login_id="+loginId)` — under the **caller's** session,
+    // so a login sent with a live token gains that user's `session_user=` suffix.
+    audit
+        .log_with_user_id(
+            &state.app,
+            caller,
+            id,
+            &format!("attempt - login_id={login_id}"),
+        )
+        .await;
+    let mut user = match state
         .app
         .authenticate_user_for_login(id, login_id, password, mfa_token)
-        .await?;
+        .await
+    {
+        Ok(user) => user,
+        Err(err) => {
+            audit
+                .log_with_user_id(
+                    &state.app,
+                    caller,
+                    id,
+                    &format!("failure - login_id={login_id}"),
+                )
+                .await;
+            return Err(ApiError::from(err));
+        }
+    };
 
     // `user.IsMagicLinkEnabled()` is `AuthService == "magic_link" && IsGuest()`.
     //
@@ -319,6 +346,10 @@ async fn serve_login(
         )));
     }
 
+    audit
+        .log_with_user_id(&state.app, caller, &user.id, "authenticated")
+        .await;
+
     let opts = LoginOptions {
         device_id: device_id.to_owned(),
         voip_device_id: voip_device_id.to_owned(),
@@ -329,6 +360,11 @@ async fn serve_login(
         .app
         .do_login(hook_ctx, &user, &opts, user_agent(headers))
         .await?;
+    // `c.AppContext = c.AppContext.WithSession(session)` came first, so `"success"` is under the
+    // **new** session: its id, and the user's own `session_user=` suffix.
+    audit
+        .log_with_user_id(&state.app, Some(&session), &user.id, "success")
+        .await;
 
     // `GetUserTermsOfService` is **not** gated on anything here — unlike `getUser`, which only
     // consults it for self or an admin. This is always self.
@@ -653,6 +689,7 @@ async fn desktop_token_login(
 ) -> Result<Response, ApiError> {
     let headers = request.headers().clone();
     let hook_ctx = crate::plugin_context::hook_context_of(&request, session.0.as_ref());
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (_, bytes) = split_body(request).await?;
     let props = map_from_json(&bytes);
     let get = |key: &str| props.get(key).map_or("", String::as_str);
@@ -694,6 +731,11 @@ async fn desktop_token_login(
         .do_login(&hook_ctx, &user, &opts, user_agent(&headers))
         .await?;
     tracing::Span::current().record("outcome", "session");
+    // `c.LogAuditWithUserId(user.Id, "success")`, after `WithSession(session)`: the new session's
+    // id, and the user's own `session_user=` suffix. The only row this route writes.
+    audit
+        .log_with_user_id(&state.app, Some(&session), &user.id, "success")
+        .await;
 
     let mut body = serde_json::to_vec(&user).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise User");

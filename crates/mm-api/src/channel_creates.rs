@@ -146,6 +146,7 @@ pub async fn create_channel(
     request: Request,
 ) -> Response {
     let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request, "channel").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -176,7 +177,7 @@ pub async fn create_channel(
         Err(err) => return err.into_response(),
     }
 
-    match serve_create_channel(&state, &session.0, &mut channel, &hook_ctx).await {
+    match serve_create_channel(&state, &session.0, &mut channel, &hook_ctx, &audit).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -187,6 +188,7 @@ async fn serve_create_channel(
     session: &Session,
     channel: &mut Channel,
     hook_ctx: &mm_app::plugin_hooks::HookContext,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
     if channel.team_id.is_empty() {
         return Err(ApiError::invalid_param("team_id"));
@@ -252,6 +254,10 @@ async fn serve_create_channel(
         .app
         .create_channel_with_user(hook_ctx, channel, &session.user_id)
         .await?;
+    // `c.LogAudit("name=" + channel.Name)` — the name `PreSave` left on the body.
+    audit
+        .log(&state.app, Some(session), &format!("name={}", channel.name))
+        .await;
     created("createChannel", channel)
 }
 

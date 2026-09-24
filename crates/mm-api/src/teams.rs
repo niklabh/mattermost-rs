@@ -1755,17 +1755,6 @@ pub async fn update_team(
     }
 }
 
-/// Port of `patchTeam` (api4/team.go) — `PUT /api/v4/teams/{team_id}/patch`.
-///
-/// The same two permissions, but the second is decided by **presence** rather than by change:
-/// `patch.AllowOpenInvite != nil || patch.AllowedDomains != nil`. So sending
-/// `{"allow_open_invite": <the value it already has>}` needs `invite_user` where the update route
-/// would not.
-///
-/// Both permission checks run **before** the team is fetched, which is the opposite order from
-/// `updateTeam` — so a patch naming a nonexistent team answers 403 rather than 404 for a caller
-/// without the permission.
-#[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded))]
 /// Port of `removeTeamIcon` (api4/team.go:2129) — `DELETE /api/v4/teams/{team_id}/image`.
 ///
 /// `manage_team` on the team, then [`mm_app::App::remove_team_icon`], then `ReturnStatusOK`.
@@ -1777,6 +1766,7 @@ pub async fn remove_team_icon(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(team_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     if let Err(err) = require_id(&team_id, "team_id") {
         return err.into_response();
@@ -1795,11 +1785,28 @@ pub async fn remove_team_icon(
     }
 
     match state.app.remove_team_icon(&team_id).await {
-        Ok(()) => crate::thread_writes::status_ok(),
+        Ok(()) => {
+            // `c.LogAudit("")` on success.
+            audit.log(&state.app, Some(&session.0), "").await;
+            crate::thread_writes::status_ok()
+        }
         Err(err) => ApiError::from(*err).into_response(),
     }
 }
 
+/// Port of `patchTeam` (api4/team.go) — `PUT /api/v4/teams/{team_id}/patch`.
+///
+/// The same two permissions, but the second is decided by **presence** rather than by change:
+/// `patch.AllowOpenInvite != nil || patch.AllowedDomains != nil`. So sending
+/// `{"allow_open_invite": <the value it already has>}` needs `invite_user` where the update route
+/// would not.
+///
+/// Both permission checks run **before** the team is fetched, which is the opposite order from
+/// `updateTeam` — so a patch naming a nonexistent team answers 403 rather than 404 for a caller
+/// without the permission.
+///
+/// On success, `c.LogAudit("")`.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded))]
 pub async fn patch_team(
     State(state): State<AppState>,
     session: AuthenticatedSession,
@@ -1854,6 +1861,9 @@ pub async fn patch_team(
     match state.app.patch_team(&team_id, &patch).await {
         Ok(TeamWrite::Done(patched)) => {
             tracing::Span::current().record("forwarded", false);
+            crate::audit_log::AuditRequest::of(&parts)
+                .log(&state.app, Some(&session.0), "")
+                .await;
             sanitized_team_response(&state, &session, *patched).await
         }
         Ok(TeamWrite::Forward(why)) => {
@@ -2626,6 +2636,7 @@ pub async fn regenerate_team_invite_id(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(team_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     if let Err(err) = require_id(&team_id, "team_id") {
         return err.into_response();
@@ -2655,7 +2666,11 @@ pub async fn regenerate_team_invite_id(
     }
 
     match state.app.regenerate_team_invite_id(&team_id).await {
-        Ok(team) => sanitized_team_response(&state, &session, team).await,
+        Ok(team) => {
+            // `c.LogAudit("")` on success.
+            audit.log(&state.app, Some(&session.0), "").await;
+            sanitized_team_response(&state, &session, team).await
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
