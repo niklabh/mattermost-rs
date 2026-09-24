@@ -99,6 +99,7 @@ struct Fixture {
     reader: common::PlainUser,
     viewer_token: String,
     channel_id: String,
+    team_id: String,
     username: String,
 }
 
@@ -139,6 +140,7 @@ async fn fixture(tag: &str, device: &str) -> Fixture {
         reader,
         viewer_token,
         channel_id,
+        team_id,
         username: common::plain_username(tag),
     }
 }
@@ -284,7 +286,9 @@ async fn an_ack_reaches_the_proxy_as_go_sends_it() {
     );
 }
 
-/// Marking a post unread sends an `update_badge` to every device of the user.
+/// Marking a post unread sends an `update_badge` to every device of the user. In a **DM**: mm-api
+/// serves `set_unread` for direct and group channels and forwards the rest ([D-421]), so an open
+/// channel would compare Go with Go.
 #[tokio::test]
 async fn marking_a_post_unread_updates_the_badge() {
     if !stack_enabled() {
@@ -293,26 +297,38 @@ async fn marking_a_post_unread_updates_the_badge() {
     let proxy = proxy();
     let device = "android_rn:mmrs-push-badge";
     let f = fixture("pushbadge", device).await;
-    let post_id = common::post_message(
+    let dm = common::create_direct_channel(
         &client(),
         &f.admin,
-        &f.channel_id,
-        &format!("@{} badge", f.username),
-        None,
+        common::logged_in_user_id(),
+        &f.reader.id,
     )
     .await;
-    proxy.discard(for_device("mmrs-push-badge", "message"));
+    let post_id = common::post_message(&client(), &f.admin, &dm, "badge me", None).await;
+    let _ = proxy
+        .take(
+            Duration::from_secs(3),
+            for_device("mmrs-push-badge", "message"),
+        )
+        .await;
 
     let mut badges = Vec::new();
     for base in [GO, RUST] {
-        let (status, body) = post(
-            base,
-            &f.viewer_token,
-            &format!("/api/v4/users/{}/posts/{post_id}/set_unread", f.reader.id),
-            serde_json::json!({}),
-        )
-        .await;
-        assert_eq!(status, 200, "{base}: {}", String::from_utf8_lossy(&body));
+        let response = client()
+            .post(format!(
+                "{base}/api/v4/users/{}/posts/{post_id}/set_unread",
+                f.reader.id
+            ))
+            .header("Authorization", format!("Bearer {}", f.viewer_token))
+            .header("X-Requested-With", "XMLHttpRequest")
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .expect("answers");
+        assert_eq!(response.status(), 200, "{base}");
+        if base == RUST {
+            common::assert_served_by_rust(response.headers(), "set_unread in a DM");
+        }
         badges.push(
             proxy
                 .take(WAIT, for_device("mmrs-push-badge", "update_badge"))
@@ -320,6 +336,7 @@ async fn marking_a_post_unread_updates_the_badge() {
                 .unwrap_or_else(|| panic!("{base} sent no badge update")),
         );
     }
+    assert_eq!(badges[0].json()["sound"], "none");
     assert_eq!(
         normalize_push(badges[0].json()),
         normalize_push(badges[1].json()),
@@ -365,7 +382,11 @@ async fn a_mention_pushes_the_same_message() {
     }
     let device = "android_rn:mmrs-push-mention";
     let f = fixture("pushmention", device).await;
-    let message = format!("@{} are you there", f.username);
+    // Markdown, entities and a list: the push text is `StripMarkdownAndDecode`'s.
+    let message = format!(
+        "@{} are you there? **bold** _it_ `code` [a link](https://example.com) &lt;tag&gt;\n\n- one\n- two",
+        f.username
+    );
     let go = post_and_take_push(&f, GO, &message, "mmrs-push-mention").await;
     let rs = post_and_take_push(&f, RUST, &message, "mmrs-push-mention").await;
     assert_eq!(
@@ -398,7 +419,8 @@ async fn an_all_activity_member_is_pushed_without_a_mention() {
         .put(format!("{GO}/api/v4/users/{}/patch", f.reader.id))
         .header("Authorization", format!("Bearer {}", f.admin))
         .json(&serde_json::json!({ "notify_props": {
-            "push": "all", "push_status": "online", "email": "false", "desktop": "mention",
+            // No `push_status`: a missing one behaves as `online` — always push.
+            "push": "all", "email": "false", "desktop": "mention",
             "channel": "true", "comments": "never", "mention_keys": "", "first_name": "false",
         }}))
         .send()
@@ -485,6 +507,66 @@ async fn no_clear_goes_to_the_reading_session_or_for_a_channel_without_a_mention
         );
         read_and_lose_focus(&f.viewer_token, &f.channel_id, "mmrs-push-noclear").await;
     }
+
+    common::delete_channel(&client(), &f.admin, &f.channel_id).await;
+    common::delete_plain_user(&client(), &f.admin, &f.reader.id).await;
+}
+
+/// A mention **in a reply** under collapsed threads: the follower's push, whose badge is the
+/// root-post mention sum plus the thread's unread mentions — a reply bumps `MentionCount` but not
+/// `MentionCountRoot`, so the column the badge reads is visible here and nowhere else.
+#[tokio::test]
+async fn a_reply_mention_under_collapsed_threads_pushes_the_same_message() {
+    if !stack_enabled() {
+        return;
+    }
+    let proxy = proxy();
+    let device = "android_rn:mmrs-push-crt";
+    let f = fixture("pushcrt", device).await;
+
+    let mut pushes = Vec::new();
+    for base in [GO, RUST] {
+        let root = common::post_message(&client(), &f.admin, &f.channel_id, "a root", None).await;
+        let (status, body) = post(
+            base,
+            &f.admin,
+            "/api/v4/posts",
+            serde_json::json!({
+                "channel_id": f.channel_id,
+                "root_id": root,
+                "message": format!("@{} in the thread", f.username),
+            }),
+        )
+        .await;
+        assert_eq!(status, 201, "{base}: {}", String::from_utf8_lossy(&body));
+        let push = proxy
+            .take(WAIT, for_device("mmrs-push-crt", "message"))
+            .await
+            .unwrap_or_else(|| panic!("{base} sent no reply push"));
+        let mut body = normalize_push(push.json());
+        body["post_id"] = serde_json::Value::from("<post>");
+        body["root_id"] = serde_json::Value::from("<root>");
+        pushes.push(body);
+
+        // Read the thread and the channel so the next round starts from the same badge.
+        let now = chrono::Utc::now().timestamp_millis();
+        let response = client()
+            .put(format!(
+                "{GO}/api/v4/users/{}/teams/{}/threads/{root}/read/{now}",
+                f.reader.id, f.team_id
+            ))
+            .header("Authorization", format!("Bearer {}", f.viewer_token))
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .await
+            .expect("answers");
+        assert_eq!(response.status(), 200, "reading the thread");
+        let _ = proxy
+            .take(Duration::from_secs(2), for_device("mmrs-push-crt", "clear"))
+            .await;
+        read_and_lose_focus(&f.viewer_token, &f.channel_id, "mmrs-push-crt").await;
+    }
+    assert_eq!(pushes[0], pushes[1], "the reply pushes differ");
 
     common::delete_channel(&client(), &f.admin, &f.channel_id).await;
     common::delete_plain_user(&client(), &f.admin, &f.reader.id).await;

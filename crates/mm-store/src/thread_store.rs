@@ -82,6 +82,12 @@ pub trait ThreadStore {
 
     /// Port of `SqlThreadStore.GetTotalUnreadMentions` (thread_store.go:202). Reads `exclude_direct` and
     /// `deleted` from `opts`, as Go's does.
+    ///
+    /// **An empty `team_id` means every team**: Go adds the team predicate only under
+    /// `if teamId != ""`, and the push badge passes `""`. The four sibling counts share the rule.
+    /// Until 2026-09-24 the predicate was unconditional here, so an empty team counted only
+    /// team-less (DM/GM) threads — invisible to every route, which always names a team, and
+    /// caught by `parity::push_send`'s collapsed-threads badge.
     fn get_total_unread_mentions(
         &self,
         user_id: &str,
@@ -424,7 +430,7 @@ impl ThreadStore for SqlThreadStore {
                                  FROM channelmembers cm
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
-               AND (COALESCE(t.threadteamid, '') = $2
+               AND ($2 = '' OR COALESCE(t.threadteamid, '') = $2
                     OR (NOT $6 AND COALESCE(t.threadteamid, '') = ''))
                AND ($5 OR COALESCE(t.threaddeleteat, 0) = 0)
                AND ($7::bigint = 0 OR tm.lastupdated >= $7 OR t.lastreplyat >= $7)
@@ -671,7 +677,7 @@ impl ThreadStore for SqlThreadStore {
                                  FROM channelmembers cm
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
-               AND (COALESCE(t.threadteamid, '') = $2
+               AND ($2 = '' OR COALESCE(t.threadteamid, '') = $2
                     OR (NOT $3 AND COALESCE(t.threadteamid, '') = ''))
                AND ($4 OR COALESCE(t.threaddeleteat, 0) = 0)
             "#,
@@ -708,7 +714,7 @@ impl ThreadStore for SqlThreadStore {
                                  FROM channelmembers cm
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
-               AND (COALESCE(t.threadteamid, '') = $2
+               AND ($2 = '' OR COALESCE(t.threadteamid, '') = $2
                     OR (NOT $3 AND COALESCE(t.threadteamid, '') = ''))
                AND ($4 OR COALESCE(t.threaddeleteat, 0) = 0)
                AND tm.lastviewed < t.lastreplyat
@@ -746,7 +752,7 @@ impl ThreadStore for SqlThreadStore {
                                  FROM channelmembers cm
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
-               AND (COALESCE(t.threadteamid, '') = $2
+               AND ($2 = '' OR COALESCE(t.threadteamid, '') = $2
                     OR (NOT $3 AND COALESCE(t.threadteamid, '') = ''))
                AND ($4 OR COALESCE(t.threaddeleteat, 0) = 0)
             "#,
@@ -788,7 +794,7 @@ impl ThreadStore for SqlThreadStore {
                                  FROM channelmembers cm
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
-               AND (COALESCE(t.threadteamid, '') = $2
+               AND ($2 = '' OR COALESCE(t.threadteamid, '') = $2
                     OR (NOT $3 AND COALESCE(t.threadteamid, '') = ''))
                AND ($4 OR COALESCE(t.threaddeleteat, 0) = 0)
             "#,

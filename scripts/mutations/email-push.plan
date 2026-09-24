@@ -18,7 +18,9 @@ push-full-sender-prefix	crates/mm-app/src/push.rs	"{sender_name}: {}",	"{sender_
 push-muted-channel	crates/mm-app/src/push.rs	channel_prop("mark_unread") == Some("mention")	channel_prop("mark_unread") == Some("all")	api	push_send
 push-missing-push-status	crates/mm-app/src/push.rs	|| push_status.is_none()) && send_online_notification	|| false) && send_online_notification	api	push_send
 push-all-activity-or	crates/mm-app/src/notification.rs	if (user_all || channel_all)	if (user_all && channel_all)	api	push_send
-push-explicit-strict	crates/mm-app/src/notification.rs	mention_type > MentionType::GmMention	mention_type >= MentionType::GmMention	api	push_send
+# push-explicit-strict is unreachable through a served route: `> GmMention` differs from `>=` only for
+# a group-message post, and mm-api forwards those (createPost). Kept here, disabled, for when it is served.
+#push-explicit-strict	crates/mm-app/src/notification.rs	mention_type > MentionType::GmMention	mention_type >= MentionType::GmMention	api	push_send
 push-badge-crt-column	crates/mm-store/src/user_store.rs	CASE WHEN $2 THEN cm.mentioncountroot ELSE cm.mentioncount END	CASE WHEN $2 THEN cm.mentioncount ELSE cm.mentioncountroot END	api	push_send
 email-category-cloud-only	crates/mm-app/src/email.rs	let category = if is_cloud { category } else { "" };	let category = if is_cloud { "" } else { category };	api	email_send
 email-change-verify-support	crates/mm-app/src/email.rs	"feedback@mattermost.com"	"feedback@example.com"	api	email_send
