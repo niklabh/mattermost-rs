@@ -20,9 +20,10 @@
 //! # Go accepts `null` into all three scalars and into the map's values
 //!
 //! Measured, and the last of those was the open question: `{"last_viewed_at_times":{"a":null}}`
-//! gives Go a map with **`a` present and set to 0**, not a map without `a`. We reject the whole
-//! document instead. Same for `null` into `status`, `channel_id` or
-//! `collapsed_threads_supported`. All four are [D-057], asserted rather than skipped.
+//! gives Go a map with **`a` present and set to 0**, not a map without `a`. serde's derive alone
+//! rejects the whole document, as it does `null` into `status`, `channel_id` or
+//! `collapsed_threads_supported` — [D-057], which the body decoder (`utils::decode_one_from_json`)
+//! closes; the tests decode through it.
 //!
 //! Everything else about the two scalars' decoding matches: Go rejects `"true"`, `1` and `0` into
 //! the bool, and rejects `1.0`, `1e9`, a quoted number and an out-of-range integer into the map's
@@ -194,14 +195,15 @@ mod go_parity {
         .unwrap()
     }
 
-    /// Go accepts `null` into a scalar and leaves the zero value; we reject the document. See
-    /// [D-057].
+    /// Go accepts `null` into a scalar and leaves the zero value; serde's derive alone rejects the
+    /// document ([D-057]). Every test below decodes through the body decoder, which agrees with Go,
+    /// and asserts serde's disagreement on these rows as the premise.
     const NULL_SCALAR: [&str; 2] = ["explicit_nulls", "explicit_null_status"];
 
-    /// Go matches field names case-insensitively and serde does not. See [D-040].
+    /// Go matches field names case-insensitively and serde's derive alone does not ([D-040]).
     const UPPERCASE_KEY: &str = "uppercase_key";
 
-    /// A repeated **struct field**: Go takes the last value, serde's derive errors. See [D-071].
+    /// A repeated **struct field**: Go takes the last value, serde's derive alone errors ([D-071]).
     /// Note this does not apply to a repeated key inside the *map* — `duplicate_key` passes,
     /// because a `BTreeMap` overwrites exactly as Go's map does.
     const DUPLICATE_FIELD: &str = "duplicate_status";
@@ -218,23 +220,17 @@ mod go_parity {
             assert!(case["ok"].as_bool().unwrap(), "{name}: Go failed to decode");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<ChannelView>(doc);
+            let got = crate::utils::decode_one_from_json::<ChannelView>(doc.as_bytes());
+            let plain = serde_json::from_str::<ChannelView>(doc);
 
             if NULL_SCALAR.contains(&name) {
-                assert!(got.is_err(), "{name}: expected the documented divergence");
-                continue;
+                assert!(plain.is_err(), "{name}: premise");
+            }
+            if name == UPPERCASE_KEY {
+                assert!(plain.unwrap().channel_id.is_empty(), "{name}: premise");
             }
 
             let got = got.unwrap_or_else(|e| panic!("{name}: {e}"));
-
-            if name == UPPERCASE_KEY {
-                assert_eq!(
-                    case["channel_id"].as_str().unwrap(),
-                    "qr6kf7ztp7yifxt4wm5xn51bke"
-                );
-                assert!(got.channel_id.is_empty(), "{name}: expected the divergence");
-                continue;
-            }
 
             assert_eq!(
                 go_json_marshal(&got).unwrap(),
@@ -272,22 +268,20 @@ mod go_parity {
             assert!(case["ok"].as_bool().unwrap(), "{name}: Go failed to decode");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<ChannelViewResponse>(doc);
+            let got = crate::utils::decode_one_from_json::<ChannelViewResponse>(doc.as_bytes());
+            let plain = serde_json::from_str::<ChannelViewResponse>(doc);
 
             if NULL_SCALAR.contains(&name) {
-                assert!(got.is_err(), "{name}: expected the documented divergence");
-                continue;
+                assert!(plain.is_err(), "{name}: premise");
             }
-
             if name == DUPLICATE_FIELD {
                 assert_eq!(
                     case["status"].as_str().unwrap(),
                     "second",
                     "Go took the last"
                 );
-                let err = got.expect_err("expected the documented [D-071] divergence");
+                let err = plain.expect_err("premise");
                 assert!(err.to_string().contains("duplicate field"), "{err}");
-                continue;
             }
 
             let got = got.unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -315,11 +309,12 @@ mod go_parity {
         }
 
         // The corpus is only worth anything while it still contains both states of the map.
-        assert_eq!(nil_maps, 4, "the nil-map documents changed count");
+        assert_eq!(nil_maps, 6, "the nil-map documents changed count");
     }
 
     /// The map's **value** position, which `file.go`'s duration corpus could not reach. Fourteen
-    /// shapes; Go and `serde_json` return the same verdict on thirteen.
+    /// shapes; Go and serde's derive alone return the same verdict on thirteen, and the body decoder
+    /// on all fourteen.
     #[test]
     fn the_map_value_decode_matches_go() {
         let oracle = oracle();
@@ -332,20 +327,23 @@ mod go_parity {
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<ChannelViewResponse>(doc);
+            let got = crate::utils::decode_one_from_json::<ChannelViewResponse>(doc.as_bytes());
             let go_ok = case["ok"].as_bool().unwrap();
 
             if name == "null" {
                 // The measured answer to the open question: Go creates the key and sets it to
-                // zero rather than leaving it out. We reject the document. See [D-057].
+                // zero rather than leaving it out. serde's derive alone rejects the document
+                // ([D-057]); the body decoder writes the zero as Go does.
                 assert!(go_ok);
                 assert!(
                     case["probe_present"].as_bool().unwrap(),
                     "Go dropped the key"
                 );
                 assert_eq!(case["probe_value"].as_i64().unwrap(), 0);
-                assert!(got.is_err(), "{name}: expected the documented divergence");
-                continue;
+                assert!(
+                    serde_json::from_str::<ChannelViewResponse>(doc).is_err(),
+                    "premise"
+                );
             }
 
             assert_eq!(got.is_ok(), go_ok, "{name}: {doc}");
@@ -372,7 +370,7 @@ mod go_parity {
 
         assert_eq!(
             (accepted, rejected),
-            (5, 8),
+            (6, 8),
             "the accept/reject split moved"
         );
     }
@@ -389,17 +387,15 @@ mod go_parity {
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<ChannelView>(doc);
+            let got = crate::utils::decode_one_from_json::<ChannelView>(doc.as_bytes());
             let go_ok = case["ok"].as_bool().unwrap();
 
             if name == "null" {
                 assert!(go_ok, "Go used to accept null into a bool");
-                assert!(!case["value"].as_bool().unwrap(), "Go left it false");
                 assert!(
-                    got.is_err(),
-                    "{name}: expected the documented [D-057] divergence"
+                    serde_json::from_str::<ChannelView>(doc).is_err(),
+                    "premise ([D-057])"
                 );
-                continue;
             }
 
             assert_eq!(got.is_ok(), go_ok, "{name}: {doc}");

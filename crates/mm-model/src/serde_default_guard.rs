@@ -13,6 +13,9 @@
 //! the way a registry of body types could be. Enum struct variants have no container switch, so
 //! each of their fields must be an `Option` or carry a field-level `default`.
 //!
+//! It also refuses a non-ASCII field name, because the body decoder's key fold
+//! (`go_json::fold_name`) is Go's `foldName` only for ASCII names ([D-040]).
+//!
 //! What it cannot check, and the sweep did by reading: that the `Default` the attribute calls is
 //! Go's zero value rather than a "sensible" one, and the hand-written `Deserialize` impls.
 
@@ -113,6 +116,31 @@ fn field_zero_fills(field: &syn::Field) -> bool {
                 .any(|key| key == "deserialize_with" || key == "with"))
 }
 
+/// Every string literal in a field's `#[serde(...)]` attributes — its `rename`, and any `alias`.
+/// The body decoder folds keys with `go_json::fold_name`, which is Go's fold only for ASCII
+/// names, so a non-ASCII one would be matched wrongly rather than refused.
+fn non_ascii_names(field: &syn::Field) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Some(ident) = &field.ident {
+        names.push(ident.to_string());
+    }
+    for attr in field
+        .attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("serde"))
+    {
+        if let Ok(list) = attr.meta.require_list() {
+            for tree in list.tokens.clone() {
+                if let proc_macro2::TokenTree::Literal(lit) = tree {
+                    names.push(lit.to_string());
+                }
+            }
+        }
+    }
+    names.retain(|name| !name.is_ascii());
+    names
+}
+
 fn path_attr(attrs: &[syn::Attribute]) -> Option<String> {
     attrs.iter().find_map(|attr| match &attr.meta {
         syn::Meta::NameValue(nv) if nv.path.is_ident("path") => match &nv.value {
@@ -174,6 +202,17 @@ impl Walk<'_> {
                             "default" | "transparent" | "from" | "try_from"
                         )
                     }) || fields.named.iter().all(field_zero_fills);
+                    for field in &fields.named {
+                        for name in non_ascii_names(field) {
+                            self.offenders.push(format!(
+                                "{}::{} ({}): a non-ASCII field name {name}, which the key fold \
+                                 cannot match as Go does",
+                                self.krate,
+                                item.ident,
+                                file.display()
+                            ));
+                        }
+                    }
                     self.judge(
                         zero_fills,
                         &item.ident,

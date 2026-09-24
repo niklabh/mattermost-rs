@@ -539,7 +539,8 @@ mod go_parity {
         .unwrap()
     }
 
-    /// The one document Go accepts and we reject: `null` into a scalar. See [D-057].
+    /// The one document Go accepts and serde's derive alone rejects: `null` into a scalar
+    /// ([D-057]), decoded through the body decoder below.
     const NULL_SCALAR_ONLY: &str = "null_scalars";
 
     #[test]
@@ -623,13 +624,12 @@ mod go_parity {
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
             assert!(case["err"].is_null(), "{name}: Go failed to decode");
 
-            if name == NULL_SCALAR_ONLY {
-                continue;
-            }
-
             let decoded: ScheduledPost = match case["in"].as_str().unwrap() {
                 "" => ScheduledPost::default(),
-                doc => serde_json::from_str(doc).unwrap_or_else(|e| panic!("{name}: {e}")),
+                // Through the body decoder, Go's rules: the `null` row is [D-057]'s, which serde's
+                // derive alone refuses and `createSchedulePost` reads the way Go does.
+                doc => crate::utils::decode_one_from_json(doc.as_bytes())
+                    .unwrap_or_else(|e| panic!("{name}: {e}")),
             };
 
             // Byte-for-byte: this is what pins the embedded half coming first.
@@ -660,7 +660,15 @@ mod go_parity {
             );
             checked += 1;
         }
-        assert_eq!(checked, cases.len() - 1, "every case but the null one");
+        assert_eq!(checked, cases.len(), "every case, the null one included");
+        let null_row = cases
+            .iter()
+            .find(|c| c["name"] == NULL_SCALAR_ONLY)
+            .expect(NULL_SCALAR_ONLY);
+        assert!(
+            serde_json::from_str::<ScheduledPost>(null_row["in"].as_str().unwrap()).is_err(),
+            "the premise: serde's derive alone refuses the null row"
+        );
     }
 
     /// Rebuilds a validation case, restoring the clock-relative `scheduled_at` the fixture

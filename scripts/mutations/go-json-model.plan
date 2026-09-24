@@ -1,0 +1,14 @@
+# D-057/D-075/D-460/D-071: the Go rules in go_decode. lib, MUTATE_PACKAGE=mm-model.
+g_since_last_null	crates/mm-model/src/go_decode.rs	.map_or(0, |i| i + 1);	.map_or(0, |i| i);	lib	body_decode
+g_non_null	crates/mm-model/src/go_decode.rs	            .filter(|value| !matches!(value, GoJson::Null))	            .filter(|value| matches!(value, GoJson::Null))	lib	body_decode
+g_empty_array_resets	crates/mm-model/src/go_decode.rs	if items.is_empty() => {\n                    backing.clear();	if items.is_empty() => {\n                    backing.truncate(backing.len());	lib	body_decode
+g_elementwise	crates/mm-model/src/go_decode.rs	Some(slot) => slot.push(item),	Some(slot) => *slot = vec![item],	lib	body_decode
+g_truncate	crates/mm-model/src/go_decode.rs	        backing.truncate(len);	        backing.truncate(backing.len());	lib	body_decode
+g_map_last_wins	crates/mm-model/src/go_decode.rs	Some(entry) => entry.1 = member,	Some(_) => {}	lib	body_decode
+g_flatten_null	crates/mm-model/src/go_decode.rs	entries.retain(|(_, value)| !matches!(value, GoJson::Null));	entries.retain(|_| true);	lib	go_decode
+g_first_folded	crates/mm-model/src/go_decode.rs	.position(|fold| *fold == key_fold)	.rposition(|fold| *fold == key_fold)	lib	body_decode
+g_struct_merge	crates/mm-model/src/go_decode.rs	Some((_, at)) => at.0.push(member),	Some((_, at)) => *at = At::one(member),	lib	body_decode
+g_scalar_earlier	crates/mm-model/src/go_decode.rs	        for value in earlier {	        for value in earlier.iter().take(0) {	lib	body_decode
+g_null_string_zero	crates/mm-model/src/go_decode.rs	        deserialize_string: String => |v| v.visit_borrowed_str(""),	        deserialize_string: String => |v| v.visit_unit(),	lib	body_decode
+control_g_key_fold_name	crates/mm-model/src/go_decode.rs	let key_fold = fold_name(key);\n                        folded\n                            .iter()\n                            .position(|fold| *fold == key_fold)	let folded_key = fold_name(key);\n                        folded\n                            .iter()\n                            .position(|fold| *fold == folded_key)	lib	body_decode
+control_g_since_collect	crates/mm-model/src/go_decode.rs	        self.0[start..].to_vec()	        self.0[start..].iter().copied().collect()	lib	body_decode
