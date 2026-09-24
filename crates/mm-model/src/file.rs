@@ -30,7 +30,8 @@
 //! `1e9` is rejected for being spelled as a float, `"1h"` and `"3600000000000"` are both rejected
 //! for being strings, and an out-of-range integer is rejected while the fields decoded *before*
 //! it stay populated. `serde_json` agrees with Go on all sixteen of those; the seventeenth is
-//! `null`, which Go accepts as zero and we reject ([D-057]).
+//! `null`, which Go accepts as zero and serde's derive alone rejects ([D-057]; the body decoder
+//! agrees with Go).
 //!
 //! # Everything else is the nillable-slice shape
 //!
@@ -263,8 +264,8 @@ mod go_parity {
         let cases = oracle["duration_unmarshal"].as_array().unwrap();
         assert_eq!(cases.len(), 17, "the unmarshal corpus changed size");
 
-        // Go accepts `null` into a scalar and leaves the zero value; serde rejects the document.
-        // See [D-057].
+        // Go accepts `null` into a scalar and leaves the zero value; serde's derive alone rejects
+        // the document, and the body decoder takes it as Go does ([D-057]).
         const NULL_SCALAR: &str = "null";
 
         let (mut accepted, mut rejected) = (0, 0);
@@ -273,14 +274,15 @@ mod go_parity {
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<PresignURLResponse>(doc);
+            let got = crate::utils::decode_one_from_json::<PresignURLResponse>(doc.as_bytes());
             let go_ok = case["ok"].as_bool().unwrap();
 
             if name == NULL_SCALAR {
                 assert!(go_ok, "{name}: Go used to accept it");
-                assert_eq!(case["expiration_after"].as_i64().unwrap(), 0);
-                assert!(got.is_err(), "{name}: expected the documented divergence");
-                continue;
+                assert!(
+                    serde_json::from_str::<PresignURLResponse>(doc).is_err(),
+                    "premise"
+                );
             }
 
             assert_eq!(got.is_ok(), go_ok, "{name}: {doc}");
@@ -313,7 +315,7 @@ mod go_parity {
 
         assert_eq!(
             (accepted, rejected),
-            (6, 10),
+            (7, 10),
             "the accept/reject split moved"
         );
     }
@@ -377,8 +379,8 @@ mod go_parity {
         let cases = oracle["presign_wire"].as_array().unwrap();
         assert_eq!(cases.len(), 8, "the presign corpus changed size");
 
-        // Go matches field names case-insensitively, so `{"URL":…}` populates `url` there and is
-        // an unknown key here. See [D-040].
+        // Go matches field names case-insensitively, so `{"URL":…}` populates `url`; serde's
+        // derive alone ignores it, and the body decoder folds it as Go does ([D-040]).
         const UPPERCASE_KEY: &str = "uppercase_key";
 
         for case in cases {
@@ -386,13 +388,12 @@ mod go_parity {
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let decoded: PresignURLResponse =
-                serde_json::from_str(doc).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let decoded: PresignURLResponse = crate::utils::decode_one_from_json(doc.as_bytes())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
 
             if name == UPPERCASE_KEY {
-                assert_eq!(case["url"].as_str().unwrap(), "https://example.com/f");
-                assert!(decoded.url.is_empty(), "{name}: expected the divergence");
-                continue;
+                let plain: PresignURLResponse = serde_json::from_str(doc).unwrap();
+                assert!(plain.url.is_empty(), "{name}: premise");
             }
 
             assert_eq!(

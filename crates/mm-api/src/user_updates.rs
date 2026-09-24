@@ -921,18 +921,13 @@ mod tests {
     /// `json.NewDecoder(r.Body).Decode(&model.UserPatch)`, through the shared
     /// [`decode_go_struct`].
     ///
-    /// # One row is a known divergence and is asserted as one
-    ///
-    /// `{"USERNAME":"folded"}` sets `Username` in Go — `encoding/json` matches field names
-    /// case-insensitively ([D-040]) — and leaves it unset here, because no
-    /// `go_json::GoFields` schema exists for `UserPatch` or `User`. The test asserts the
-    /// *divergence* rather than skipping the row, so closing [D-460] will fail it and the
-    /// assertion has to be flipped deliberately.
+    /// The folded-key row (`{"USERNAME":"folded"}`) was asserted as a divergence until the body
+    /// decoders took Go's key fold ([D-460]); it is now pinned as agreement.
     #[test]
     fn user_patch_decoding_matches_go() {
         let rows = cases("patch_decode");
         assert!(rows.len() >= 17, "the corpus is populated");
-        let mut divergent = 0;
+        let mut folded = 0;
         for row in rows {
             let body = row["in"].as_str().expect("a body");
             let ours: Result<UserPatch, ApiError> = decode_go_struct(body.as_bytes(), "user");
@@ -944,24 +939,13 @@ mod tests {
             let ours = ours.unwrap_or_else(|_| panic!("Go accepts {body:?}"));
             let theirs: UserPatch =
                 serde_json::from_value(row["patch"].clone()).expect("the patch deserialises");
-
             if body == r#"{"USERNAME":"folded"}"# {
-                assert_eq!(
-                    theirs.username.as_deref(),
-                    Some("folded"),
-                    "Go folds the key"
-                );
-                assert_eq!(ours.username, None, "we do not — [D-460]");
-                divergent += 1;
-                continue;
+                assert_eq!(ours.username.as_deref(), Some("folded"), "Go folds the key");
+                folded += 1;
             }
-
             assert_eq!(ours, theirs, "UserPatch decode of {body:?}");
         }
-        assert_eq!(
-            divergent, 1,
-            "exactly one divergent row, and it is the folded key"
-        );
+        assert_eq!(folded, 1, "the folded-key row is in the corpus");
     }
 
     /// A JSON **array** decodes into a `#[serde(default)]` struct and not into a Go one. Pinned

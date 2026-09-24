@@ -360,22 +360,10 @@ pub async fn query_logs(
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
         .unwrap_or_default();
-    // Through a `Value` first: serde's derive would read a JSON *array* as a struct, field by
-    // position, where Go's decoder refuses anything but an object (or `null`, which is the nil
-    // pointer this handler also refuses).
-    let filter: LogFilter = match mm_model::utils::decode_one_from_json::<Value>(&bytes) {
-        Ok(object @ Value::Object(_)) => match serde_json::from_value::<LogFilter>(object) {
-            Ok(filter) => filter,
-            Err(_) => {
-                return Err(ApiError::from(AppError::new(
-                    "queryLogs",
-                    "api.system.logs.invalidFilter",
-                    None,
-                    String::new(),
-                    500,
-                )));
-            }
-        },
+    // `var filter *model.LogFilter`: a decode error and the nil a `null` leaves are the same 500.
+    let filter: LogFilter = match mm_model::utils::decode_one_from_json::<Option<LogFilter>>(&bytes)
+    {
+        Ok(Some(filter)) => filter,
         _ => {
             return Err(ApiError::from(AppError::new(
                 "queryLogs",

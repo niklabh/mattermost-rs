@@ -298,7 +298,8 @@ mod go_parity {
         let cases = oracle["float_decode"].as_array().unwrap();
         assert_eq!(cases.len(), 20, "the decode corpus changed size");
 
-        // Go accepts `null` into a scalar and leaves the zero value; we reject. See [D-057].
+        // Go accepts `null` into a scalar and leaves the zero value; serde's derive alone rejects
+        // it, and the body decoder takes it as Go does ([D-057]).
         const NULL_SCALAR: &str = "null";
 
         let (mut accepted, mut rejected) = (0, 0);
@@ -307,13 +308,15 @@ mod go_parity {
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<AnalyticsRow>(doc);
+            let got = crate::utils::decode_one_from_json::<AnalyticsRow>(doc.as_bytes());
             let go_ok = case["ok"].as_bool().unwrap();
 
             if name == NULL_SCALAR {
                 assert!(go_ok, "Go used to accept null into a float");
-                assert!(got.is_err(), "{name}: expected the documented divergence");
-                continue;
+                assert!(
+                    serde_json::from_str::<AnalyticsRow>(doc).is_err(),
+                    "premise"
+                );
             }
 
             assert_eq!(got.is_ok(), go_ok, "{name}: {doc}");
@@ -334,7 +337,7 @@ mod go_parity {
 
         assert_eq!(
             (accepted, rejected),
-            (12, 7),
+            (13, 7),
             "the accept/reject split moved"
         );
     }

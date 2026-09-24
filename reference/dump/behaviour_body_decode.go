@@ -15,9 +15,11 @@ package main
 // body holds — scalar, nested struct, pointer to struct, slice of structs, slice of strings,
 // map[string]any — is in one document; the Rust test declares the same struct.
 //
-// Deliberately **not** in the corpus: an explicit `null` for a scalar or inside a slice of
-// structs ([D-057], [D-075]) and a key in the wrong case ([D-460]). Each is its own entry, and a
-// row here would assert a divergence this oracle is not about.
+// The corpus also drives the rules the adapter took on after D-941: `null` into a scalar, a struct,
+// a slice element and a map value (D-057, D-075), keys matched case-insensitively with Go's
+// foldName — including U+212A KELVIN SIGN and U+017F LONG S, the two non-ASCII runes whose fold
+// is ASCII — (D-040, D-460), and a repeated key or a repeated folded spelling, which Go assigns
+// again in document order with a per-kind meaning of "again" (D-071).
 //
 // Determinism: a fixed corpus, no rand, no time.Now.
 
@@ -47,6 +49,17 @@ type bodyDecodeOuter struct {
 	Props map[string]any    `json:"props"`
 }
 
+// Two tags that differ only by case: the exact spelling finds its own field, and a folded one
+// finds the first declared (encode.go:1306, "first folded match takes precedence").
+type bodyDecodeCollide struct {
+	Lower string `json:"k"`
+	Upper string `json:"K"`
+}
+
+var bodyDecodeCollideCorpus = []string{
+	`{"k":"l"}`, `{"K":"u"}`, "{\"\u212a\":\"kelvin\"}", `{"k":"l","K":"u"}`, "{\"K\":\"u\",\"\u212a\":\"kelvin\"}",
+}
+
 var bodyDecodeCorpus = []string{
 	// Not an object.
 	``, `   `, `{`, `null`, ` null `, `[]`, `["x"]`, `[{}]`, `"s"`, `7`, `true`,
@@ -66,6 +79,27 @@ var bodyDecodeCorpus = []string{
 	`{"count":"7"}`, `{"count":1.5}`, `{"flag":1}`, `{"name":7}`,
 	// Unknown keys, and a lone surrogate.
 	`{"zzz":1,"name":"a"}`, `{"name":"\ud800"}`,
+	// null into every kind (D-057, D-075).
+	`{"name":null,"count":null,"flag":null}`, `{"inner":null}`, `{"inner":{"a":null,"n":null}}`,
+	`{"tags":[null]}`, `{"tags":["a",null,"b"]}`, `{"list":[null]}`, `{"list":[null,{"a":"x"}]}`,
+	`{"props":{"k":null}}`, `{"maybe":{"a":null}}`,
+	// Keys folded (D-040, D-460).
+	`{"NAME":"a"}`, `{"Name":"a","COUNT":3,"Flag":true}`, `{"INNER":{"A":"x","N":1}}`,
+	`{"nAmE":"a"}`, `{"na_me":"a"}`, `{"TAGS":["t"]}`, `{"PROPS":{"K":1}}`,
+	"{\"TAG\u017f\":[\"s\"]}", "{\"inner\":{\"\u212a\":1}}", "{\"n\u0430me\":\"cyrillic\"}",
+	// Repeated keys and repeated spellings (D-071).
+	`{"name":"a","NAME":"b"}`, `{"NAME":"b","name":"a"}`, `{"name":"a","name":null}`,
+	`{"count":1,"count":null}`, `{"name":7,"name":"a"}`, `{"name":"a","name":7}`,
+	`{"inner":{"a":"x"},"inner":{"n":2}}`, `{"inner":{"a":"x"},"inner":null}`,
+	`{"inner":{"a":"x"},"INNER":{"n":2}}`,
+	`{"maybe":{"a":"x"},"maybe":{"n":2}}`, `{"maybe":{"a":"x"},"maybe":null,"maybe":{"n":2}}`,
+	`{"tags":["a","b"],"tags":["x"]}`, `{"tags":["a","b"],"tags":[null]}`,
+	`{"tags":["a","b"],"tags":["x"],"tags":[null,null]}`, `{"tags":["a","b"],"tags":[],"tags":[null,null]}`,
+	`{"tags":["a","b"],"tags":null,"tags":[null]}`,
+	`{"list":[{"a":"x"}],"list":[{"n":1}]}`,
+	`{"props":{"a":1,"b":2},"props":{"a":3}}`, `{"props":{"a":1},"props":null,"props":{"b":2}}`,
+	`{"props":{"a":{"x":1}},"props":{"a":{"y":2}}}`,
+	`{"inner":[],"inner":{}}`, `{"tags":"a","tags":[]}`,
 	// A full document.
 	`{"name":"n","count":9,"flag":true,"inner":{"a":"i","n":1},"maybe":{"a":"m","n":2},` +
 		`"list":[{"a":"l"}],"tags":["t"],"props":{"p":true}}`,
@@ -142,8 +176,24 @@ func int64DecodeCases() []map[string]any {
 	return out
 }
 
+// The collision struct, through Decode into a value.
+func bodyDecodeCollideCases() []map[string]any {
+	var out []map[string]any
+	for _, body := range bodyDecodeCollideCorpus {
+		var value bodyDecodeCollide
+		err := json.NewDecoder(strings.NewReader(body)).Decode(&value)
+		row := map[string]any{"in": body, "ok": err == nil}
+		if err == nil {
+			row["value"] = value
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
 func writeBodyDecodeBehaviourFixture(outDir string) error {
 	out := map[string]any{
+		"collide_decode":  bodyDecodeCollideCases(),
 		"struct_decode":   bodyDecodeCases(),
 		"map_bool_decode": mapBoolDecodeCases(),
 		"int64_decode":    int64DecodeCases(),

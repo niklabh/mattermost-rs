@@ -116,7 +116,9 @@ fn decode(bytes: &[u8], whole: bool) -> Option<(ScheduledPost, serde_json::Value
         object.retain(|_, field| !field.is_null());
     }
     remap_object_keys(&mut value, &SCHEDULED_POST_FIELDS);
-    let decoded = serde_json::from_value(value).ok()?;
+    // The embedded `Draft` makes this a `#[serde(flatten)]` type, which the body decoder cannot
+    // fold for; the remap above does that. Below the top level its rules apply ([D-075]).
+    let decoded = mm_model::utils::from_value_go(&value).ok()?;
     Some((decoded, raw))
 }
 
