@@ -1,0 +1,16 @@
+[package]
+name = "gogoldmark"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+# A port of github.com/yuin/goldmark v1.8.2 (MIT). It contains no Mattermost code and must never
+# depend on an `mm-*` crate.
+license = "MIT"
+repository.workspace = true
+description = "Byte-exact port of yuin/goldmark v1.8.2 (CommonMark, the HTML renderer and GFM)"
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -32,6 +32,10 @@ members = [
     "crates/gohtml",
     "crates/gohtml2text",
     "crates/gomail",
+    # Byte-exact port of yuin/goldmark v1.8.2 (MIT): CommonMark, the HTML renderer and GFM, which
+    # Mattermost's push-notification text and notification e-mail HTML are rendered with.
+    # Forbidden from depending on any mm-* crate. mm-app drives it.
+    "crates/gogoldmark",
 ]
 
 [workspace.package]

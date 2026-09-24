@@ -23,6 +23,9 @@ goimage.workspace = true
 # of jaytaylor/html2text — what `mail.rs` (platform/shared/mail) drives.
 gomail = { path = "../gomail" }
 gohtml2text = { path = "../gohtml2text" }
+# Byte-exact port of goldmark (MIT): push-notification text and notification e-mail HTML
+# (`crate::markdown_utils`).
+gogoldmark = { path = "../gogoldmark" }
 
 serde.workspace = true
 serde_json.workspace = true
