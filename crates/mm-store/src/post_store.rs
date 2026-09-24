@@ -637,12 +637,17 @@ pub trait PostStore {
     ///
     /// `params_list` is taken by value because Go rewrites `params.Terms` in place before the
     /// searches run and the caller never reads it again.
+    ///
+    /// `cjk_search` is `FeatureFlags.CJKSearch`, which Go's store reads from the running config
+    /// through `WithFeatureFlags` (sqlstore/store.go:184); this store has no config, so the
+    /// caller passes it.
     fn search_posts_for_user(
         &self,
         params_list: Vec<SearchParams>,
         user_id: &str,
         team_id: &str,
         page: i64,
+        cjk_search: bool,
     ) -> impl std::future::Future<Output = Result<PostSearchResults, StoreError>> + Send;
 
     /// Port of `SqlPostStore.PermanentDeleteByUser` (post_store.go:1163).
@@ -4141,6 +4146,7 @@ impl PostStore for SqlPostStore {
         user_id: &str,
         team_id: &str,
         page: i64,
+        cjk_search: bool,
     ) -> Result<PostSearchResults, StoreError> {
         if page > 0 {
             return Ok(PostSearchResults::new(Some(PostList::new()), None));
@@ -4156,7 +4162,7 @@ impl PostStore for SqlPostStore {
             // "remove any unquoted term that contains only non-alphanumeric chars" — applied to
             // `Terms` only; `ExcludedTerms` is not filtered here or anywhere.
             params.terms = remove_non_alpha_numeric_unquoted_terms(&params.terms, " ");
-            let found = search(&self.pool, team_id, user_id, params).await?;
+            let found = search(&self.pool, team_id, user_id, params, cjk_search).await?;
             posts.extend(&found);
         }
         posts.sort_by_create_at();
@@ -4641,16 +4647,61 @@ pub(crate) const SPECIAL_SEARCH_CHARS: [char; 7] = ['<', '>', '+', '(', ')', '~'
 ///
 /// # The CJK branch is live
 ///
-/// `FeatureFlags.CJKSearch` defaults to `true` (feature_flags.go:198), so a term containing Han,
-/// Hiragana, Katakana or Hangul takes the `LIKE` path instead of `to_tsquery` on a stock server
-/// as much as here. `SearchWithoutUserId` is never set by this route's caller and is not
+/// `cjk_search` is `FeatureFlags.CJKSearch`, which defaults to `true` (feature_flags.go:198) and
+/// which Go's store reads through `WithFeatureFlags` (sqlstore/store.go:184) — see
+/// [`term_clause`]. `SearchWithoutUserId` is never set by this route's caller and is not
 /// modelled: every search is scoped to the caller's channel memberships.
+/// The term half of `search`'s WHERE (post_store.go:2282-2300).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct TermClause {
+    /// The `to_tsquery` text, on the full-text path.
+    ts_query: Option<String>,
+    /// One `LIKE` pattern per term on the CJK path; `None` when there are none, so no clause.
+    like_terms: Option<Vec<String>>,
+    /// One `NOT LIKE` pattern per excluded term on the CJK path.
+    like_excluded: Option<Vec<String>>,
+}
+
+/// Go's three-way branch over the blanked terms: nothing when both are empty ("we've already
+/// confirmed that we have a channel or user to search for"); `buildCJKSearchClause`
+/// (post_store.go:2202) when `FeatureFlags.CJKSearch` is on **and** either side contains Han,
+/// Hiragana, Katakana or Hangul; otherwise `to_tsquery`, after `neutralizeNonWordHyphens`.
+///
+/// With the flag off a CJK term goes to `to_tsquery` like any other, which under the default
+/// English text-search config matches only whole space-delimited tokens.
+fn term_clause(terms: &str, excluded_terms: &str, or_terms: bool, cjk_search: bool) -> TermClause {
+    if terms.is_empty() && excluded_terms.is_empty() {
+        return TermClause::default();
+    }
+    if cjk_search && (contains_cjk(terms) || contains_cjk(excluded_terms)) {
+        // One `LIKE` per term, ANDed or ORed, and one `NOT LIKE` per excluded term. An empty
+        // list adds no clause, so it binds as NULL.
+        let patterns = |input: &str| -> Option<Vec<String>> {
+            let parsed: Vec<String> = split_cjk_search_terms(input)
+                .iter()
+                .map(|term| like_pattern(term))
+                .collect();
+            (!parsed.is_empty()).then_some(parsed)
+        };
+        return TermClause {
+            ts_query: None,
+            like_terms: patterns(terms),
+            like_excluded: patterns(excluded_terms),
+        };
+    }
+    TermClause {
+        ts_query: Some(build_ts_query(terms, excluded_terms, or_terms)),
+        ..TermClause::default()
+    }
+}
+
 #[tracing::instrument(skip_all, fields(team_id = %team_id, hashtag = params.is_hashtag, or_terms = params.or_terms))]
 async fn search(
     pool: &PgPool,
     team_id: &str,
     user_id: &str,
     params: &SearchParams,
+    cjk_search: bool,
 ) -> Result<PostList, StoreError> {
     let mut list = PostList::new();
     // Note what the list omits: `ExcludedDate`, `ExcludedAfterDate` and `ExcludedBeforeDate`.
@@ -4714,31 +4765,11 @@ async fn search(
         excluded_terms = excluded_terms.replace(c, " ");
     }
 
-    let mut ts_query: Option<String> = None;
-    let mut like_terms: Option<Vec<String>> = None;
-    let mut like_excluded: Option<Vec<String>> = None;
-    if terms.is_empty() && excluded_terms.is_empty() {
-        // "we've already confirmed that we have a channel or user to search for"
-    } else if contains_cjk(&terms) || contains_cjk(&excluded_terms) {
-        // `buildCJKSearchClause` (post_store.go:2202): one `LIKE` per term, ANDed or ORed, and
-        // one `NOT LIKE` per excluded term. An empty list adds no clause, so it binds as NULL.
-        let parsed: Vec<String> = split_cjk_search_terms(&terms)
-            .iter()
-            .map(|term| like_pattern(term))
-            .collect();
-        if !parsed.is_empty() {
-            like_terms = Some(parsed);
-        }
-        let parsed: Vec<String> = split_cjk_search_terms(&excluded_terms)
-            .iter()
-            .map(|term| like_pattern(term))
-            .collect();
-        if !parsed.is_empty() {
-            like_excluded = Some(parsed);
-        }
-    } else {
-        ts_query = Some(build_ts_query(&terms, &excluded_terms, params.or_terms));
-    }
+    let TermClause {
+        ts_query,
+        like_terms,
+        like_excluded,
+    } = term_clause(&terms, &excluded_terms, params.or_terms, cjk_search);
 
     let text_config = crate::channel_store::default_text_search_config(pool).await?;
 
@@ -5047,6 +5078,44 @@ fn like_pattern(term: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `FeatureFlags.CJKSearch` (post_store.go:2284): on — Go's default — a CJK term takes the
+    /// `LIKE` path; off, it takes `to_tsquery` like any other term. A non-CJK term and an empty
+    /// search are the same either way.
+    #[test]
+    fn the_cjk_flag_decides_like_or_tsquery() {
+        let like = term_clause("日本 語", "中", false, true);
+        assert_eq!(
+            like,
+            TermClause {
+                ts_query: None,
+                like_terms: Some(vec!["%日本%".to_owned(), "%語%".to_owned()]),
+                like_excluded: Some(vec!["%中%".to_owned()]),
+            }
+        );
+        // Either side alone is enough.
+        assert!(term_clause("plain", "中", true, true).ts_query.is_none());
+        assert_eq!(
+            term_clause("日本 語", "中", false, false),
+            TermClause {
+                ts_query: Some(build_ts_query("日本 語", "中", false)),
+                ..TermClause::default()
+            }
+        );
+        for cjk_search in [true, false] {
+            assert_eq!(
+                term_clause("plain words", "", true, cjk_search),
+                TermClause {
+                    ts_query: Some(build_ts_query("plain words", "", true)),
+                    ..TermClause::default()
+                }
+            );
+            assert_eq!(
+                term_clause("", "", false, cjk_search),
+                TermClause::default()
+            );
+        }
+    }
 
     fn row() -> PostRow {
         PostRow {

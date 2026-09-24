@@ -1480,6 +1480,26 @@ mod go_parity {
         }
     }
 
+    /// `GetStaticScriptHashes(subpath, cfg.FeatureFlags.EnableConcurrentReact)`
+    /// (web/handlers.go:58): the flag, read from the running config (`load_model_config`), picks
+    /// which loader script's hash the CSP carries.
+    #[test]
+    fn the_csp_hash_follows_the_concurrent_react_flag() {
+        let setup = |on: bool| {
+            let mut flags = mm_model::feature_flags::FeatureFlags::default();
+            flags.set_defaults();
+            flags.enable_concurrent_react = on;
+            let config: mm_model::config::Config = serde_json::from_value(serde_json::json!({
+                "FeatureFlags": serde_json::to_value(&flags).unwrap(),
+            }))
+            .unwrap();
+            StaticSetup::from_config(&config, "/".to_owned()).csp_sha_directive
+        };
+        assert_eq!(setup(true), get_static_script_hashes("/", true));
+        assert_eq!(setup(false), get_static_script_hashes("/", false));
+        assert_ne!(setup(true), setup(false));
+    }
+
     #[test]
     fn static_script_hashes_match_go() {
         let oracle = oracle();

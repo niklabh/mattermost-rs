@@ -10097,7 +10097,9 @@ and an unsupported `DefaultServerLocale`/`DefaultClientLocale`/`AvailableLocales
 
 ## D-1161 · Six feature-flag reads are still constants now that `Config::feature_flags` exists
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-260, `FeatureFlags` block)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (D-260, `FeatureFlags` block)
+**Closed** 2026-09-24 — every site reads `Config::feature_flags` (CJKSearch as a `search_posts_for_user` parameter); the
+`EnableDocs` "cascade" was never flag-gated in Go and its doc comment is corrected; a shared DM/GM under a running sync service forwards.
 
 Each is Go's default and so right on a stock server, and wrong under the matching
 `MM_FEATUREFLAGS_*` variable: `channel_create.rs`'s `FEATURE_FLAG_ENABLE_SHARED_CHANNELS_DMS` and
