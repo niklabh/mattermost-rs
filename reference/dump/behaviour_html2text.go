@@ -176,6 +176,12 @@ var h2tAdversarial = []string{
 	"<b a=1 b=2><b b=2 a=1><b a=1 b=2><b b=2 a=1>x",
 	"<b><b><b><b>x</b></b></b></b>",
 	"<p><b><b><b><b></p><p>x",
+	"<table><tr><b><div>x</b>y</tr></table>",
+	"<table><thead><b><div>x</b>y</thead></table>",
+	"<table><tfoot><i><p>x</i>y</tfoot></table>",
+	"<table><tr><a><div><b><p>x</a>y</b>z</table>",
+	"<svg><clipPath><path></clippath>x</svg>",
+	"<svg><foreignObject><div></foreignobject>x</svg>",
 	"<p><b a=1><b a=1><b a=2><b a=1></p><p>x",
 	"<font color=red><font color=red><font color=red><font color=red><p>x</font>",
 	"<nobr>a<nobr>b<nobr>c",
@@ -316,6 +322,37 @@ func h2tParseFuzz(n int) []string {
 	return out
 }
 
+// h2tFormattingFuzz is tag soup of formatting elements, blocks and table parts only, with many
+// misnested end tags: the adoption agency's inner loop (the bookmark bookkeeping of steps 14.5
+// and 19) and its foster-parenting exit need longer runs of formatting elements than the general
+// soup produces.
+func h2tFormattingFuzz(n int) []string {
+	r := rand.New(rand.NewPCG(0x61646f70, 0x74696f6e))
+	fmtTags := []string{"a", "b", "i", "u", "s", "em", "font", "nobr", "big", "code"}
+	blocks := []string{"p", "div", "table", "tr", "td", "tbody", "blockquote", "li", "h1"}
+	var out []string
+	for k := 0; k < n; k++ {
+		var b strings.Builder
+		steps := 8 + r.IntN(40)
+		for s := 0; s < steps; s++ {
+			switch r.IntN(9) {
+			case 0, 1, 2, 3:
+				b.WriteString("<" + fmtTags[r.IntN(len(fmtTags))] + ">")
+			case 4:
+				b.WriteString("<" + blocks[r.IntN(len(blocks))] + ">")
+			case 5, 6:
+				b.WriteString("</" + fmtTags[r.IntN(len(fmtTags))] + ">")
+			case 7:
+				b.WriteString("</" + blocks[r.IntN(len(blocks))] + ">")
+			default:
+				b.WriteString("x")
+			}
+		}
+		out = append(out, b.String())
+	}
+	return out
+}
+
 func h2tParseCases() ([]h2tParseCase, error) {
 	dir, err := h2tModuleDir("golang.org/x/net")
 	if err != nil {
@@ -358,6 +395,9 @@ func h2tParseCases() ([]h2tParseCase, error) {
 	}
 	for i, in := range h2tParseFuzz(1500) {
 		add(fmt.Sprintf("fuzz#%d", i), in)
+	}
+	for i, in := range h2tFormattingFuzz(1500) {
+		add(fmt.Sprintf("fmtfuzz#%d", i), in)
 	}
 	return cases, nil
 }
@@ -433,7 +473,11 @@ var h2tTargeted = []string{
 	". starts", "text<span>.after</span>", "a<span>b</span>", "<span>a</span><span>b</span>", "a <span> b</span>",
 	"&lt;tag&gt; &amp; &nbsp; &copy; &#8212;", "<!-- comment -->visible", "<!DOCTYPE html>doc",
 	"<p>a</p><blockquote>\n</blockquote>", "<div>\n</div>x", "<br><br><br>",
-	"<svg><a href='http://svg.example'>svg link</a><title>t</title></svg>", "<math><mi>x</mi></math>",
+	"<svg><a href='http://svg.example'>svg link</a><title>t</title></svg>",
+	"<svg><a href='http://one.example' xlink:href='http://two.example'>t</a></svg>",
+	"<blockquote>" + strings.Repeat("a", 74) + "<br>b</blockquote>",
+	"<blockquote>" + strings.Repeat("a", 73) + "<br>b</blockquote>",
+	"<blockquote>" + strings.Repeat("a", 74) + "<li>b</li></blockquote>", "<math><mi>x</mi></math>",
 	"<textarea>ta\n  text</textarea>", "<select><option>o1<option>o2</select>", "<noscript>ns</noscript>",
 	"<iframe>if</iframe>", "<xmp><b>x</b></xmp>", "<plaintext><b>raw</b>",
 	"<frameset><frame></frameset>", "<table><tr><td>" + h2tLong + "</td></tr></table>",
