@@ -417,3 +417,75 @@ async fn an_all_activity_member_is_pushed_without_a_mention() {
     common::delete_channel(&client(), &f.admin, &f.channel_id).await;
     common::delete_plain_user(&client(), &f.admin, &f.reader.id).await;
 }
+
+/// Reading **on the phone** clears nothing on it — the session that did the reading is skipped —
+/// and an unread channel with no mention sends no clear at all.
+#[tokio::test]
+async fn no_clear_goes_to_the_reading_session_or_for_a_channel_without_a_mention() {
+    if !stack_enabled() {
+        return;
+    }
+    let proxy = proxy();
+    let device = "android_rn:mmrs-push-noclear";
+    let f = fixture("pushnoclear", device).await;
+
+    for base in [GO, RUST] {
+        // A mention, read on the phone itself: the clear would go only to the phone, which is
+        // the reading session.
+        common::post_message(
+            &client(),
+            &f.admin,
+            &f.channel_id,
+            &format!("@{} hi", f.username),
+            None,
+        )
+        .await;
+        let _ = proxy
+            .take(WAIT, for_device("mmrs-push-noclear", "message"))
+            .await;
+        let (status, _) = post(
+            base,
+            &f.reader.token,
+            "/api/v4/channels/members/me/view",
+            serde_json::json!({ "channel_id": f.channel_id }),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}");
+        assert!(
+            proxy
+                .take(
+                    Duration::from_secs(2),
+                    for_device("mmrs-push-noclear", "clear")
+                )
+                .await
+                .is_none(),
+            "{base} cleared the session that did the reading"
+        );
+        read_and_lose_focus(&f.viewer_token, &f.channel_id, "mmrs-push-noclear").await;
+
+        // Unread, not mentioned, read on the other session: nothing to clear.
+        common::post_message(&client(), &f.admin, &f.channel_id, "no names here", None).await;
+        let (status, _) = post(
+            base,
+            &f.viewer_token,
+            "/api/v4/channels/members/me/view",
+            serde_json::json!({ "channel_id": f.channel_id }),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}");
+        assert!(
+            proxy
+                .take(
+                    Duration::from_secs(2),
+                    for_device("mmrs-push-noclear", "clear")
+                )
+                .await
+                .is_none(),
+            "{base} cleared a channel that held no mention"
+        );
+        read_and_lose_focus(&f.viewer_token, &f.channel_id, "mmrs-push-noclear").await;
+    }
+
+    common::delete_channel(&client(), &f.admin, &f.channel_id).await;
+    common::delete_plain_user(&client(), &f.admin, &f.reader.id).await;
+}
