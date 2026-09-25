@@ -331,4 +331,8 @@ mod parity {
     pub mod url_length;
     // Appended 2026-09-25: MFA enrolment and the MFA login across both servers (D-500, D-1210).
     pub mod mfa_enrolment;
+    // Appended 2026-09-25: persistent notifications, their resolution and their job (D-401, D-551).
+    pub mod persistent_notifications;
+    // Appended 2026-09-25: the product-notices and notify-admin jobs (D-804).
+    pub mod notify_jobs;
 }

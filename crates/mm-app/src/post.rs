@@ -379,7 +379,11 @@ impl App {
         // The hook now runs here too ([`App::apply_posts_will_be_consumed_hook`]), so that reason
         // is gone; what keeps the forward is that no custom-typed post has been measured through
         // this pipeline against Go, and [`crate::post_create`] refuses to write one.
-        if original.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX) {
+        // `custom_up_notification` is the server's own (the notify-admin send) and is measured —
+        // see `parity::notify_jobs`.
+        if original.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX)
+            && original.post_type != crate::notify_admin::POST_TYPE_UP_NOTIFICATION
+        {
             return Err(PrepareError::Unreproducible("plugin post type"));
         }
         // The burn-on-read block at post_metadata.go:217 reads the ReadReceipt and TemporaryPost

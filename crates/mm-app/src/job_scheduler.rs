@@ -252,6 +252,42 @@ pub fn cleanup_desktop_tokens_scheduler() -> PeriodicScheduler {
     )
 }
 
+/// Port of `jobs/product_notices/scheduler.go`: a `PeriodicScheduler` whose `NextScheduleTime`
+/// is overridden to `time.Now()` plus `AnnouncementSettings.NoticesFetchFrequency` seconds —
+/// **no jitter**, unlike the base scheduler — enabled while either notice switch is on.
+pub struct ProductNoticesScheduler;
+
+impl Scheduler for ProductNoticesScheduler {
+    fn job_type(&self) -> &'static str {
+        mm_model::job::JOB_TYPE_PRODUCT_NOTICES
+    }
+
+    fn enabled(&self, config: &Config) -> bool {
+        config.admin_notices_enabled || config.user_notices_enabled
+    }
+
+    fn next_schedule_time(
+        &self,
+        config: &Config,
+        _now: DateTime<Local>,
+        _pending_jobs: bool,
+        _last_successful_job: Option<&Job>,
+    ) -> Option<DateTime<Local>> {
+        Local::now().checked_add_signed(chrono::Duration::seconds(config.notices_fetch_frequency))
+    }
+}
+
+/// Port of `notify_admin.MakeInstallPluginScheduler` (install_plugin_scheduler.go:16) for
+/// `install_plugin_notify_admin`: every twenty-four hours (plus the base jitter), always enabled
+/// for this type.
+pub fn install_plugin_notify_admin_scheduler() -> PeriodicScheduler {
+    PeriodicScheduler::new(
+        mm_model::job::JOB_TYPE_INSTALL_PLUGIN_NOTIFY_ADMIN,
+        Duration::from_secs(24 * 60 * 60),
+        |_config| true,
+    )
+}
+
 /// The schedulers this build knows about, matching [`crate::job_runtime::registered_workers`].
 ///
 /// Nothing starts them; see the module note and [D-802].
@@ -264,6 +300,8 @@ pub fn registered_schedulers() -> Vec<Box<dyn Scheduler>> {
         Box::new(crate::job_workers::expiry_notify_scheduler()),
         Box::new(crate::job_workers::cleanup_expired_access_tokens_scheduler()),
         Box::new(crate::job_workers::notify_expiring_access_tokens_scheduler()),
+        Box::new(ProductNoticesScheduler),
+        Box::new(install_plugin_notify_admin_scheduler()),
     ]
 }
 
@@ -366,6 +404,49 @@ mod tests {
         );
     }
 
+    /// `NoticesFetchFrequency` seconds from now, with no jitter, and off only when both notice
+    /// switches are.
+    #[test]
+    fn the_product_notices_scheduler_waits_the_fetch_frequency() {
+        let config = Config {
+            notices_fetch_frequency: 120,
+            ..Config::default()
+        };
+        let before = Local::now();
+        let next = ProductNoticesScheduler
+            .next_schedule_time(&config, before, false, None)
+            .expect("representable");
+        let delta = next - before;
+        assert!(delta >= chrono::Duration::seconds(120), "{delta}");
+        assert!(delta < chrono::Duration::seconds(121), "no jitter: {delta}");
+        for (admin, user, on) in [
+            (true, false, true),
+            (false, true, true),
+            (false, false, false),
+        ] {
+            let config = Config {
+                admin_notices_enabled: admin,
+                user_notices_enabled: user,
+                ..Config::default()
+            };
+            assert_eq!(
+                ProductNoticesScheduler.enabled(&config),
+                on,
+                "{admin} {user}"
+            );
+        }
+    }
+
+    /// Workers with no scheduler here, each for a stated reason. Nothing starts a scheduler in
+    /// this server (see the module note), so a missing one changes nothing at run time; the list
+    /// keeps the gap named rather than silent.
+    ///
+    /// - `post_persistent_notifications`: `enabledFunc` is `MinimumProfessionalLicense` and the
+    ///   period is half `PersistentNotificationIntervalMinutes`, neither of which a
+    ///   [`Scheduler`] can read from [`Config`].
+    const WORKERS_WITHOUT_A_SCHEDULER: &[&str] =
+        &[mm_model::job::JOB_TYPE_POST_PERSISTENT_NOTIFICATIONS];
+
     #[test]
     fn the_registered_schedulers_match_the_registered_workers() {
         let schedulers = registered_schedulers();
@@ -375,6 +456,13 @@ mod tests {
         // the report API (report.go:225). So the counts differ; only the direction
         // "a scheduler queues nothing no worker runs" is an invariant.
         assert!(schedulers.len() <= workers.len());
+        for job_type in WORKERS_WITHOUT_A_SCHEDULER {
+            assert!(workers.get(job_type).is_some(), "{job_type} has a worker");
+            assert!(
+                schedulers.iter().all(|s| s.job_type() != *job_type),
+                "{job_type} is listed as unscheduled but has a scheduler"
+            );
+        }
         for scheduler in &schedulers {
             assert!(
                 workers.get(scheduler.job_type()).is_some(),

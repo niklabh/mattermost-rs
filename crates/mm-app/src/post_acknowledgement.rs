@@ -31,7 +31,7 @@ use mm_model::websocket_message::{
     WEBSOCKET_EVENT_ACKNOWLEDGEMENT_ADDED, WEBSOCKET_EVENT_ACKNOWLEDGEMENT_REMOVED,
     WEBSOCKET_EVENT_POST_EDITED, WebSocketEvent,
 };
-use mm_store::{PostAcknowledgementStore, PostStore, StoreError};
+use mm_store::{PostAcknowledgementStore, StoreError};
 
 use crate::App;
 use crate::post::{PrepareError, PreparePostForClientOpts};
@@ -105,6 +105,10 @@ impl App {
                     )
                 }
             })?;
+
+        // `ResolvePersistentNotification` after the upsert, as in Go: its failure answers the
+        // request with the error although the acknowledgement is written ([D-551], closed).
+        self.resolve_persistent_notification(&post, user_id).await?;
 
         // `InvalidateLastPostTimeCache`: nothing here caches the last post time.
         self.send_acknowledgement_event(WEBSOCKET_EVENT_ACKNOWLEDGEMENT_ADDED, &saved, &post)
@@ -198,37 +202,14 @@ impl App {
         Ok(AcknowledgementWrite::Done(()))
     }
 
-    /// The two things a save can do that this process cannot, decided before the write.
-    ///
-    /// `ResolvePersistentNotification` (post_persistent_notification.go:20) gives up on its
-    /// first lines for the author's own post, a disabled feature, or — the common case — a post
-    /// that is not a persistent-notification post; only a live row past all three makes the
-    /// request Go's. `post.root_id` is not consulted there, unlike the reaction path.
+    /// The one thing a save can do that this process cannot, decided before the write: the
+    /// `post_edited` event needs the post's client shape. (A persistent-notification post was the
+    /// other until [D-551] closed; it is resolved after the write now, as in Go.)
     async fn acknowledgement_undecidable(
         &self,
         post: &Post,
-        user_id: &str,
+        _user_id: &str,
     ) -> AppResult<Option<&'static str>> {
-        if post.user_id != user_id
-            && self.is_persistent_notifications_enabled()
-            && self
-                .store()
-                .post()
-                .has_persistent_notification(&post.id)
-                .await
-                .map_err(|err| {
-                    tracing::error!(error = %err, "persistent notification lookup failed");
-                    AppError::boxed(
-                        "ResolvePersistentNotification",
-                        "app.post_priority.delete_persistent_notification_post.app_error",
-                        None,
-                        String::new(),
-                        500,
-                    )
-                })?
-        {
-            return Ok(Some("the post is a persistent-notification post"));
-        }
         if let Err(PrepareError::Unreproducible(why)) = self.prepared_for_update_event(post).await {
             return Ok(Some(why));
         }

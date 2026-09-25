@@ -7539,7 +7539,9 @@ be done without claiming on shapes we then forward.
 ## D-401 · createPost serves one shape and forwards the rest
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (createPost)
-**Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed), then `file_ids`
+**Narrowed** 2026-09-25 — `persistent_notifications: true` and a reply to a live
+persistent-notification root are served (`mm_app::post_persistent_notification`,
+`parity::persistent_notifications`); **Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed), then `file_ids`
 (`attachFilesToPost`) and a `PostPriority`; 2026-09-19 — a message with a link is served
 (`mm_app::link_metadata`: OpenGraph, image and plain-link previews, the image dimensions, the
 permalink preview and its `previewed_post` prop, the `LinkMetadata` row), and a permalink to a post
@@ -7553,8 +7555,6 @@ it:
 
 | forwarded shape | what it needs |
 |---|---|
-| a reply to a live persistent-notification root | `ResolvePersistentNotification` after the save — the [D-551] scan |
-| `persistent_notifications: true` | `forEachPersistentNotificationPost`'s recipients check, `savePostsPersistentNotifications`, and the job that sends from the row (a priority without it is served since 2026-09-14) |
 | `burn_on_read` | the `TemporaryPost` and `ReadReceipts` stores, and `RevealBurnOnReadPostsForUser` |
 | any non-default post type | `card` reads `FeatureFlags.IntegratedBoards`; `custom_*` is a plugin's |
 | a DM whose receiver has the auto-responder on | `SendAutoResponseIfNecessary`, which writes the response as a second post (group messages, and DMs with it off, are served since 2026-09-14) |
@@ -8523,21 +8523,13 @@ pins the hand-over and Go's own 400 for an invalid body.
 **What is owed:** `SchemeStore::save`/`update`/`delete` with the role cascade
 (sqlstore/scheme_store.go), the three app functions, and their audit records — behind these
 three routes, compared against the licensed pair.
-## D-551 · an acknowledgement on a persistent-notification post is forwarded, not served
+## D-551 · an acknowledgement on a persistent-notification post is forwarded, not served — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (licensed acknowledgements)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (licensed acknowledgements)
 
-`saveAcknowledgementForPostWithPost` (app/post_acknowledgements.go:44) runs
-`ResolvePersistentNotification` **after** the upsert and returns its error, which would leave the
-row written and the request failed. That order cannot be reproduced by declining afterwards, so
-`App::save_acknowledgement_for_post` decides before the write and hands the whole request to Go
-when the post is a live persistent-notification post (`PostStore::has_persistent_notification`),
-exactly as the reaction path does. Go's function gives up on its first lines for every other post
-— the author's own, the feature off, no row — so nearly every request is served.
-
-**What is owed:** `forEachPersistentNotificationPost` and the mention scan behind it
-(app/post_persistent_notification.go), shared with reactions. Reachable on the licensed pair by
-creating a post with `priority.persistent_notifications` through the oracle; not attempted here.
+Paid off: `ResolvePersistentNotification` is ported (`mm_app::post_persistent_notification`) and runs
+after the write on the acknowledgement, reaction and reply paths, as in Go;
+`parity::persistent_notifications` compares all three on the licensed pair.
 
 ---
 
@@ -9170,6 +9162,11 @@ configured.
 ## D-804 · Eighteen of the twenty-nine registered job types have no worker here
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (app/server.go:1585) · **Owner** the jobs subsystem
+**Narrowed** 2026-09-25 — `post_persistent_notifications`, `product_notices` and
+`install_plugin_notify_admin` have workers (and the last two their schedulers), each compared with
+Go's own run in `parity::persistent_notifications` / `parity::notify_jobs`. `upgrade_notify_admin`
+and `trial_notify_admin` are [D-1321]; `resend_invitation_email` is [D-1322]. The count in the title
+is as raised.
 
 `mm_app::job::REGISTERED_JOB_TYPES` lists the twenty-nine types the Go server registers a worker
 for, and `App::create_job` validates against it — so this server can create a job of any of them.
@@ -10140,6 +10137,53 @@ Ported: a hook moving to another channel is checked for its old owner with
 Ported: an empty `team_id` is filled from the stored hook and any other is the 400, after
 `"attempt"` and before the permissions;
 `parity::webhook_writes::an_outgoing_update_naming_another_team_is_refused`.
+
+---
+
+## D-1320 · A persistent-notification post this server cannot prepare fails the job run here
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (post_persistent_notifications)
+
+`sendPersistentNotifications` publishes the post as `PreparePostForClient` shapes it. When a due
+post is one of the shapes `mm_app::post::prepare_post_for_client` refuses (a custom post type, the
+image-proxy rewrite), a job run *claimed by this server* returns
+`PersistentNotificationError::Unreproducible` and records a job error before `UpdateLastActivity`,
+so that page's notifications are not sent until a later run — where Go sends them. The runtime
+cannot hand a claimed job back (its structure is the jobs owner's). Reachable only with the job
+workers on (`MM_API_ENABLE_JOB_WORKERS`).
+
+**What is owed:** either the refused prepare shapes, or a way for a worker to release a claimed job.
+
+---
+
+## D-1321 · `upgrade_notify_admin` and `trial_notify_admin` have no worker: their `isEnabled` is the licence
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (jobs/notify_admin/worker.go)
+
+Both bodies are ported — `App::do_check_for_admin_notifications`, the same send the
+`install_plugin_notify_admin` worker and `trigger-notify-admin-posts` run — but a worker's
+`isEnabled` is `license != nil && *license.Features.Cloud`, over the licence captured when the
+workers were registered, and a `SimpleWorker`'s `is_enabled` is a `fn(&Config)`: the licence is not
+reachable from it. Registering either as always-enabled would run a Cloud-only job on every server.
+Their schedulers (`notify_admin.MakeScheduler`, the same licence test) are unported for the same
+reason. Neither route nor job reaches them on a build without a Cloud licence.
+
+**What is owed:** an `is_enabled` that can read the licence (the runtime is the jobs owner's), then
+two `workers.add` lines.
+
+## D-1322 · `resend_invitation_email` has no worker: its `DoJob` never claims the job
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (jobs/resend_invitation_email/worker.go)
+
+`ResendInvitationEmailWorker` is not a `SimpleWorker`. Its `DoJob` does **not** call `ClaimJob`:
+it reads `Data["scheduledAt"]`, and only once 48 hours (or `MM_RESEND_INVITATION_EMAIL_JOB_DURATION`)
+have passed does it resend the invitations (`InviteNewUsersToTeamGracefully` to the addresses not
+yet in the team) and set the job successful — until then the job stays `pending` and is offered
+again on every poll. A `SimpleWorker` claims first, so registering one would move a waiting job to
+`in_progress` and then `success` without sending anything. It needs a worker shape the runtime does
+not have, plus the graceful invite (email sending is ported; the invite batch is not).
+
+**What is owed:** a non-claiming worker in the runtime, then this worker on it.
 
 ---
 

@@ -473,6 +473,32 @@ pub trait PostStore {
         post_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlPostPersistentNotificationStore.Get` (post_persistent_notification_store.go:46):
+    /// up to `per_page` live rows created **and** last sent at or before `max_time` and sent fewer
+    /// than `max_sent_count` times. No `ORDER BY`, as in Go — the caller treats a page as a set,
+    /// and pages by re-querying after [`PostStore::update_persistent_notifications_last_activity`]
+    /// moved the rows it saw out of the window. `per_page == 0` is Go's `1000`.
+    fn get_due_persistent_notifications(
+        &self,
+        max_time: i64,
+        max_sent_count: i16,
+        per_page: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<PersistentNotificationRow>, StoreError>> + Send;
+
+    /// Port of `SqlPostPersistentNotificationStore.UpdateLastActivity` (:73): `LastSentAt` to now
+    /// and `SentCount + 1` for every id, deleted rows included — Go's `WHERE` is the ids alone.
+    fn update_persistent_notifications_last_activity(
+        &self,
+        post_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPostPersistentNotificationStore.DeleteExpired` (:106): soft-delete every live
+    /// row sent `max_sent_count` times or more.
+    fn delete_expired_persistent_notifications(
+        &self,
+        max_sent_count: i16,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlPostPersistentNotificationStore.DeleteByChannel`
     /// (post_persistent_notification_store.go:124) for the single channel its only reachable
     /// caller passes — `App.DeleteChannel`, which archives a channel.
@@ -512,7 +538,8 @@ pub trait PostStore {
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
     /// Port of `SqlPostStore.Save` (post_store.go:341) and the `SaveMultiple` (:159) it delegates
-    /// to, narrowed to **one root post that is not burn-on-read, prioritised or persistent**.
+    /// to, narrowed to **one post that is not burn-on-read**. A priority and its
+    /// persistent-notification row are written in the same transaction.
     ///
     /// # `LastPostAt` moves even when the message count does not
     ///
@@ -1731,6 +1758,17 @@ pub(crate) fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
         is_following: None,
         metadata: None,
     })
+}
+
+/// A `PersistentNotifications` row — Go's `model.PostPersistentNotifications`, which never
+/// reaches the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistentNotificationRow {
+    pub post_id: String,
+    pub create_at: i64,
+    pub last_sent_at: i64,
+    pub delete_at: i64,
+    pub sent_count: i16,
 }
 
 impl PostStore for SqlPostStore {
@@ -3712,6 +3750,82 @@ impl PostStore for SqlPostStore {
         })
     }
 
+    #[tracing::instrument(skip(self), fields(max_time, max_sent_count, per_page))]
+    async fn get_due_persistent_notifications(
+        &self,
+        max_time: i64,
+        max_sent_count: i16,
+        per_page: i64,
+    ) -> Result<Vec<PersistentNotificationRow>, StoreError> {
+        let per_page = if per_page == 0 { 1000 } else { per_page };
+        // The four nullable columns are Go's `int64`/`int16` fields, which a NULL would fail to
+        // scan; every writer sets them, so they are read as non-null.
+        sqlx::query_as!(
+            PersistentNotificationRow,
+            r#"
+            SELECT postid AS "post_id!",
+                   createat AS "create_at!",
+                   lastsentat AS "last_sent_at!",
+                   deleteat AS "delete_at!",
+                   sentcount AS "sent_count!"
+              FROM persistentnotifications
+             WHERE deleteat = 0
+               AND createat <= $1
+               AND lastsentat <= $1
+               AND sentcount < $2
+             LIMIT $3
+            "#,
+            max_time,
+            max_sent_count,
+            per_page,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to get notifications".to_owned(),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip(self), fields(count = post_ids.len()))]
+    async fn update_persistent_notifications_last_activity(
+        &self,
+        post_ids: &[String],
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE persistentnotifications SET lastsentat = $1, sentcount = sentcount + 1 \
+             WHERE postid = ANY($2)",
+            get_millis(),
+            post_ids,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update last activity for posts {post_ids:?}"),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip(self), fields(max_sent_count))]
+    async fn delete_expired_persistent_notifications(
+        &self,
+        max_sent_count: i16,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE persistentnotifications SET deleteat = $1 WHERE deleteat = 0 AND sentcount >= $2",
+            get_millis(),
+            max_sent_count,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete notifications".to_owned(),
+            source,
+        })
+    }
+
     #[tracing::instrument(skip(self), fields(post_id = %post_id))]
     async fn delete_persistent_notification(&self, post_id: &str) -> Result<(), StoreError> {
         sqlx::query!(
@@ -4010,13 +4124,6 @@ impl PostStore for SqlPostStore {
                 detail: "a burn-on-read post is a TemporaryPost write",
             });
         }
-        if post.get_persistent_notification() == Some(true) {
-            return Err(StoreError::Argument {
-                entity: "Post",
-                detail: "savePostsPersistentNotifications writes PersistentNotifications",
-            });
-        }
-
         post.pre_save();
 
         let max_post_size = self.max_post_size().await?;
@@ -4073,7 +4180,26 @@ impl PostStore for SqlPostStore {
                 source,
             })?;
         }
-        // `savePostsPersistentNotifications` — refused above; see the trait docs.
+        // `savePostsPersistentNotifications` (post_store.go:3133): a row for a priority that
+        // asks for persistent notifications, `CreateAt` the post's and every other column zero.
+        if post
+            .get_priority()
+            .and_then(|priority| priority.persistent_notifications)
+            == Some(true)
+        {
+            sqlx::query!(
+                "INSERT INTO persistentnotifications (postid, createat, lastsentat, deleteat, sentcount) \
+                 VALUES ($1, $2, 0, 0, 0)",
+                post.id,
+                post.create_at,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to save posts persistent notifications".to_owned(),
+                source,
+            })?;
+        }
 
         tx.commit().await.map_err(|source| StoreError::Db {
             context: "commit_transaction".to_owned(),

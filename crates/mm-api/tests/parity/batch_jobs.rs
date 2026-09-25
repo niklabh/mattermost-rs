@@ -315,6 +315,9 @@ async fn the_draft_migrations_delete_what_go_deletes_and_report_alike() {
     if !stack_enabled() {
         return;
     }
+    // A job server of `parity::persistent_notifications` / `parity::notify_jobs` claims every
+    // type it registers, these included.
+    let _jobs = common::JOB_RUNS.lock().await;
     let Some(pool) = fixture_pool().await else {
         return;
     };
@@ -439,6 +442,9 @@ async fn the_dm_limit_migration_deletes_what_go_deletes_and_reports_alike() {
     if !stack_enabled() {
         return;
     }
+    // A job server of `parity::persistent_notifications` / `parity::notify_jobs` claims every
+    // type it registers, these included.
+    let _jobs = common::JOB_RUNS.lock().await;
     let Some(pool) = fixture_pool().await else {
         return;
     };
@@ -497,6 +503,9 @@ async fn a_cancel_request_mid_run_ends_in_success_at_the_progress_it_had() {
     if !stack_enabled() {
         return;
     }
+    // A job server of `parity::persistent_notifications` / `parity::notify_jobs` claims every
+    // type it registers, these included.
+    let _jobs = common::JOB_RUNS.lock().await;
     let Some(pool) = fixture_pool().await else {
         return;
     };
@@ -707,6 +716,9 @@ async fn the_user_export_writes_the_csv_go_writes_and_posts_it_alike() {
     if !stack_enabled() {
         return;
     }
+    // A job server of `parity::persistent_notifications` / `parity::notify_jobs` claims every
+    // type it registers, these included.
+    let _jobs = common::JOB_RUNS.lock().await;
     let Some(pool) = fixture_pool().await else {
         return;
     };

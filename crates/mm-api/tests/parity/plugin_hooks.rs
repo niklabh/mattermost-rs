@@ -72,7 +72,7 @@ const CHANNEL_HOST_PORT: u16 = 8134;
 /// Its Go server.
 const CHANNEL_GO_OFFSET: u16 = 84;
 /// The Rust host of the onboarding tranche, `OnInstall`.
-const ONBOARDING_HOST_PORT: u16 = 8135;
+const ONBOARDING_HOST_PORT: u16 = 8146;
 /// Its Go server.
 const ONBOARDING_GO_OFFSET: u16 = 85;
 /// The Rust host of the scheduled-post tranche, `ScheduledPostWillBeCreated`.
