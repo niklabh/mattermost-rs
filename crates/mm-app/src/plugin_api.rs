@@ -57,6 +57,17 @@
 //! `RolesGrantPermission`, and the twenty-one group methods from `GetGroup` to
 //! `DeleteGroupConstrainedMemberships`.
 //!
+//! And the command, plugin, upload-session, team-icon, profile-image, typing, toast, push,
+//! channel and cluster methods (`plugin_api/server.rs`, which says which answer a Go `error` and
+//! which are Go's own shortcuts): `CreateCommand`, `GetCommand`, `UpdateCommand`,
+//! `DeleteCommand`, `GetPlugins`, `GetPluginStatus`, `EnablePlugin`, `DisablePlugin`,
+//! `RemovePlugin`, `CreateUploadSession`, `GetUploadSession`, `GetTeamIcon`, `SetTeamIcon`,
+//! `RemoveTeamIcon`, `SetProfileImage`, `PublishUserTyping`, `SendToastMessage`,
+//! `SendPushNotification`, `AddUserToChannel`, `GetChannelOfType`, `RestoreChannel`,
+//! `CreateTeamMembersGracefully`, `PublishPluginClusterEvent`, `RegisterCollectionAndTopic`,
+//! `GetLDAPUserAttributes`, `RequestTrialLicense` (its refusals), `LogAuditRec` and
+//! `LogAuditRecWithLevel`.
+//!
 //! And the slash-command seven (`crate::plugin_commands`): `RegisterCommand`,
 //! `UnregisterCommand`, `ListPluginCommands`, `ListBuiltInCommands`, `ListCustomCommands`,
 //! `ListCommands` and `ExecuteSlashCommand`.
@@ -158,6 +169,7 @@ mod auth;
 mod channels;
 mod files;
 mod http;
+mod server;
 mod users;
 
 pub use files::{file_infos_options_from_wire, open_dialog_request_from_wire, send_mail_refusal};
@@ -328,6 +340,234 @@ fn render_fields(fields: &[(String, String)]) -> String {
 }
 
 impl mm_plugin::rpc::PluginApi for AppPluginApi {
+    // -- commands, plugins, uploads, icons, typing, toasts, push, cluster (plugin_api/server.rs) --
+
+    /// `PluginAPI.AddUserToChannel`; see [`AppPluginApi::server_add_user_to_channel`].
+    async fn add_user_to_channel(
+        &self,
+        args: api::Z_AddUserToChannelArgs,
+    ) -> Result<api::Z_AddUserToChannelReturns, NotImplemented> {
+        self.server_add_user_to_channel(args).await
+    }
+
+    /// `PluginAPI.GetChannelOfType`; see [`AppPluginApi::server_get_channel_of_type`].
+    async fn get_channel_of_type(
+        &self,
+        args: api::Z_GetChannelOfTypeArgs,
+    ) -> Result<api::Z_GetChannelOfTypeReturns, NotImplemented> {
+        self.server_get_channel_of_type(args).await
+    }
+
+    /// `PluginAPI.RestoreChannel`; see [`AppPluginApi::server_restore_channel`].
+    async fn restore_channel(
+        &self,
+        args: api::Z_RestoreChannelArgs,
+    ) -> Result<api::Z_RestoreChannelReturns, NotImplemented> {
+        self.server_restore_channel(args).await
+    }
+
+    /// `PluginAPI.CreateTeamMembersGracefully`; see [`AppPluginApi::server_create_team_members_gracefully`].
+    async fn create_team_members_gracefully(
+        &self,
+        args: api::Z_CreateTeamMembersGracefullyArgs,
+    ) -> Result<api::Z_CreateTeamMembersGracefullyReturns, NotImplemented> {
+        self.server_create_team_members_gracefully(args).await
+    }
+
+    /// `PluginAPI.GetTeamIcon`; see [`AppPluginApi::server_get_team_icon`].
+    async fn get_team_icon(
+        &self,
+        args: api::Z_GetTeamIconArgs,
+    ) -> Result<api::Z_GetTeamIconReturns, NotImplemented> {
+        self.server_get_team_icon(args).await
+    }
+
+    /// `PluginAPI.SetTeamIcon`; see [`AppPluginApi::server_set_team_icon`].
+    async fn set_team_icon(
+        &self,
+        args: api::Z_SetTeamIconArgs,
+    ) -> Result<api::Z_SetTeamIconReturns, NotImplemented> {
+        self.server_set_team_icon(args).await
+    }
+
+    /// `PluginAPI.RemoveTeamIcon`; see [`AppPluginApi::server_remove_team_icon`].
+    async fn remove_team_icon(
+        &self,
+        args: api::Z_RemoveTeamIconArgs,
+    ) -> Result<api::Z_RemoveTeamIconReturns, NotImplemented> {
+        self.server_remove_team_icon(args).await
+    }
+
+    /// `PluginAPI.SetProfileImage`; see [`AppPluginApi::server_set_profile_image`].
+    async fn set_profile_image(
+        &self,
+        args: api::Z_SetProfileImageArgs,
+    ) -> Result<api::Z_SetProfileImageReturns, NotImplemented> {
+        self.server_set_profile_image(args).await
+    }
+
+    /// `PluginAPI.PublishUserTyping`; see [`AppPluginApi::server_publish_user_typing`].
+    async fn publish_user_typing(
+        &self,
+        args: api::Z_PublishUserTypingArgs,
+    ) -> Result<api::Z_PublishUserTypingReturns, NotImplemented> {
+        self.server_publish_user_typing(args).await
+    }
+
+    /// `PluginAPI.SendToastMessage`; see [`AppPluginApi::server_send_toast_message`].
+    async fn send_toast_message(
+        &self,
+        args: api::Z_SendToastMessageArgs,
+    ) -> Result<api::Z_SendToastMessageReturns, NotImplemented> {
+        self.server_send_toast_message(args).await
+    }
+
+    /// `PluginAPI.SendPushNotification`; see [`AppPluginApi::server_send_push_notification`].
+    async fn send_push_notification(
+        &self,
+        args: api::Z_SendPushNotificationArgs,
+    ) -> Result<api::Z_SendPushNotificationReturns, NotImplemented> {
+        self.server_send_push_notification(args).await
+    }
+
+    /// `PluginAPI.GetLDAPUserAttributes`; see [`AppPluginApi::server_get_ldap_user_attributes`].
+    async fn get_ldap_user_attributes(
+        &self,
+        args: api::Z_GetLDAPUserAttributesArgs,
+    ) -> Result<api::Z_GetLDAPUserAttributesReturns, NotImplemented> {
+        self.server_get_ldap_user_attributes(args).await
+    }
+
+    /// `PluginAPI.RequestTrialLicense`; see [`AppPluginApi::server_request_trial_license`].
+    async fn request_trial_license(
+        &self,
+        args: api::Z_RequestTrialLicenseArgs,
+    ) -> Result<api::Z_RequestTrialLicenseReturns, NotImplemented> {
+        self.server_request_trial_license(args).await
+    }
+
+    /// `PluginAPI.GetPlugins`; see [`AppPluginApi::server_get_plugins`].
+    async fn get_plugins(
+        &self,
+        args: api::Z_GetPluginsArgs,
+    ) -> Result<api::Z_GetPluginsReturns, NotImplemented> {
+        self.server_get_plugins(args).await
+    }
+
+    /// `PluginAPI.GetPluginStatus`; see [`AppPluginApi::server_get_plugin_status`].
+    async fn get_plugin_status(
+        &self,
+        args: api::Z_GetPluginStatusArgs,
+    ) -> Result<api::Z_GetPluginStatusReturns, NotImplemented> {
+        self.server_get_plugin_status(args).await
+    }
+
+    /// `PluginAPI.EnablePlugin`; see [`AppPluginApi::server_enable_plugin`].
+    async fn enable_plugin(
+        &self,
+        args: api::Z_EnablePluginArgs,
+    ) -> Result<api::Z_EnablePluginReturns, NotImplemented> {
+        self.server_enable_plugin(args).await
+    }
+
+    /// `PluginAPI.DisablePlugin`; see [`AppPluginApi::server_disable_plugin`].
+    async fn disable_plugin(
+        &self,
+        args: api::Z_DisablePluginArgs,
+    ) -> Result<api::Z_DisablePluginReturns, NotImplemented> {
+        self.server_disable_plugin(args).await
+    }
+
+    /// `PluginAPI.RemovePlugin`; see [`AppPluginApi::server_remove_plugin`].
+    async fn remove_plugin(
+        &self,
+        args: api::Z_RemovePluginArgs,
+    ) -> Result<api::Z_RemovePluginReturns, NotImplemented> {
+        self.server_remove_plugin(args).await
+    }
+
+    /// `PluginAPI.CreateCommand`; see [`AppPluginApi::server_create_command`].
+    async fn create_command(
+        &self,
+        args: api::Z_CreateCommandArgs,
+    ) -> Result<api::Z_CreateCommandReturns, NotImplemented> {
+        self.server_create_command(args).await
+    }
+
+    /// `PluginAPI.GetCommand`; see [`AppPluginApi::server_get_command`].
+    async fn get_command(
+        &self,
+        args: api::Z_GetCommandArgs,
+    ) -> Result<api::Z_GetCommandReturns, NotImplemented> {
+        self.server_get_command(args).await
+    }
+
+    /// `PluginAPI.UpdateCommand`; see [`AppPluginApi::server_update_command`].
+    async fn update_command(
+        &self,
+        args: api::Z_UpdateCommandArgs,
+    ) -> Result<api::Z_UpdateCommandReturns, NotImplemented> {
+        self.server_update_command(args).await
+    }
+
+    /// `PluginAPI.DeleteCommand`; see [`AppPluginApi::server_delete_command`].
+    async fn delete_command(
+        &self,
+        args: api::Z_DeleteCommandArgs,
+    ) -> Result<api::Z_DeleteCommandReturns, NotImplemented> {
+        self.server_delete_command(args).await
+    }
+
+    /// `PluginAPI.CreateUploadSession`; see [`AppPluginApi::server_create_upload_session`].
+    async fn create_upload_session(
+        &self,
+        args: api::Z_CreateUploadSessionArgs,
+    ) -> Result<api::Z_CreateUploadSessionReturns, NotImplemented> {
+        self.server_create_upload_session(args).await
+    }
+
+    /// `PluginAPI.GetUploadSession`; see [`AppPluginApi::server_get_upload_session`].
+    async fn get_upload_session(
+        &self,
+        args: api::Z_GetUploadSessionArgs,
+    ) -> Result<api::Z_GetUploadSessionReturns, NotImplemented> {
+        self.server_get_upload_session(args).await
+    }
+
+    /// `PluginAPI.PublishPluginClusterEvent`; see [`AppPluginApi::server_publish_plugin_cluster_event`].
+    async fn publish_plugin_cluster_event(
+        &self,
+        args: api::Z_PublishPluginClusterEventArgs,
+    ) -> Result<api::Z_PublishPluginClusterEventReturns, NotImplemented> {
+        self.server_publish_plugin_cluster_event(args).await
+    }
+
+    /// `PluginAPI.RegisterCollectionAndTopic`; see [`AppPluginApi::server_register_collection_and_topic`].
+    async fn register_collection_and_topic(
+        &self,
+        args: api::Z_RegisterCollectionAndTopicArgs,
+    ) -> Result<api::Z_RegisterCollectionAndTopicReturns, NotImplemented> {
+        self.server_register_collection_and_topic(args).await
+    }
+
+    /// `PluginAPI.LogAuditRec`: `LogAuditRecWithLevel` at `LvlAuditCLI`; see
+    /// [`AppPluginApi::server_log_audit_rec`].
+    async fn log_audit_rec(
+        &self,
+        args: api::Z_LogAuditRecArgs,
+    ) -> Result<api::Z_LogAuditRecReturns, NotImplemented> {
+        self.server_log_audit_rec(args.a.as_deref(), "audit-cli");
+        Ok(api::Z_LogAuditRecReturns {})
+    }
+
+    /// `PluginAPI.LogAuditRecWithLevel`; see [`AppPluginApi::server_log_audit_rec`].
+    async fn log_audit_rec_with_level(
+        &self,
+        args: api::Z_LogAuditRecWithLevelArgs,
+    ) -> Result<api::Z_LogAuditRecWithLevelReturns, NotImplemented> {
+        self.server_log_audit_rec(args.a.as_deref(), &args.b.name);
+        Ok(api::Z_LogAuditRecWithLevelReturns {})
+    }
     // -- users ------------------------------------------------------------------------------
 
     /// Port of `PluginAPI.GetUser` (app/plugin_api.go:285): the store row, **unsanitised** —

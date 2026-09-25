@@ -10218,3 +10218,18 @@ session per `Conn` and ends it on close: nothing limits how many a plugin holds,
 state carries over between `Conn`s. **What is owed:** a `gopq` pool honouring `MaxOpenConns`,
 `MaxIdleConns` and `ConnMaxLifetimeMilliseconds`, with Go's wait-then-`context deadline exceeded`,
 and a parity row that exhausts it.
+
+---
+
+## D-1330 · The audit log (mlog's audit targets) is not kept
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (plugin API, `LogAuditRec`)
+
+Go writes every `MakeAuditRecord`/`LogAuditRec` record, and a plugin's `LogAuditRec`, to the
+audit logger (`Server.Audit`, app/audit.go), whose targets `ExperimentalAuditSettings.File*`,
+`AdvancedLoggingJSON` and `MM_EXPERIMENTALAUDITSETTINGS_ADDITIONAL` configure. With none set —
+every stack here — nothing is written anywhere, which is what this server does in every case: the
+REST handlers drop their records and `mm_app::plugin_api::server` logs a plugin's at debug. The
+`Audits` table rows (`c.LogAudit`) are a different thing and are written. **What is owed:** the
+file target (an mlog JSON line per record, `plugin_id` added for a plugin's) behind those
+settings, and a test with `FileEnabled` on comparing the two servers' files.

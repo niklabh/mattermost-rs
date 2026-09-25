@@ -139,6 +139,7 @@ pub mod terms_of_service;
 pub mod test_notification;
 pub mod thread;
 pub mod thread_read;
+pub mod toast;
 pub mod typing;
 /// Port of the two read functions in `app/upload.go`.
 pub mod upload;

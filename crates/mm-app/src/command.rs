@@ -127,7 +127,7 @@ impl App {
     /// Both sides are lower-cased, because the *stored* trigger need not be: `createCommand`
     /// lower-cases the incoming one, but a plugin-registered row is written as-is.
     #[tracing::instrument(skip(self), fields(team_id = %team_id, trigger = %trigger))]
-    async fn validate_command_trigger_uniqueness(
+    pub(crate) async fn validate_command_trigger_uniqueness(
         &self,
         team_id: &str,
         trigger: &str,
@@ -174,11 +174,16 @@ impl App {
     /// is where `PreSave` and `IsValid` live: a body that is both a duplicate *and* invalid
     /// answers `api.command.duplicate_trigger.app_error`, never the validation error.
     #[tracing::instrument(skip_all, fields(team_id = %command.team_id, trigger = %command.trigger))]
-    pub async fn create_command(&self, mut command: Command) -> AppResult<Command> {
+    pub async fn create_command(&self, command: Command) -> AppResult<Command> {
         if !self.config().enable_commands {
             return Err(commands_disabled("CreateCommand"));
         }
+        self.create_command_ungated(command).await
+    }
 
+    /// Port of the unexported `App.createCommand` (command.go:717): [`App::create_command`]
+    /// without the `EnableCommands` gate, which the plugin API's `CreateCommand` calls directly.
+    pub async fn create_command_ungated(&self, mut command: Command) -> AppResult<Command> {
         command.trigger = command.trigger.to_lowercase();
 
         self.validate_command_trigger_uniqueness(&command.team_id, &command.trigger, "")

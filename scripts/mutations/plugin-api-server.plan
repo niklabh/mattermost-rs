@@ -1,0 +1,12 @@
+# P1: the plugin API server tranche.
+s_team_kept	crates/mm-app/src/plugin_api/server.rs	    if updated.team_id.is_empty() {	    if !updated.team_id.is_empty() {	api	the_plugin_api_server_methods
+s_creator_cleared	crates/mm-app/src/plugin_api/server.rs	        command.creator_id.clear();	        let _ = &command.creator_id;	api	the_plugin_api_server_methods
+s_not_found_text	crates/mm-app/src/plugin_api/server.rs	not found, id: {id}	not found: {id}	api	the_plugin_api_server_methods
+s_requestor	crates/mm-app/src/plugin_api/server.rs	            user_requestor_id: args.c.clone(),	            user_requestor_id: String::new(),	api	the_plugin_api_server_methods
+s_graceful	crates/mm-app/src/plugin_api/server.rs	.add_team_members(&args.a, &args.b, &args.c, true,	.add_team_members(&args.a, &args.b, &args.c, false,	api	the_plugin_api_server_methods
+s_ldap_status	crates/mm-app/src/plugin_api/server.rs	                501,	                500,	api	the_plugin_api_server_methods
+s_toast_key	crates/mm-app/src/toast.rs	payload.insert("message".to_owned(), message.into());	payload.insert("text".to_owned(), message.into());	api	the_plugin_api_server_methods
+s_icon_event	crates/mm-app/src/user_image.rs	            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,	            mm_model::websocket_message::WEBSOCKET_EVENT_DELETE_TEAM,	api	the_plugin_api_server_methods
+s_icon_decode_id	crates/mm-app/src/user_image.rs	"api.team.set_team_icon.decode.app_error", 400	"api.user.upload_profile_user.decode.app_error", 400	api	the_plugin_api_server_methods
+control_s_channel_binding	crates/mm-app/src/plugin_api/server.rs	            |channel| channel_to_wire(&channel),	            |found| channel_to_wire(&found),	api	the_plugin_api_server_methods
+control_s_upload_type	crates/mm-app/src/plugin_api/server.rs	        r#type: us.type_.as_str().to_owned(),	        r#type: String::from(us.type_.as_str()),	api	the_plugin_api_server_methods

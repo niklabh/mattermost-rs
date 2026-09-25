@@ -14,6 +14,8 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
 | Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 71/258, Driver 20/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 204/258 (2026-09-25), Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
@@ -14904,3 +14906,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `jobs.BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker` (jobs/batch_*.go), `JobServer.CancellationWatcher`, `UpdateInProgressJobData` | `mm_app::job_runtime` (`BatchWorker`, `batch_migration_worker`, `batch_report_worker`, `do_batch_job`, `Workers::add_batch`) | DONE | `db_job_worker` (6 new), 4 unit; `scripts/mutations/jobs-batch-j2.plan` — 13 run, 11 caught (after a fixture fix), 2 controls survived | No cancellation watcher on this shape: a `cancel_requested` row finishes `success` at the progress it had. `add`/`get` keep the `SimpleWorker` API. |
 | `delete_empty_drafts_migration`, `delete_orphan_drafts_migration`, `delete_dms_preferences_migration`, `export_users_to_csv`; `SaveReportChunk`, `CompileReportChunks`, `SendReportToUser`, `CleanupReportChunks`; the three draft and one preference store queries; `System.Save` | `mm_app::job_runtime`, `mm_app::report`, `mm_store` | DONE | `parity::batch_jobs` (4: rows, files, posts and job rows against Go's worker on identical plantings) | The orphan migration deletes every channel draft (an empty root names no post) — Go's. Draft suites hold `common::DRAFT_ROWS` against it. |
 | `encoding/csv.Writer`; `time.Time.String()`'s zone abbreviation | `mm_model::go_csv`, `mm_model::report::go_time_string` (`local_time_zone`) | DONE | `behaviour_go_stdlib.json` (`encoding_csv`, `time_string` now compared whole) | The CSV's timestamps end in `IST` like Go's; the abbreviation divergence the report model documented is gone. |
+
+## Plugin API: commands, plugins, uploads, icons, typing, toasts, push and the cluster (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `PluginAPI` `CreateCommand` … `LogAuditRecWithLevel` — the twenty-eight in docs/PLUGIN_PLAN.md Phase 6 (app/plugin_api.go), `App.SetTeamIconFromFile`, `App.SendToastMessage`, `App.SetProfileImageFromFile` | `mm_app::plugin_api::server`, `App::set_team_icon_from_file`, `mm_app::toast`, `App::set_profile_image_from_file`, `App::create_command_ungated` | DONE (204 of 258) | `parity::plugin_hooks::the_plugin_api_server_methods_answer_as_go_answers` (61 calls, hooks and frames under both hosts; `LogAuditRecWithLevel` is not called), 3 unit | Team-icon and profile bytes match Go's encoder; `RequestTrialLicense` past its refusals is not-implemented; the audit record reaches no audit log ([D-1330]). |
