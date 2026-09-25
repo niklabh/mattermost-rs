@@ -832,7 +832,7 @@ async fn job_worker_batch_migration_runs_until_done_and_marks_the_key() {
     purge_batch_key(&pool).await;
 }
 
-/// A job created with no data is handed an **empty map**, not nothing: `DoJob`'s
+/// A job whose data is nil is handed an **empty map**, not nothing: `DoJob`'s
 /// `if job.Data == nil { job.Data = make(model.StringMap) }`. And a next cursor of nil (the DM
 /// preference migration's) is written as `null` and handed on as nothing.
 #[tokio::test]
@@ -847,7 +847,10 @@ async fn job_worker_batch_nil_data_is_an_empty_map_first_and_nil_after() {
     let app = app(&pool);
 
     let job = plant(&pool, "mmrsjw0000000000batchnil1", BATCH_TYPE, 21).await;
-    sqlx::query("UPDATE jobs SET data = NULL WHERE id = $1")
+    // A JSON `null`, which is Go's nil map. A SQL `NULL` would read back as `{}` (see
+    // `JobRow::into_job`) and never reach the branch — the mutation run that first used it let
+    // `nil-data-not-an-empty-map` survive.
+    sqlx::query("UPDATE jobs SET data = 'null'::jsonb WHERE id = $1")
         .bind(&job.id)
         .execute(&pool)
         .await

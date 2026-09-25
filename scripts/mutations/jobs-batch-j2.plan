@@ -1,5 +1,7 @@
 # Mutation plan for unit J2: the batch-worker shape, its four workers, the Go CSV writer and the
 # zone abbreviation.
+# 2026-09-25: 13 run, 10 caught, 3 survived — two controls, and `nil-data-not-an-empty-map`, whose
+# fixture planted a SQL NULL (read back as `{}`); with a JSON null it is caught (1 of 1).
 #
 #   scripts/mutate-batch.sh scripts/mutations/jobs-batch-j2.plan
 #
