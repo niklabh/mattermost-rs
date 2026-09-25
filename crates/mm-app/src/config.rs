@@ -79,6 +79,18 @@ pub struct Config {
     /// open channels, confining reads to members so the compliance export sees every access.
     /// Read by [`crate::App::has_permission_to_read_channel`].
     pub compliance_enable: bool,
+    /// `MetricsSettings.Enable` (config.go:1209, `new(false)`) — `isEnabled` of the
+    /// `active_users` job worker.
+    pub metrics_enable: bool,
+    /// `MetricsSettings.EnableClientMetrics` (config.go:1217, `new(true)`) — `isEnabled` of the
+    /// `mobile_session_metadata` job worker.
+    pub metrics_enable_client_metrics: bool,
+    /// `SqlSettings.AnalyticsQueryTimeout` in seconds (config.go:1588, `new(300)`) — the
+    /// `analyticsContext` deadline of the three materialized-view refreshes.
+    pub analytics_query_timeout: i64,
+    /// `ServiceSettings.RefreshPostStatsRunTime` (config.go:1029, `new("00:00")`) — the start
+    /// time of the `refresh_materialized_views` daily scheduler, parsed as Go's `"15:04"`.
+    pub refresh_post_stats_run_time: String,
 
     /// `ImageProxySettings.Enable` (config.go:3996). Go default `false`.
     ///
@@ -1483,6 +1495,10 @@ impl Default for Config {
         Self {
             restrict_system_admin: false,
             compliance_enable: false,
+            metrics_enable: false,
+            metrics_enable_client_metrics: true,
+            analytics_query_timeout: 300,
+            refresh_post_stats_run_time: "00:00".to_owned(),
             image_proxy_enable: false,
             enable_post_icon_override: false,
             enable_custom_emoji: true,
@@ -1783,6 +1799,23 @@ impl Config {
                 "MM_COMPLIANCESETTINGS_ENABLE",
                 default.compliance_enable,
             ),
+            metrics_enable: lookup_bool(
+                lookup,
+                "MM_METRICSSETTINGS_ENABLE",
+                default.metrics_enable,
+            ),
+            metrics_enable_client_metrics: lookup_bool(
+                lookup,
+                "MM_METRICSSETTINGS_ENABLECLIENTMETRICS",
+                default.metrics_enable_client_metrics,
+            ),
+            analytics_query_timeout: lookup_int(
+                lookup,
+                "MM_SQLSETTINGS_ANALYTICSQUERYTIMEOUT",
+                default.analytics_query_timeout,
+            ),
+            refresh_post_stats_run_time: lookup("MM_SERVICESETTINGS_REFRESHPOSTSTATSRUNTIME")
+                .unwrap_or(default.refresh_post_stats_run_time),
             image_proxy_enable: lookup_bool(
                 lookup,
                 "MM_IMAGEPROXYSETTINGS_ENABLE",
@@ -2520,6 +2553,24 @@ impl Config {
                 .unwrap_or_default()
                 .enable
                 .unwrap_or(default.compliance_enable),
+            metrics_enable: parsed
+                .metrics_settings
+                .as_ref()
+                .and_then(|m| m.enable)
+                .unwrap_or(default.metrics_enable),
+            metrics_enable_client_metrics: parsed
+                .metrics_settings
+                .as_ref()
+                .and_then(|m| m.enable_client_metrics)
+                .unwrap_or(default.metrics_enable_client_metrics),
+            analytics_query_timeout: parsed
+                .sql_settings
+                .as_ref()
+                .and_then(|s| s.analytics_query_timeout)
+                .unwrap_or(default.analytics_query_timeout),
+            refresh_post_stats_run_time: service
+                .refresh_post_stats_run_time
+                .unwrap_or(default.refresh_post_stats_run_time),
             image_proxy_enable: parsed
                 .image_proxy_settings
                 .unwrap_or_default()
@@ -3128,6 +3179,8 @@ struct Document {
     client_requirements: Option<ClientRequirementsDocument>,
     #[serde(rename = "SqlSettings")]
     sql_settings: Option<SqlSettingsDocument>,
+    #[serde(rename = "MetricsSettings")]
+    metrics_settings: Option<MetricsSettingsDocument>,
     #[serde(rename = "ElasticsearchSettings")]
     elasticsearch_settings: Option<ElasticsearchSettingsDocument>,
     #[serde(rename = "AIRecapSettings")]
@@ -3375,6 +3428,16 @@ struct ClientRequirementsDocument {
 struct SqlSettingsDocument {
     #[serde(rename = "DisableDatabaseSearch")]
     disable_database_search: Option<bool>,
+    #[serde(rename = "AnalyticsQueryTimeout")]
+    analytics_query_timeout: Option<i64>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct MetricsSettingsDocument {
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
+    #[serde(rename = "EnableClientMetrics")]
+    enable_client_metrics: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -3393,6 +3456,8 @@ struct ServiceSettingsDocument {
     /// consulted, never its value, which is just as well: the live document holds `""`.
     #[serde(rename = "SiteURL")]
     site_url: Option<String>,
+    #[serde(rename = "RefreshPostStatsRunTime")]
+    refresh_post_stats_run_time: Option<String>,
     #[serde(rename = "WebserverMode")]
     webserver_mode: Option<String>,
     #[serde(rename = "ExperimentalEnableAuthenticationTransfer")]
@@ -4059,6 +4124,31 @@ mod tests {
     ///
     /// Base 10 is explicit on the Go side, so the hex and underscore spellings a base-0 parse
     /// would accept are **not** overrides on either server — they leave the setting alone.
+    /// The three job-worker settings are read from their own sections, and each defaults to
+    /// Go's `SetDefaults` value when absent — `EnableClientMetrics` to **true**.
+    #[test]
+    fn the_job_worker_settings_are_read_and_defaulted() {
+        let config = Config::from_document(
+            r#"{"MetricsSettings":{"Enable":true,"EnableClientMetrics":false},
+                "SqlSettings":{"AnalyticsQueryTimeout":17}}"#,
+        )
+        .expect("decodes");
+        assert!(config.metrics_enable);
+        assert!(!config.metrics_enable_client_metrics);
+        assert_eq!(config.analytics_query_timeout, 17);
+
+        let empty = Config::from_document("{}").expect("decodes");
+        assert!(!empty.metrics_enable, "config.go:1210 new(false)");
+        assert!(
+            empty.metrics_enable_client_metrics,
+            "config.go:1218 new(true)"
+        );
+        assert_eq!(
+            empty.analytics_query_timeout, 300,
+            "config.go:1589 new(300)"
+        );
+    }
+
     #[test]
     fn lookup_int_matches_gos_parse_int() {
         let with = |v: &'static str| lookup_int(&move |_: &str| Some(v.to_owned()), "MM_X", 43_200);

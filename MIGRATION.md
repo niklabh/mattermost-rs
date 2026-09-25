@@ -14881,3 +14881,10 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `c.AppContext.Path()` = `r.URL.Path` from `url.ParseRequestURI`; `net/http`'s own 400 for a target it cannot parse | `mm_api::audit_log::go_request_path`, `mux_guard::decide` | DONE | 3 unit, `audit_rows::an_encoded_path_is_recorded_decoded`, `…a_target_go_cannot_parse_is_its_400_and_writes_no_row`; `scripts/mutations/hook-updates-d1220.plan` — 10 run, 8 caught (after a fixture fix), 2 controls survived | `/users/m%65/patch` is served and recorded as `/users/me/patch`; an invalid escape now goes to Go on every route (it was our 401 on a non-id parameter). |
 | `updateIncomingHook`'s `ValidateIncomingWebhookUserChannelAccess` on a move (webhook.go:176); `updateOutgoingHook`'s team fill and mismatch 400 (webhook.go:425) | `mm_api::webhooks`, `App::validate_incoming_webhook_user_channel_access` | DONE, closes [D-1220], [D-1221] | `webhook_writes::moving_an_incoming_hook_checks_its_owner_can_read_the_new_channel`, `…an_outgoing_update_naming_another_team_is_refused` | The move check is the **old owner's**, not the caller's, and only when the channel changes; `read_channel_content` needs channel membership even on an open channel. |
+
+## Job workers, the simple ones — D-804 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `jobs/active_users`, `jobs/mobile_session_metadata` (worker + scheduler) | `mm_app::job_workers` | DONE | 2 unit + `parity::job_workers_simple` | Both feed a metrics interface that is nil in the public tree, so what is compared is the job row; `active_users` is compared with `MetricsSettings.Enable` patched on in Go (`ListenAddress ":0"`). |
+| `jobs/refresh_materialized_views` (worker + `DailyScheduler`), `RefreshPostStats`, `RefreshFileStats`, `RefreshPostStatsForUsers` | `mm_app::job_workers`, `mm_store::post_store::refresh_materialized_view` | DONE | `parity::job_workers_simple`, 24-input `"15:04"` corpus | `analyticsContext` is `SET LOCAL statement_timeout`; the start time is parsed as Go's `"15:04"`, not chrono's `%H:%M` (D-803 item 2). |

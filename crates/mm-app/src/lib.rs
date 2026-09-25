@@ -69,6 +69,7 @@ pub mod import;
 pub mod job;
 pub mod job_runtime;
 pub mod job_scheduler;
+pub mod job_workers;
 pub mod license;
 pub mod limits;
 pub mod link_image;

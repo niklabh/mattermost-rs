@@ -97,6 +97,10 @@
   "MessageExportSettings": {
     "DownloadExportResults": false
   },
+  "MetricsSettings": {
+    "Enable": false,
+    "EnableClientMetrics": true
+  },
   "Office365Settings": {
     "Enable": false
   },
@@ -195,6 +199,7 @@
     "OutgoingIntegrationRequestsTimeout": 30,
     "PostEditTimeLimit": -1,
     "PostPriority": true,
+    "RefreshPostStatsRunTime": "00:00",
     "RestrictLinkPreviews": "",
     "ScheduledPosts": true,
     "SessionIdleTimeoutInMinutes": 43200,
@@ -212,6 +217,7 @@
     "WebserverMode": "gzip"
   },
   "SqlSettings": {
+    "AnalyticsQueryTimeout": 300,
     "DisableDatabaseSearch": false
   },
   "TeamSettings": {

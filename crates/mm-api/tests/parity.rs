@@ -115,6 +115,7 @@ mod parity {
     pub mod image_writes;
     pub mod incoming_hooks;
     pub mod invite_info;
+    pub mod job_workers_simple;
     pub mod job_writes;
     pub mod jobs;
     pub mod latest_version;

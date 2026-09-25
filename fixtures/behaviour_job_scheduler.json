@@ -323,6 +323,81 @@
       "error": "parsing time \"abc\" as \"15:04\": cannot parse \"abc\" as \"15\"",
       "input": "abc",
       "ok": false
+    },
+    {
+      "error": "parsing time \" 3:00\" as \"15:04\": cannot parse \" 3:00\" as \"15\"",
+      "input": " 3:00",
+      "ok": false
+    },
+    {
+      "error": "parsing time \"03:00 \": extra text: \" \"",
+      "input": "03:00 ",
+      "ok": false
+    },
+    {
+      "error": "parsing time \"3:5\" as \"15:04\": cannot parse \"5\" as \"04\"",
+      "input": "3:5",
+      "ok": false
+    },
+    {
+      "error": "parsing time \"003:00\" as \"15:04\": cannot parse \"3:00\" as \":\"",
+      "input": "003:00",
+      "ok": false
+    },
+    {
+      "error": "parsing time \"-1:00\" as \"15:04\": cannot parse \"-1:00\" as \"15\"",
+      "input": "-1:00",
+      "ok": false
+    },
+    {
+      "error": "parsing time \"+3:00\" as \"15:04\": cannot parse \"+3:00\" as \"15\"",
+      "input": "+3:00",
+      "ok": false
+    },
+    {
+      "error": "parsing time \"3:00Z\": extra text: \"Z\"",
+      "input": "3:00Z",
+      "ok": false
+    },
+    {
+      "error": "parsing time \"1:2\" as \"15:04\": cannot parse \"2\" as \"04\"",
+      "input": "1:2",
+      "ok": false
+    },
+    {
+      "hour": 9,
+      "input": "09:09",
+      "minute": 9,
+      "offset_seconds": 0,
+      "ok": true,
+      "rfc3339": "0000-01-01T09:09:00Z",
+      "year": 0,
+      "zone": "UTC"
+    },
+    {
+      "hour": 9,
+      "input": "9:59",
+      "minute": 59,
+      "offset_seconds": 0,
+      "ok": true,
+      "rfc3339": "0000-01-01T09:59:00Z",
+      "year": 0,
+      "zone": "UTC"
+    },
+    {
+      "error": "parsing time \":00\" as \"15:04\": cannot parse \":00\" as \"15\"",
+      "input": ":00",
+      "ok": false
+    },
+    {
+      "error": "parsing time \"3:\" as \"15:04\": cannot parse \"\" as \"04\"",
+      "input": "3:",
+      "ok": false
+    },
+    {
+      "error": "parsing time \"\\xd9\\xa3:00\" as \"15:04\": cannot parse \"\\xd9\\xa3:00\" as \"15\"",
+      "input": "٣:00",
+      "ok": false
     }
   ]
 }

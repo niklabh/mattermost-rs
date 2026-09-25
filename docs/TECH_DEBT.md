@@ -9157,19 +9157,23 @@ they cannot drift silently.
    inputs agree, including the two that surprise — `"3:00"` is accepted by both, `"0300"` by
    neither.
 
-**What is owed:** a Go-faithful `"15:04"` parse (two digits for the minute, one or two for the
-hour) at the point a `DailyScheduler` is registered, and a decision on (1) — most likely to keep
+**(2) is paid (2026-09-25):** `mm_app::job_workers::parse_go_hhmm`, asserted against the whole
+corpus (now 24 inputs) with the `refresh_materialized_views` scheduler that registers it.
+
+**What is owed:** a decision on (1) — most likely to keep
 `None` and say so, since a job that skips a day is better than one that runs at an hour nobody
 configured.
 
-## D-804 · Twenty-eight of the twenty-nine registered job types have no worker here
+## D-804 · Twenty-five of the twenty-nine registered job types have no worker here
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (app/server.go:1585) · **Owner** the jobs subsystem
 
 `mm_app::job::REGISTERED_JOB_TYPES` lists the twenty-nine types the Go server registers a worker
 for, and `App::create_job` validates against it — so this server can create a job of any of them.
-`mm_app::job_runtime::registered_workers` runs exactly one: `cleanup_desktop_tokens`. Every other
-type is created here and run by the Go server off the shared table.
+`mm_app::job_runtime::registered_workers` runs four: `cleanup_desktop_tokens`, and since 2026-09-25
+`active_users`, `mobile_session_metadata` and `refresh_materialized_views` (`mm_app::job_workers`,
+`parity::job_workers_simple`). Every other type is created here and run by the Go server off the
+shared table. `last_accessible_post` and `last_accessible_file` are [D-1300].
 
 The runtime is not the gap; each worker's **body** is. They range from a single `DELETE`
 (`cleanup_expired_access_tokens`) to the import and export pipelines, and several need store
@@ -10181,3 +10185,17 @@ the i18n files (go-i18n reads a map), the oEmbed `Ordered` visitor (already Go's
 invalid-UTF-8 rewrite the helpers lack), the dynamic-list response (Go uses its partial decode),
 and documents this server or Go marshalled itself (licence, token extra, Systems rows, config row,
 log lines, link-metadata rows).
+
+## D-1300 · `last_accessible_post` and `last_accessible_file` need an `isEnabled` that reads the licence
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (jobs/last_accessible_post/worker.go) · **Owner** the job runtime
+
+Both Go workers capture the licence **the server started with** (`MakeWorker(s.Jobs, s.License(), …)`,
+app/server.go:1722, :1728) and enable on it: `Limits.PostHistory > 0` for posts,
+`*Features.Cloud` for files. This runtime's `SimpleWorker` takes `is_enabled: fn(&Config)`, which
+cannot see a licence, and changing that shape belongs to the runtime's owner. Registering either
+worker as always-on would claim jobs Go leaves pending on every unlicensed stack. The bodies are
+portable once the shape is: `ComputeLastAccessiblePostTime` (post.go:2196) needs
+`Post().GetNthRecentPostTime`, and `ComputeLastAccessibleFileTime` (file.go:1780) needs
+`FileInfo().GetUptoNSizeFileTime` plus `Cloud().GetCloudLimits`, which is the private cloud
+interface: a cloud licence with a nil `Cloud()` is Go's panic, recorded by `HandleJobPanic`.

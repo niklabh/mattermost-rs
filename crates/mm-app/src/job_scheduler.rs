@@ -256,7 +256,12 @@ pub fn cleanup_desktop_tokens_scheduler() -> PeriodicScheduler {
 ///
 /// Nothing starts them; see the module note and [D-802].
 pub fn registered_schedulers() -> Vec<Box<dyn Scheduler>> {
-    vec![Box::new(cleanup_desktop_tokens_scheduler())]
+    vec![
+        Box::new(cleanup_desktop_tokens_scheduler()),
+        Box::new(crate::job_workers::active_users_scheduler()),
+        Box::new(crate::job_workers::mobile_session_metadata_scheduler()),
+        Box::new(crate::job_workers::refresh_materialized_views_scheduler()),
+    ]
 }
 
 #[cfg(test)]
@@ -547,37 +552,19 @@ mod go_parity {
     }
 
     /// `time.Parse("15:04", …)` is the daily scheduler's whole input validation, and a failure is
-    /// the `nil` start time that switches the scheduler off (base_schedulers.go:70). Recorded
-    /// because the next person to port a `DailyScheduler` needs it, and because replaying it
-    /// found a divergence that reading would not have.
-    ///
-    /// Ten of the eleven inputs agree between Go's `"15:04"` and chrono's `"%H:%M"`, including
-    /// the two that surprise: `"3:00"` — a **one-digit hour** — is accepted by both, and
-    /// `"0300"` is rejected by both.
-    ///
-    /// The eleventh does not. **`"03:0"` parses in chrono and fails in Go**: Go's `04` is a
-    /// zero-padded two-digit minute and will not take one digit, while chrono's `%M` will. So a
-    /// `RefreshPostStatsRunTime` of `"03:0"` switches the job off on the Go server and would
-    /// schedule it for 03:00 on a port that reached for `%H:%M`. Nothing consumes this yet —
-    /// `refresh_materialized_views` is the only `DailyScheduler` in the public tree and is not
-    /// ported — so it is a trap recorded rather than a bug fixed; see [D-803].
+    /// the `nil` start time that switches it off. [`crate::job_workers::parse_go_hhmm`] must agree
+    /// with Go on **every** input of the corpus — acceptance, hour and minute. chrono's `%H:%M`
+    /// does not (`"03:0"` and `"3:5"` parse there and fail in Go, [D-803]), which is why the
+    /// scheduler does not use it.
     #[test]
     fn the_hhmm_parse_corpus_is_what_a_daily_scheduler_must_reproduce() {
-        /// The one input on which chrono is more permissive than Go.
-        const CHRONO_ACCEPTS_AND_GO_DOES_NOT: &str = "03:0";
-
         let mut accepted_by_go = 0;
-        let mut divergences = Vec::new();
         for case in cases("parse_hhmm") {
             let input = case["input"].as_str().expect("input");
             let go_ok = case["ok"].as_bool().expect("ok");
-            let parsed = NaiveTime::parse_from_str(input, "%H:%M");
-
-            if parsed.is_ok() != go_ok {
-                divergences.push(input);
-                continue;
-            }
-            let Ok(parsed) = parsed else { continue };
+            let parsed = crate::job_workers::parse_go_hhmm(input);
+            assert_eq!(parsed.is_some(), go_ok, "{input:?}: {case}");
+            let Some(parsed) = parsed else { continue };
             accepted_by_go += 1;
             assert_eq!(parsed.hour() as u64, case["hour"].as_u64().expect("hour"));
             assert_eq!(
@@ -590,12 +577,10 @@ mod go_parity {
             assert_eq!(case["year"], 0);
             assert_eq!(case["offset_seconds"], 0);
         }
-
-        assert_eq!(accepted_by_go, 4, "four inputs are accepted by both");
-        assert_eq!(
-            divergences,
-            vec![CHRONO_ACCEPTS_AND_GO_DOES_NOT],
-            "the set of Go/chrono parse divergences changed; see [D-803]"
+        assert_eq!(accepted_by_go, 6, "six inputs are accepted by Go");
+        assert!(
+            NaiveTime::parse_from_str("03:0", "%H:%M").is_ok(),
+            "chrono still accepts what Go refuses; the reason this is not `%H:%M`"
         );
     }
 
