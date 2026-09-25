@@ -1,3 +1,7 @@
+// The job runtime's future, awaited in-process by `parity::job_workers_simple`, is deeper than the
+// default query depth allows for its layout (measured after the batch-worker shape landed).
+#![recursion_limit = "256"]
+
 //! Consolidated integration test suite for mm-api cross-server parity.
 //!
 //! This binary consolidates all the parity tests that were previously separate
