@@ -13,14 +13,12 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 71/258, Driver 20/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
-
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 240/258 (2026-09-25), Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 34/35 (the 35th needs the private cluster) and the 3 websocket hooks, API methods 240/258 (2026-09-25), Driver 20/20 pooled; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
 Blended, the migration is **roughly 60–65% by route traffic** and **about 40% with equal weight
-on routes, websocket, plugins and jobs**. The backlog is 162 OPEN entries in
+on routes, websocket, plugins and jobs**. The backlog is 159 OPEN entries in
 [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md). What remains, largest first: the 258 plugin API
 methods and the Driver, 28 job workers, the forwarded branches inside served routes, and the
 e-mail batching and the generated sender avatar ([D-1072]).
@@ -14906,6 +14904,16 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `jobs.BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker` (jobs/batch_*.go), `JobServer.CancellationWatcher`, `UpdateInProgressJobData` | `mm_app::job_runtime` (`BatchWorker`, `batch_migration_worker`, `batch_report_worker`, `do_batch_job`, `Workers::add_batch`) | DONE | `db_job_worker` (6 new), 4 unit; `scripts/mutations/jobs-batch-j2.plan` — 13 run, 11 caught (after a fixture fix), 2 controls survived | No cancellation watcher on this shape: a `cancel_requested` row finishes `success` at the progress it had. `add`/`get` keep the `SimpleWorker` API. |
 | `delete_empty_drafts_migration`, `delete_orphan_drafts_migration`, `delete_dms_preferences_migration`, `export_users_to_csv`; `SaveReportChunk`, `CompileReportChunks`, `SendReportToUser`, `CleanupReportChunks`; the three draft and one preference store queries; `System.Save` | `mm_app::job_runtime`, `mm_app::report`, `mm_store` | DONE | `parity::batch_jobs` (4: rows, files, posts and job rows against Go's worker on identical plantings) | The orphan migration deletes every channel draft (an empty root names no post) — Go's. Draft suites hold `common::DRAFT_ROWS` against it. |
 | `encoding/csv.Writer`; `time.Time.String()`'s zone abbreviation | `mm_model::go_csv`, `mm_model::report::go_time_string` (`local_time_zone`) | DONE | `behaviour_go_stdlib.json` (`encoding_csv`, `time_string` now compared whole) | The CSV's timestamps end in `IST` like Go's; the abbreviation divergence the report model documented is gone. |
+
+## The plugin host's hook side — UNIT P3 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `EmailNotificationWillBeSent`, `NotificationWillBePushed` (notification_email.go:197, notification_push.go:141) | `mm_app::notification_email`, `mm_app::push` (wired earlier) | proven, closes [D-932] | `parity::plugin_hooks::the_notification_join_and_guard_hooks_fire_as_go_fires_them` | Refusal and rewrite under both hosts, with the mail and push that follow; a rewritten push gets its transport back. |
+| `/join` (`JoinProvider.DoCommand`), `App.JoinChannel` (channel.go:2719) | `mm_app::command_join`, `mm_api::commands::serve_join` | DONE | `parity::command_dispatch::the_join_command_answers_as_go_does` + the tour above | The one built-in that runs here; Go's `GetByName(…, true)` is `allowFromCache`, so an archived channel is not found. |
+| `app/channel_guards.go`, `PluginAPI.RegisterChannelGuard`/`UnregisterChannelGuard`, the `ChannelGuardStore` writes | `mm_app::channel_guards`, `mm_store::channel_guard_store` | DONE, closes [D-933] | the tour above + 3 unit | The cache only while hosting; under the Go host the table is read per dispatch, since Go's writes cannot reach this process. |
+| `OnWebSocketConnect`, `WebSocketMessageHasBeenPosted`, `OnWebSocketDisconnect` (platform/web_conn.go) | `mm_api::websocket`, `mm_app::plugin_hooks` | DONE | the tour above | `remote_addr` is `GetIPAddress`, not the peer; every message is handed over after routing, in order, `custom_` ones included. |
+| `*sql.DB`'s pool as `DriverImpl` uses it | `mm_app::plugin_driver_pool` | DONE, closes [D-1340] | `parity::plugin_driver` + 3 unit | Serves the plugins alone; Go's is shared with the store. |
 
 ## Plugin API: commands, plugins, uploads, icons, typing, toasts, push and the cluster (2026-09-25)
 

@@ -119,6 +119,17 @@ pub async fn connect_websocket(
     // Go only to label a reconnect metric, which this server does not keep.
     let requested_id = query_value(query, CONNECTION_ID_PARAM);
     let sequence_value = query_value(query, SEQUENCE_NUMBER_PARAM);
+    // `RemoteAddress: c.AppContext.IPAddress()` — `utils.GetIPAddress`, not the raw peer — and
+    // `XForwardedFor: c.AppContext.XForwardedFor()`, the header as sent (websocket.go:82), which
+    // every message handed to the plugins carries.
+    let peer = Peer {
+        remote_addr: crate::client_ip::client_ip(&parts.headers, &parts.extensions),
+        x_forwarded_for: parts
+            .headers
+            .get("X-Forwarded-For")
+            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+            .unwrap_or_default(),
+    };
 
     Ok(upgrade
         .max_message_size(SOCKET_MAX_MESSAGE_SIZE)
@@ -130,8 +141,62 @@ pub async fn connect_websocket(
                 posted_ack,
                 requested_id,
                 sequence_value,
+                peer,
             )
         }))
+}
+
+/// The client's address as the connection keeps it for the plugins.
+struct Peer {
+    remote_addr: String,
+    x_forwarded_for: String,
+}
+
+/// Go's `pluginPosted` channel and its consumer (web_conn.go:141, :286): ten messages may wait,
+/// and a client that outruns the hooks waits for them.
+struct PluginPosted {
+    tx: tokio::sync::mpsc::Sender<(String, String, mm_app::plugin_hooks::PluginWebSocketRequest)>,
+    consumer: tokio::task::JoinHandle<()>,
+    peer: Peer,
+}
+
+impl PluginPosted {
+    /// Only a process that hosts plugins runs the consumer; under the Go host no plugin here
+    /// could be told.
+    fn start(state: &AppState, peer: Peer) -> Option<Self> {
+        if !state.app.plugin_host().hosted() {
+            return None;
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let app = state.app.clone(); // the consumer outlives this borrow
+        let consumer = tokio::spawn(async move {
+            while let Some((connection_id, user_id, request)) = rx.recv().await {
+                app.web_socket_message_has_been_posted(connection_id, user_id, request)
+                    .await;
+            }
+        });
+        Some(Self { tx, consumer, peer })
+    }
+
+    /// The clone of `request` the plugins are handed, queued behind the ones before it.
+    async fn post(&self, conn: &Arc<WebConn>, request: &WebSocketRequest) {
+        let wire = mm_app::plugin_hooks::web_socket_request_for_plugins(
+            request,
+            &conn.session().id,
+            &self.peer.remote_addr,
+            &self.peer.x_forwarded_for,
+        );
+        let _ = self
+            .tx
+            .send((conn.connection_id(), conn.user_id(), wire))
+            .await;
+    }
+
+    /// `close(wc.pluginPosted); wg.Wait()`: every queued message reaches the plugins first.
+    async fn finish(self) {
+        drop(self.tx);
+        let _ = self.consumer.await;
+    }
 }
 
 /// Go's `r.URL.Query().Get(key)`: the **first** value under `key`, percent-decoded, and the empty
@@ -240,6 +305,7 @@ async fn serve_socket(
     posted_ack: bool,
     requested_id: String,
     sequence_value: String,
+    peer: Peer,
 ) {
     let session = session.unwrap_or_default();
     let user_id = session.user_id.clone();
@@ -281,6 +347,12 @@ async fn serve_socket(
         }
     };
 
+    // The last step of `NewWebConn`, before the hub hears of it (web_conn.go:275).
+    state
+        .app
+        .on_web_socket_connect(&conn.connection_id(), &user_id);
+    let plugin_posted = PluginPosted::start(&state, peer);
+
     // Go registers only when the session carries a user (websocket.go:113). An unregistered
     // connection still runs both pumps: it can authenticate later over the socket.
     if !user_id.is_empty() {
@@ -294,7 +366,7 @@ async fn serve_socket(
             .await
             .is_break()
     {
-        state.app.hub_unregister(&conn, queues).await;
+        finish_connection(&state, &conn, queues, plugin_posted).await;
         return;
     }
 
@@ -369,7 +441,10 @@ async fn serve_socket(
                         // No deadline reset: Go sets the read deadline once and moves it only in
                         // the pong handler (web_conn.go:443-449), so a chatty client that never
                         // pongs is still dropped at 100s.
-                        if dispatch_text(&state, &conn, text.as_str()).await.is_break() {
+                        if dispatch_text(&state, &conn, text.as_str(), plugin_posted.as_ref())
+                            .await
+                            .is_break()
+                        {
                             break;
                         }
                     }
@@ -434,7 +509,24 @@ async fn serve_socket(
         }
     }
 
-    state.app.hub_unregister(&conn, queues).await;
+    finish_connection(&state, &conn, queues, plugin_posted).await;
+}
+
+/// The end of `readPump`'s caller (web_conn.go:416-431): the plugins' queue drained, the hub
+/// told, then `OnWebSocketDisconnect` under the connection's id as it now stands.
+async fn finish_connection(
+    state: &AppState,
+    conn: &Arc<WebConn>,
+    queues: ParkedQueues,
+    plugin_posted: Option<PluginPosted>,
+) {
+    if let Some(plugin_posted) = plugin_posted {
+        plugin_posted.finish().await;
+    }
+    state.app.hub_unregister(conn, queues).await;
+    state
+        .app
+        .on_web_socket_disconnect(&conn.connection_id(), &conn.user_id());
 }
 
 /// The resumption prelude of `writePump` (web_conn.go:524-557), run before the pump loop for a
@@ -519,7 +611,12 @@ fn encode_event(event: &WebSocketEvent, precomputed: bool) -> Result<String, ser
 
 /// The body of `readPump`'s loop (web_conn.go:463) for one text frame: decode, then route unless
 /// the action belongs to plugins. `Break` closes the connection.
-async fn dispatch_text(state: &AppState, conn: &Arc<WebConn>, text: &str) -> ControlFlow<()> {
+async fn dispatch_text(
+    state: &AppState,
+    conn: &Arc<WebConn>,
+    text: &str,
+    plugin_posted: Option<&PluginPosted>,
+) -> ControlFlow<()> {
     // `var req model.WebSocketRequest; json.NewDecoder(rd).Decode(&req)` — the shared body
     // decoder's rules: one JSON value and nothing past it (`{"seq":1,"action":"ping"} trailing`
     // is a ping), `null` is the zero request, keys fold and `null` members are ignored. A failure,
@@ -533,12 +630,18 @@ async fn dispatch_text(state: &AppState, conn: &Arc<WebConn>, text: &str) -> Con
     };
 
     // "Messages which actions are prefixed with the plugin prefix should only be dispatched to
-    // the plugins" — and there is no plugin host.
-    if request.action.starts_with(WEBSOCKET_MESSAGE_PLUGIN_PREFIX) {
-        return ControlFlow::Continue(());
+    // the plugins": the router never sees them. Every message, routed or not, is then handed to
+    // the plugins — after the router ran, so the session is the one it may just have set, and
+    // even when the router closed the connection.
+    let flow = if request.action.starts_with(WEBSOCKET_MESSAGE_PLUGIN_PREFIX) {
+        ControlFlow::Continue(())
+    } else {
+        serve_web_socket(state, conn, &request).await
+    };
+    if let Some(plugin_posted) = plugin_posted {
+        plugin_posted.post(conn, &request).await;
     }
-
-    serve_web_socket(state, conn, &request).await
+    flow
 }
 
 /// Port of `(*WebSocketRouter).ServeWebSocket` (websocket_router.go:26).

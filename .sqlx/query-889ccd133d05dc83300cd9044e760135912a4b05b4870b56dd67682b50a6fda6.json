@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ChannelGuards (ChannelId, PluginId, CreatedAt) VALUES ($1, $2, $3)\n             ON CONFLICT (ChannelId, PluginId) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "889ccd133d05dc83300cd9044e760135912a4b05b4870b56dd67682b50a6fda6"
+}

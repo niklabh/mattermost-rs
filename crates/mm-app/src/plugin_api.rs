@@ -1780,6 +1780,35 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
     }
 
     /// `PluginAPI.DeleteChannel`; see [`AppPluginApi::channels_delete_channel`].
+    /// Port of `PluginAPI.RegisterChannelGuard` (app/plugin_api.go:602): the plugin's own id,
+    /// lower-cased. See [`crate::channel_guards`].
+    async fn register_channel_guard(
+        &self,
+        args: api::Z_RegisterChannelGuardArgs,
+    ) -> Result<api::Z_RegisterChannelGuardReturns, NotImplemented> {
+        let result = self
+            .app
+            .register_channel_guard(&args.a, &self.id.to_lowercase())
+            .await;
+        Ok(api::Z_RegisterChannelGuardReturns {
+            a: result.err().and_then(|err| self.wire(err)),
+        })
+    }
+
+    /// Port of `PluginAPI.UnregisterChannelGuard` (app/plugin_api.go:606).
+    async fn unregister_channel_guard(
+        &self,
+        args: api::Z_UnregisterChannelGuardArgs,
+    ) -> Result<api::Z_UnregisterChannelGuardReturns, NotImplemented> {
+        let result = self
+            .app
+            .unregister_channel_guard(&args.a, &self.id.to_lowercase())
+            .await;
+        Ok(api::Z_UnregisterChannelGuardReturns {
+            a: result.err().and_then(|err| self.wire(err)),
+        })
+    }
+
     async fn delete_channel(
         &self,
         args: api::Z_DeleteChannelArgs,

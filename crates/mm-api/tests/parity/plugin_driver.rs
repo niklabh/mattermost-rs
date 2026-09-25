@@ -10,7 +10,8 @@
 //! methods; NULLs and every column type lib/pq decodes; binary and text result formats; a
 //! `*pq.Error` with its position; a rolled-back, a read-only and a failed transaction; several
 //! result sets; rows closed part-way; a query while rows are open; a connection lib/pq marks bad
-//! and `database/sql` then closes; and last, a `timestamptz` gob cannot carry) and writes each
+//! and `database/sql` then closes; the pool at its `MaxOpenConns`, and a session reused from it;
+//! and last, a `timestamptz` gob cannot carry) and writes each
 //! reply as gob carried it. The two transcripts are compared line for line.
 //!
 //! The hosts run **one after the other**, each against a freshly planted `mmrs_plugin_driver`,
@@ -30,11 +31,17 @@ use super::plugin_hooks::{repo, start_go};
 use common::{GO, SecondServer, client, go_minted_token, stack_enabled};
 
 /// The Rust host; see `second_server_ports`.
-const HOST_PORT: u16 = 8123;
+pub(super) const HOST_PORT: u16 = 8123;
 /// Its Go server sits at Go's port plus this, :8124 on stack 0. Every port a suite starts must
 /// stay under Go's port + 100, which is where the next stack's servers begin.
-const GO_OFFSET: u16 = 59;
+pub(super) const GO_OFFSET: u16 = 59;
 const PLUGIN_ID: &str = "mmrs.driverscript";
+/// The pool both hosts are started with, which the script's last steps exhaust: four
+/// connections, and two seconds to wait for a fifth.
+const POOL: [(&str, &str); 2] = [
+    ("MM_SQLSETTINGS_MAXOPENCONNS", "4"),
+    ("MM_SQLSETTINGS_QUERYTIMEOUT", "2"),
+];
 /// The table the script reads and writes.
 const TABLE: &str = "mmrs_plugin_driver";
 
@@ -240,7 +247,8 @@ async fn run_the_script(client: &reqwest::Client, admin: &str) {
         &go_run,
         &[
             ("DRIVER_SCRIPT_TRANSCRIPT", go_transcript.as_str()),
-            ("MM_SQLSETTINGS_MAXOPENCONNS", "10"),
+            POOL[0],
+            POOL[1],
         ],
         GO_OFFSET,
     )
@@ -262,6 +270,8 @@ async fn run_the_script(client: &reqwest::Client, admin: &str) {
             ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
             ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
             ("MM_SQLSETTINGS_DATASOURCE", dsn.as_str()),
+            POOL[0],
+            POOL[1],
             ("DRIVER_SCRIPT_TRANSCRIPT", rust_transcript.as_str()),
         ],
     )

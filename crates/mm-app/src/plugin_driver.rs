@@ -24,12 +24,11 @@
 //!
 //! # Where it differs
 //!
-//! - **One server connection per `Conn`.** Go takes a connection from its `*sql.DB` pool and
-//!   `ConnClose` returns it there, so a plugin may be handed a session another caller used (with
-//!   its temporary tables and `SET`s); here each `Conn` opens a fresh session with Go's own DSN
-//!   (`SqlSettings.DataSource`, or a replica under the same rule as `GetInternalReplicaDB`) and
-//!   closes it when nothing else holds it. `SqlSettings.QueryTimeout` bounds the open, as it bounds
-//!   Go's wait for a pooled connection. [D-1340]
+//! - **A pool of the plugins' own.** `Conn` takes a connection from a pool with Go's
+//!   `MaxOpenConns`, `MaxIdleConns` and lifetime settings, and waits for one up to `QueryTimeout`
+//!   ([`crate::plugin_driver_pool`]); Go's pool is the store's, so there the server's own
+//!   queries count against the same bound. The data source is Go's own DSN
+//!   (`SqlSettings.DataSource`, or a replica under the same rule as `GetInternalReplicaDB`).
 //! - **An unknown transaction, statement or rows id.** Go dereferences the missing map entry and
 //!   the server process panics. Here the RPC call fails instead, with go-netrpc's service error,
 //!   and the plugin's `database/sql` reports that. `RowsColumnTypeDatabaseTypeName` and
@@ -56,9 +55,11 @@ use mm_plugin::wire::plugin::{
 use mm_plugin::wire::{pq, sql_driver};
 
 use crate::App;
+use crate::plugin_driver_pool::{DEADLINE_EXCEEDED, PoolError, PoolSettings, Pooled, Pools};
 
-/// The lib/pq connection behind one `*sql.Conn`. `None` once `database/sql` closed it.
-type SharedConn = Arc<tokio::sync::Mutex<Option<gopq::Conn>>>;
+/// The lib/pq connection behind one `*sql.Conn`, taken from its pool. `None` once `database/sql`
+/// closed it.
+type SharedConn = Arc<tokio::sync::Mutex<Option<Pooled>>>;
 
 /// `connMeta`: the connection and the plugin that opened it, with `*sql.Conn`'s `done` flag.
 struct ConnEntry {
@@ -90,6 +91,8 @@ struct Maps {
 pub struct AppPluginDriver {
     app: App,
     maps: Mutex<Maps>,
+    /// The `*sql.DB` pools, by data source ([`crate::plugin_driver_pool`]).
+    pools: Pools,
     /// `SqlStore.rrCounter`, for the replica round robin.
     replica_counter: AtomicU64,
 }
@@ -100,6 +103,7 @@ impl AppPluginDriver {
         Self {
             app,
             maps: Mutex::new(Maps::default()),
+            pools: Pools::default(),
             replica_counter: AtomicU64::new(0),
         }
     }
@@ -112,30 +116,48 @@ impl AppPluginDriver {
     ///
     /// A replica is used only when `DataSourceReplicas` is not empty and a licence is loaded, and
     /// then in turn, as `GetInternalReplicaDB` chooses.
-    async fn data_source(&self, is_master: bool) -> Result<(String, i64), PluginError> {
+    async fn data_source(
+        &self,
+        is_master: bool,
+    ) -> Result<(String, i64, PoolSettings), PluginError> {
         let config = crate::config::load_model_config(self.app.store().config())
             .await
             .map_err(|e| PluginError::Message(e.to_string()))?;
         let sql = &config.sql_settings;
         let timeout = sql.query_timeout.unwrap_or(30);
+        let settings = PoolSettings {
+            max_open: sql.max_open_conns.unwrap_or(300),
+            max_idle: sql.max_idle_conns.unwrap_or(20),
+            max_lifetime_ms: sql.conn_max_lifetime_milliseconds.unwrap_or(3_600_000),
+            max_idle_time_ms: sql.conn_max_idle_time_milliseconds.unwrap_or(300_000),
+        };
         let replicas = sql.data_source_replicas.as_deref().unwrap_or_default();
         if !is_master && !replicas.is_empty() && matches!(self.app.license().await, Ok(Some(_))) {
             let n = self.replica_counter.fetch_add(1, Ordering::Relaxed) + 1;
             let i = (n % replicas.len() as u64) as usize;
-            return Ok((replicas[i].clone(), timeout));
+            return Ok((replicas[i].clone(), timeout, settings));
         }
-        Ok((sql.data_source.clone().unwrap_or_default(), timeout))
+        Ok((
+            sql.data_source.clone().unwrap_or_default(),
+            timeout,
+            settings,
+        ))
     }
 
     /// `DriverImpl.conn`.
     async fn open(&self, is_master: bool, plugin_id: &str) -> Result<String, PluginError> {
-        let (dsn, timeout) = self.data_source(is_master).await?;
-        let connect = gopq::Conn::connect(&dsn);
-        let conn =
-            match tokio::time::timeout(Duration::from_secs(timeout.max(0) as u64), connect).await {
-                Ok(result) => result.map_err(pq_error)?,
-                Err(_) => return Err(PluginError::Message("context deadline exceeded".into())),
-            };
+        let (dsn, timeout, settings) = self.data_source(is_master).await?;
+        let pool = self.pools.for_dsn(&dsn, settings);
+        let conn = match pool
+            .get(Duration::from_secs(u64::try_from(timeout).unwrap_or(0)))
+            .await
+        {
+            Ok(conn) => conn,
+            Err(PoolError::Deadline) => {
+                return Err(PluginError::Message(DEADLINE_EXCEEDED.to_owned()));
+            }
+            Err(PoolError::Connect(err)) => return Err(pq_error(err)),
+        };
         let id = mm_model::utils::new_id();
         self.maps().conns.insert(
             id.clone(),
@@ -169,30 +191,34 @@ impl AppPluginDriver {
             return Err(PluginError::Sentinel(Sentinel::ConnDone));
         }
         let mut guard = entry.conn.lock().await;
-        let Some(conn) = guard.as_mut() else {
+        let Some(pooled) = guard.as_mut() else {
             return Err(PluginError::Sentinel(Sentinel::ConnDone));
         };
-        let result = f(conn, &entry.conn).await;
+        let result = f(&mut pooled.conn, &entry.conn).await;
         if let Err(gopq::Error::BadConn) = result {
             entry.done.store(true, Ordering::SeqCst);
-            if let Some(conn) = guard.take() {
-                let _ = conn.close().await;
+            if let Some(pooled) = guard.take() {
+                pooled.discard().await;
             }
         }
         result.map_err(pq_error)
     }
 
-    /// `(*sql.Conn).Close`: `sql.ErrConnDone` when it was already closed. The session ends when
-    /// no statement, transaction or rows handle still holds it.
+    /// `(*sql.Conn).Close`: `sql.ErrConnDone` when it was already closed. The connection goes
+    /// back to its pool when no statement, transaction or rows handle still holds it; while one
+    /// does it stays theirs, and is ended when the last of them goes. Go returns it to the pool
+    /// regardless, where the next `Conn` may be handed the session those handles still read.
     async fn close_entry(entry: &ConnEntry) -> Result<(), PluginError> {
         if entry.done.swap(true, Ordering::SeqCst) {
             return Err(PluginError::Sentinel(Sentinel::ConnDone));
         }
         let mut guard = entry.conn.lock().await;
-        if Arc::strong_count(&entry.conn) == 1
-            && let Some(conn) = guard.take()
-        {
-            let _ = conn.close().await;
+        if Arc::strong_count(&entry.conn) == 1 {
+            if let Some(pooled) = guard.take() {
+                pooled.put_back().await;
+            }
+        } else if let Some(pooled) = guard.as_mut() {
+            pooled.release_slot();
         }
         Ok(())
     }
@@ -225,7 +251,7 @@ async fn on_conn<T>(
 ) -> Result<T, gopq::Error> {
     let mut guard = conn.lock().await;
     match guard.as_mut() {
-        Some(conn) => f(conn).await,
+        Some(pooled) => f(&mut pooled.conn).await,
         None => Err(gopq::Error::BadConn),
     }
 }

@@ -129,6 +129,21 @@
 //! `!config-script` does the same with `recorder/config.rs` — the configuration and licence
 //! methods, and three `SavePluginConfig`s — and records `{"hook": "ConfigScript", ...}`.
 //!
+//! `!guard-script <channel id>` and `!unguard-script <channel id>` register and remove the
+//! plugin's channel guard (`recorder/guards.rs`), recording `GuardScript` and `UnguardScript`.
+//!
+//! # The websocket hooks, with `HOOK_RECORDER_WEBSOCKET`
+//!
+//! `OnWebSocketConnect`, `WebSocketMessageHasBeenPosted` and `OnWebSocketDisconnect` are written
+//! down and answered with nothing.
+//!
+//! # The notification hooks, with `HOOK_RECORDER_NOTIFY`
+//!
+//! `EmailNotificationWillBeSent` refuses a mail whose text holds `!mail-reject` and answers a
+//! bare content (subject and the two bodies) for `!mail-rewrite`; `NotificationWillBePushed`
+//! refuses `!push-reject` and answers `!push-rewrite` with the message replaced and the transport
+//! cleared.
+//!
 //! With `HOOK_RECORDER_COMMANDS` set, the recorder registers slash commands on activation and
 //! answers `ExecuteCommand` by the command's first word (`recorder/commands.rs`), writing down
 //! `{"hook": "OnActivate", "calls": [...]}` and each `ExecuteCommand`; `/hookrec script` also
@@ -158,6 +173,7 @@ use std::sync::{Mutex, OnceLock};
 use mm_plugin::rpc::{ApiClient, Hooks, NotImplemented, Plugin, client_main};
 use mm_plugin::wire::model::{Channel, Draft, ScheduledPost};
 use mm_plugin::wire::model::{ChannelMember, Post, TeamMember};
+use mm_plugin::wire::model::{EmailNotificationContent, PushNotification};
 use mm_plugin::wire::plugin::{
     Z_ChannelHasBeenCreatedArgs, Z_ChannelHasBeenCreatedReturns, Z_ChannelMemberWillBeAddedArgs,
     Z_ChannelMemberWillBeAddedReturns, Z_ChannelWillBeArchivedArgs, Z_ChannelWillBeArchivedReturns,
@@ -176,6 +192,10 @@ use mm_plugin::wire::plugin::{
     Z_UserHasLoggedInArgs, Z_UserHasLoggedInReturns, Z_UserWillLogInArgs, Z_UserWillLogInReturns,
 };
 use mm_plugin::wire::plugin::{Z_DraftWillBeUpsertedArgs, Z_DraftWillBeUpsertedReturns};
+use mm_plugin::wire::plugin::{
+    Z_EmailNotificationWillBeSentArgs, Z_EmailNotificationWillBeSentReturns,
+    Z_NotificationWillBePushedArgs, Z_NotificationWillBePushedReturns,
+};
 use mm_plugin::wire::plugin::{Z_GenerateSupportDataArgs, Z_GenerateSupportDataReturns};
 use mm_plugin::wire::plugin::{
     Z_MessagesWillBeConsumedArgs, Z_MessagesWillBeConsumedReturns,
@@ -220,6 +240,8 @@ mod channels;
 mod auth;
 #[path = "recorder/files.rs"]
 mod files;
+#[path = "recorder/guards.rs"]
+mod guards;
 #[path = "recorder/properties.rs"]
 mod properties;
 #[path = "recorder/server.rs"]
@@ -278,6 +300,24 @@ const CONSUMED: [&str; 2] = [
     "MessagesWillBeConsumed",
     "MessagesWillBeConsumedWithContext",
 ];
+
+/// The two notification hooks, added to [`IMPLEMENTED`] when `HOOK_RECORDER_NOTIFY` is set: a
+/// post that mentions someone fires them, and the older tours mention people without expecting
+/// them.
+const NOTIFY: [&str; 2] = ["EmailNotificationWillBeSent", "NotificationWillBePushed"];
+
+/// The three websocket hooks, added to [`IMPLEMENTED`] when `HOOK_RECORDER_WEBSOCKET` is set.
+const WEBSOCKET: [&str; 3] = [
+    "OnWebSocketConnect",
+    "WebSocketMessageHasBeenPosted",
+    "OnWebSocketDisconnect",
+];
+
+/// The reason the notification hooks refuse with.
+const NOTIFY_REJECTION: &str = "the hook recorder keeps this quiet";
+
+/// What `!mail-rewrite` makes the subject, and `!push-rewrite` the push message.
+const NOTIFY_REWRITE: &str = "rewritten by the hook recorder";
 
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
@@ -376,6 +416,16 @@ impl Hooks for Recorder {
         IMPLEMENTED
             .iter()
             .chain(CONSUMED.iter().filter(|_| consume))
+            .chain(
+                NOTIFY
+                    .iter()
+                    .filter(|_| std::env::var_os("HOOK_RECORDER_NOTIFY").is_some()),
+            )
+            .chain(
+                WEBSOCKET
+                    .iter()
+                    .filter(|_| std::env::var_os("HOOK_RECORDER_WEBSOCKET").is_some()),
+            )
             .chain(["ExecuteCommand"].iter().filter(|_| commands::enabled()))
             .chain(["ServeHTTP"].iter().filter(|_| files::serves_http()))
             .map(|s| (*s).to_owned())
@@ -424,6 +474,90 @@ impl Hooks for Recorder {
         Ok(Z_MessagesWillBeConsumedWithContextReturns {
             a: consumed_replacements(&args.b, "!consume-ctx ", CONSUMED_CTX_PREFIX),
         })
+    }
+
+    async fn on_web_socket_connect(
+        &self,
+        args: mm_plugin::wire::plugin::Z_OnWebSocketConnectArgs,
+    ) -> Result<mm_plugin::wire::plugin::Z_OnWebSocketConnectReturns, NotImplemented> {
+        self.saw("OnWebSocketConnect", &args);
+        Ok(Default::default())
+    }
+
+    async fn web_socket_message_has_been_posted(
+        &self,
+        args: mm_plugin::wire::plugin::Z_WebSocketMessageHasBeenPostedArgs,
+    ) -> Result<mm_plugin::wire::plugin::Z_WebSocketMessageHasBeenPostedReturns, NotImplemented>
+    {
+        self.saw("WebSocketMessageHasBeenPosted", &args);
+        Ok(Default::default())
+    }
+
+    async fn on_web_socket_disconnect(
+        &self,
+        args: mm_plugin::wire::plugin::Z_OnWebSocketDisconnectArgs,
+    ) -> Result<mm_plugin::wire::plugin::Z_OnWebSocketDisconnectReturns, NotImplemented> {
+        self.saw("OnWebSocketDisconnect", &args);
+        Ok(Default::default())
+    }
+
+    /// `!mail-reject` in the mail's text refuses it; `!mail-rewrite` answers a content carrying
+    /// only a subject and the two message bodies, which Go puts in place of the whole content.
+    async fn email_notification_will_be_sent(
+        &self,
+        args: Z_EmailNotificationWillBeSentArgs,
+    ) -> Result<Z_EmailNotificationWillBeSentReturns, NotImplemented> {
+        self.saw("EmailNotificationWillBeSent", &args);
+        let content = args
+            .a
+            .as_deref()
+            .map(|n| n.email_notification_content.clone())
+            .unwrap_or_default();
+        if content.message_text.contains("!mail-reject") {
+            return Ok(Z_EmailNotificationWillBeSentReturns {
+                a: None,
+                b: NOTIFY_REJECTION.to_owned(),
+            });
+        }
+        if content.message_text.contains("!mail-rewrite") {
+            return Ok(Z_EmailNotificationWillBeSentReturns {
+                a: Some(Box::new(EmailNotificationContent {
+                    subject: NOTIFY_REWRITE.to_owned(),
+                    message_html: content.message_html,
+                    message_text: content.message_text,
+                    ..EmailNotificationContent::default()
+                })),
+                b: String::new(),
+            });
+        }
+        Ok(Z_EmailNotificationWillBeSentReturns::default())
+    }
+
+    /// `!push-reject` in the message refuses the push; `!push-rewrite` answers a copy with the
+    /// message replaced and the transport cleared, which Go puts back.
+    async fn notification_will_be_pushed(
+        &self,
+        args: Z_NotificationWillBePushedArgs,
+    ) -> Result<Z_NotificationWillBePushedReturns, NotImplemented> {
+        self.saw("NotificationWillBePushed", &args);
+        let push = args.a.as_deref().cloned().unwrap_or_default();
+        if push.message.contains("!push-reject") {
+            return Ok(Z_NotificationWillBePushedReturns {
+                a: None,
+                b: NOTIFY_REJECTION.to_owned(),
+            });
+        }
+        if push.message.contains("!push-rewrite") {
+            return Ok(Z_NotificationWillBePushedReturns {
+                a: Some(Box::new(PushNotification {
+                    message: NOTIFY_REWRITE.to_owned(),
+                    transport: Default::default(),
+                    ..push
+                })),
+                b: String::new(),
+            });
+        }
+        Ok(Z_NotificationWillBePushedReturns::default())
     }
 
     async fn message_will_be_posted(
@@ -497,6 +631,20 @@ impl Hooks for Recorder {
                 None => vec![json!({ "error": "no API client" })],
             };
             self.record(&json!({ "hook": "ConfigScript", "calls": calls }));
+        }
+        if let Some(channel) = after(message, guards::GUARD_SCRIPT) {
+            let calls = match self.api.get() {
+                Some(api) => guards::register(api.client(), channel).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "GuardScript", "calls": calls }));
+        }
+        if let Some(channel) = after(message, guards::UNGUARD_SCRIPT) {
+            let calls = match self.api.get() {
+                Some(api) => guards::unregister(api.client(), channel).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "UnguardScript", "calls": calls }));
         }
         let answer = if let Some(reason) = after(message, "!reject ") {
             Z_MessageWillBePostedReturns {
