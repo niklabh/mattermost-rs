@@ -51,6 +51,8 @@ async fn send(
 
 #[tokio::test]
 async fn an_array_a_null_and_trailing_bytes_are_answered_as_go_answers_them() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }

@@ -112,6 +112,8 @@ fn normalise_draft(draft: &serde_json::Value) -> serde_json::Value {
 
 #[tokio::test]
 async fn a_draft_round_trips_and_both_servers_answer_the_same_shape() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -214,6 +216,8 @@ async fn a_draft_round_trips_and_both_servers_answer_the_same_shape() {
 
 #[tokio::test]
 async fn an_empty_message_deletes_the_draft_and_answers_201_null() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -254,6 +258,8 @@ async fn an_empty_message_deletes_the_draft_and_answers_201_null() {
 
 #[tokio::test]
 async fn an_archived_channel_refuses_a_draft() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -284,6 +290,8 @@ async fn an_archived_channel_refuses_a_draft() {
 
 #[tokio::test]
 async fn deleting_a_draft_that_is_not_there_is_a_200() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -322,6 +330,8 @@ async fn deleting_a_draft_that_is_not_there_is_a_200() {
 
 #[tokio::test]
 async fn the_thread_form_names_a_different_draft_from_the_channel_form() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -378,6 +388,8 @@ async fn the_thread_form_names_a_different_draft_from_the_channel_form() {
 
 #[tokio::test]
 async fn the_draft_events_omit_the_originating_connection() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -632,6 +644,8 @@ async fn category(
 
 #[tokio::test]
 async fn deleting_preferences_publishes_both_events() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }

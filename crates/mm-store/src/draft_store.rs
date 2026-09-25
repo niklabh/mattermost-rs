@@ -74,6 +74,41 @@ pub trait DraftStore {
         &self,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlDraftStore.GetLastCreateAtAndUserIdValuesForEmptyDraftsMigration`
+    /// (draft_store.go:261): the `(CreateAt, UserId)` of the **last** row of the next window of
+    /// at most 100 drafts after the cursor, in `(CreateAt, UserId)` order — or `(0, "")` when no
+    /// draft lies after it, which is how the two draft migrations know they are done.
+    ///
+    /// The cursor is strict on both columns (`CreateAt > c OR (CreateAt = c AND UserId > u)`), so
+    /// two drafts of one user with the same `CreateAt` in different channels straddle a window
+    /// boundary only as a pair. Both migrations use it, the orphan one included.
+    fn get_last_create_at_and_user_id_values_for_empty_drafts_migration(
+        &self,
+        create_at: i64,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(i64, String), StoreError>> + Send;
+
+    /// Port of `SqlDraftStore.DeleteEmptyDraftsByCreateAtAndUserId` (draft_store.go:293): delete
+    /// the drafts of the same 100-row window whose `Message` is empty. Soft-deleted drafts are in
+    /// the window like any other.
+    fn delete_empty_drafts_by_create_at_and_user_id(
+        &self,
+        create_at: i64,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlDraftStore.DeleteOrphanDraftsByCreateAtAndUserId` (draft_store.go:324): delete
+    /// the drafts of the window whose `RootId` names a deleted post **or no post at all**.
+    ///
+    /// **A channel draft is an orphan.** Its `RootId` is `""`, no post has that id, and
+    /// `NOT EXISTS` is true — so this deletes every draft that is not a thread reply, as Go's
+    /// statement does. Reproduced, not corrected.
+    fn delete_orphan_drafts_by_create_at_and_user_id(
+        &self,
+        create_at: i64,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -381,6 +416,105 @@ impl DraftStore for SqlDraftStore {
                 ),
                 source,
             })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(create_at, user_id = %user_id))]
+    async fn get_last_create_at_and_user_id_values_for_empty_drafts_migration(
+        &self,
+        create_at: i64,
+        user_id: &str,
+    ) -> Result<(i64, String), StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT createat AS "create_at!", userid AS "user_id!"
+              FROM drafts
+             WHERE createat > $1 OR (createat = $1 AND userid > $2)
+             ORDER BY createat, userid ASC
+             LIMIT 100
+            "#,
+            create_at,
+            user_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to get the list of drafts".to_owned(),
+            source,
+        })?;
+        Ok(rows.last().map_or((0, String::new()), |row| {
+            (row.create_at, row.user_id.clone())
+        }))
+    }
+
+    #[tracing::instrument(skip(self), fields(create_at, user_id = %user_id, deleted))]
+    async fn delete_empty_drafts_by_create_at_and_user_id(
+        &self,
+        create_at: i64,
+        user_id: &str,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            r#"
+            WITH dd AS (
+                SELECT userid, channelid, rootid
+                  FROM drafts
+                 WHERE createat > $1 OR (createat = $1 AND userid > $2)
+                 ORDER BY createat, userid
+                 LIMIT 100
+            )
+            DELETE FROM drafts d
+             USING dd
+             WHERE d.userid = dd.userid
+               AND d.channelid = dd.channelid
+               AND d.rootid = dd.rootid
+               AND d.message = ''
+            "#,
+            create_at,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete empty drafts".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(create_at, user_id = %user_id, deleted))]
+    async fn delete_orphan_drafts_by_create_at_and_user_id(
+        &self,
+        create_at: i64,
+        user_id: &str,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            r#"
+            WITH dd AS (
+                SELECT userid, channelid, rootid
+                  FROM drafts
+                 WHERE createat > $1 OR (createat = $1 AND userid > $2)
+                 ORDER BY createat, userid
+                 LIMIT 100
+            )
+            DELETE FROM drafts d
+             USING dd
+             WHERE d.userid = dd.userid
+               AND d.channelid = dd.channelid
+               AND d.rootid = dd.rootid
+               AND (d.rootid IN (SELECT id FROM posts WHERE deleteat <> 0)
+                    OR NOT EXISTS (SELECT 1 FROM posts WHERE posts.id = d.rootid))
+            "#,
+            create_at,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete orphan drafts".to_owned(),
+            source,
+        })?;
         tracing::Span::current().record("deleted", result.rows_affected());
         Ok(())
     }

@@ -102,6 +102,7 @@ pub mod scheduled_posts;
 pub mod schemes;
 /// Port of `web.WriteFileResponse` and the `http.ServeContent` behind it.
 pub mod serve_content;
+pub mod serve_http;
 pub mod session_expiry;
 pub mod sessions;
 pub mod sidebar;
@@ -3810,12 +3811,13 @@ pub fn router(state: AppState) -> Router {
         )
         // Every path no route claimed: the web client's handlers, which forward whatever is not
         // theirs — see `web_static::fallback`.
-        // `UserIdRateLimit` in `ServeHTTP`, over every route served here and none of the
-        // fallbacks — a `route_layer` skips both `Router::fallback` and each method router's
-        // `any` forward; `web_static::fallback` counts the web client's own.
+        // `ServeHTTP`'s `basicSecurityChecks` and `UserIdRateLimit`, over every route served here
+        // and none of the fallbacks — a `route_layer` skips both `Router::fallback` and each
+        // method router's `any` forward; `web_static::fallback` runs both for the web client's
+        // own. After every `.route` and `.merge`: it wraps only what is already registered.
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            ratelimit::per_user,
+            serve_http::preamble,
         ))
         .fallback(web_static::fallback)
         // Outermost, so it sees every response this server produces — including the proxy's,

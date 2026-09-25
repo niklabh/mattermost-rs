@@ -14,8 +14,8 @@ use common::{
 };
 
 /// The job-running mm-apis, one per test so the two can run at once; see `second_server_ports`.
-const NOTICES_JOB_SERVER_PORT: u16 = 8114;
-const NOTIFY_ADMIN_JOB_SERVER_PORT: u16 = 8123;
+const NOTICES_JOB_SERVER_PORT: u16 = 8127;
+const NOTIFY_ADMIN_JOB_SERVER_PORT: u16 = 8129;
 
 async fn plant_views(pool: &sqlx::PgPool, user_id: &str) {
     for notice in ["mmrs-gone-notice-a", "mmrs-gone-notice-b"] {

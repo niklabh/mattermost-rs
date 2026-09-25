@@ -32,7 +32,7 @@ use common::{
 };
 
 /// The job-running mm-api; see `second_server_ports`.
-const JOB_SERVER_PORT: u16 = 8113;
+const JOB_SERVER_PORT: u16 = 8125;
 
 async fn send(
     base: &str,

@@ -1210,6 +1210,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "gopq"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "form_urlencoded",
+ "hmac",
+ "md-5",
+ "pbkdf2",
+ "rand 0.9.5",
+ "sha2",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "goqr"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "gotemplate"
 version = "0.1.0"
 dependencies = [
@@ -1808,6 +1832,8 @@ dependencies = [
  "gohtml2text",
  "goimage",
  "gomail",
+ "gopq",
+ "goqr",
  "gotemplate",
  "hmac",
  "if-addrs",
@@ -1825,6 +1851,7 @@ dependencies = [
  "rsa",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "sqlx",
  "subtle",

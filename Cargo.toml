@@ -36,6 +36,13 @@ members = [
     # Mattermost's push-notification text and notification e-mail HTML are rendered with.
     # Forbidden from depending on any mm-* crate. mm-app drives it.
     "crates/gogoldmark",
+    # Byte-exact port of rsc.io/qr as github.com/mattermost/rsc vendors it (BSD-3-Clause): the QR
+    # code and PNG of Mattermost's MFA enrolment. Forbidden from depending on any mm-* crate.
+    "crates/goqr",
+    # Byte-exact port of github.com/lib/pq's driver connection (MIT): the plugin Driver's SQL
+    # connections, which must send and answer what Go's does. Forbidden from depending on any
+    # mm-* crate. mm-app drives it.
+    "crates/gopq",
 ]
 
 [workspace.package]
@@ -64,6 +71,8 @@ mm-store = { path = "crates/mm-store" }
 mm-app = { path = "crates/mm-app" }
 goimage = { path = "crates/goimage" }
 gohtml = { path = "crates/gohtml", version = "0.1.0" }
+gopq = { path = "crates/gopq" }
+md-5 = "0.10"
 
 # Runtime
 tokio = { version = "1", features = ["full"] }

@@ -101,13 +101,15 @@ fn no_two_second_servers_share_a_port() {
     // plugin API tranches at + 88, + 89, + 90, + 92, + 94 and + 97, its slash-command tranche
     // at + 91, and its client plugin-HTTP tranche at + 98. Its auth tranche's is at + 61: an
     // offset of 100 or more is the next stack's Go server (stack k's Go is 8065 + 100k), so a
-    // tranche's Go offset stays below 100. `parity::ratelimit` starts its Go servers at + 75, + 82 and + 83.
+    // tranche's Go offset stays below 100. `parity::ratelimit` starts its Go servers at + 75, + 48 and + 49 (+ 82 and + 83 are
+    // `parity::plugin_hooks`'s download and upload tranches). `parity::plugin_driver` starts its
+    // Go server at + 59.
     // The `EnableTesting` oracle (`MMRS_EDITLIMIT_VARIANT=testing`) is at + 70: until 2026-09-25
     // `plugin_hooks`' onboarding host started on it and killed the oracle, which is why
     // `parity::manualtest` so often found no oracle to ask.
     let reserved: Vec<u16> = [
-        8065, 8066, 8115, 8126, 8135, 8138, 8139, 8140, 8147, 8148, 8152, 8153, 8154, 8155, 8156,
-        8157, 8159, 8162, 8163,
+        8065, 8066, 8113, 8114, 8115, 8124, 8126, 8135, 8138, 8139, 8140, 8152, 8153, 8154, 8155,
+        8156, 8157, 8159, 8162, 8163,
     ]
     .into_iter()
     .chain(8095..=8104)
@@ -120,4 +122,32 @@ fn no_two_second_servers_share_a_port() {
         taken.is_empty(),
         "second servers on a port the stack itself uses: {taken:?}"
     );
+
+    // Stack k's servers start at 8065 + 100k, so a port at or past 8165, or a Go offset of 100
+    // or more, is the next stack's Go server or mm-api — which the second server then frees, and
+    // so kills. Measured 2026-09-25: `parity::plugin_driver` on stack 2 at :8165 and + 101 took
+    // stack 3's Go server and mm-api down on every run.
+    let beyond: Vec<_> = claims.keys().filter(|port| **port >= 8165).collect();
+    assert!(
+        beyond.is_empty(),
+        "second servers on the next stack's ports: {beyond:?}"
+    );
+    let mut offsets = Vec::new();
+    for file in &files {
+        let text = std::fs::read_to_string(file).unwrap();
+        for line in text.lines() {
+            let line = line.trim_start();
+            if line.starts_with("const ") && line.contains("_OFFSET: u16 =") {
+                if let Some(offset) = line.split_once('=').and_then(|(_, v)| leading_port(v)) {
+                    offsets.push((offset, file.display().to_string()));
+                }
+            }
+        }
+    }
+    assert!(
+        offsets.iter().any(|(o, _)| *o == 74),
+        "plugin_hooks' Go offset was not found — the scan is not reading what it thinks"
+    );
+    let far: Vec<_> = offsets.iter().filter(|(o, _)| *o >= 100).collect();
+    assert!(far.is_empty(), "Go offsets into the next stack: {far:?}");
 }

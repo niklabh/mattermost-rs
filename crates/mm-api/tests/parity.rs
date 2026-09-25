@@ -278,6 +278,7 @@ mod parity {
     // Appended 2026-09-15: the searchmisc family.
     pub mod agents;
     pub mod audit_rows;
+    pub mod batch_jobs;
     pub mod file_search;
     // Appended 2026-09-16: the configuration projection follows a write (D-701).
     pub mod config_reload;
@@ -293,6 +294,7 @@ mod parity {
     pub mod managed_categories;
     pub mod marketplace;
     pub mod marketplace_visit;
+    pub mod plugin_driver;
     pub mod plugin_hooks;
     pub mod plugin_startup;
     // Appended 2026-09-23: the support packet past its licence gate.
@@ -320,6 +322,10 @@ mod parity {
     pub mod null_columns;
     // Appended 2026-09-25: set_unread's open-channel and reply arms (D-421).
     pub mod set_unread_mentions;
+    // Appended 2026-09-25: basicSecurityChecks' 414 (D-1211).
+    pub mod url_length;
+    // Appended 2026-09-25: MFA enrolment and the MFA login across both servers (D-500, D-1210).
+    pub mod mfa_enrolment;
     // Appended 2026-09-25: persistent notifications, their resolution and their job (D-401, D-551).
     pub mod persistent_notifications;
     // Appended 2026-09-25: the product-notices and notify-admin jobs (D-804).

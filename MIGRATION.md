@@ -13,12 +13,12 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 71/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 71/258, Driver 20/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
 Blended, the migration is **roughly 60–65% by route traffic** and **about 40% with equal weight
-on routes, websocket, plugins and jobs**. The backlog is 161 OPEN entries in
+on routes, websocket, plugins and jobs**. The backlog is 162 OPEN entries in
 [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md). What remains, largest first: the 258 plugin API
 methods and the Driver, 28 job workers, the forwarded branches inside served routes, and the
 e-mail batching and the generated sender avatar ([D-1072]).
@@ -14881,6 +14881,29 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `c.AppContext.Path()` = `r.URL.Path` from `url.ParseRequestURI`; `net/http`'s own 400 for a target it cannot parse | `mm_api::audit_log::go_request_path`, `mux_guard::decide` | DONE | 3 unit, `audit_rows::an_encoded_path_is_recorded_decoded`, `…a_target_go_cannot_parse_is_its_400_and_writes_no_row`; `scripts/mutations/hook-updates-d1220.plan` — 10 run, 8 caught (after a fixture fix), 2 controls survived | `/users/m%65/patch` is served and recorded as `/users/me/patch`; an invalid escape now goes to Go on every route (it was our 401 on a non-id parameter). |
 | `updateIncomingHook`'s `ValidateIncomingWebhookUserChannelAccess` on a move (webhook.go:176); `updateOutgoingHook`'s team fill and mismatch 400 (webhook.go:425) | `mm_api::webhooks`, `App::validate_incoming_webhook_user_channel_access` | DONE, closes [D-1220], [D-1221] | `webhook_writes::moving_an_incoming_hook_checks_its_owner_can_read_the_new_channel`, `…an_outgoing_update_naming_another_team_is_refused` | The move check is the **old owner's**, not the caller's, and only when the channel changes; `read_channel_content` needs channel membership even on an open channel. |
+
+## Tech-debt payoff: `basicSecurityChecks`, and the MFA login (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `Handler.basicSecurityChecks` (web/handlers.go:143), `ServiceSettings.MaximumURLLength` | `mm_api::serve_http` (a `route_layer` on both routers), `mm_app::config::Config::maximum_url_length` | DONE, closes [D-1211] | `parity::url_length` (3: at, under and over the limit, the socket, the mux 404), 2 unit + config; `scripts/mutations/url-length.plan` | `len(RequestURI)` strictly greater, before the security headers and the per-user limit, so the 414 carries only `Content-Type` and gzip's `Vary`. The web client's page and `/manualtest` already checked it. |
+| `github.com/mattermost/rsc` `qr`, `qr/coding`, `gf256` (rsc.io/qr, BSD-3-Clause) | `goqr` (new crate) | DONE | `go_parity` (51 texts, every PNG byte-equal) + 9 unit; `scripts/mutations/goqr.plan` | Encoding chosen for the whole text, mask always 0, and the library's own fixed-Huffman PNG writer. |
+| `platform/shared/mfa`, `dgoogauth` (TOTP, window 3, replay list), `App.GenerateMfaSecret`/`ActivateMfa`/`DeactivateMfa`/`UpdateMfa`/`CheckUserMfa`, the four `UserStore` MFA methods, `updateUserMfa`, `generateMfaSecret` | `mm_app::otp`, `mm_app::user_auth`, `mm_app::login`, `mm_store::user_store`, `mm_api::user_auth` | DONE, closes [D-500]; the MFA branch of [D-1210]; opens [D-1260] | `behaviour_mfa.json` go_parity (90 codes, 24 validate and 24 activate rows relative to the step, 8 generated secrets), `parity::mfa_enrolment` (2, licensed MFA pair); `scripts/mutations/mfa.plan` | A code that is not six digits is Go's 500 on activation and 400 on login; the replay list is JSON strings. The secret alone is random: Go's is recorded and the rest must follow from it. |
+
+## The plugin database driver — UNIT P2 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `app.DriverImpl` (plugin_db_driver.go), `AppDriver`, `driverForPlugin` and the `ShutdownConns` call in `supervisor.Shutdown` | `mm_app::plugin_driver::AppPluginDriver`, `mm_plugin::rpc::{AppDriver, DriverForPlugin}`, `mm_plugin::environment` | DONE, 20/20 methods; opens [D-1340] | `parity::plugin_driver` (171 replies from `examples/driver_script`, compared line for line) + 4 unit; `scripts/mutations/plugin-driver.plan` (17 run, 17 caught) | `database/sql`'s `Raw` is kept: a `driver.ErrBadConn` closes the `*sql.Conn`, and later calls answer `sql.ErrConnDone`. An unknown tx/stmt/rows id panics Go; here the RPC call fails. |
+| github.com/lib/pq v1.12.3 `conn`, `stmt`, `rows`, `encode`, `error`, `scram`, `oid` (MIT) | `gopq` (new crate) | DONE | 10 unit; the parity suite above is its oracle | Chosen over sqlx because lib/pq's result formats (binary only for `bytea`/`int2/4/8`/`uuid`), decoded values and error texts are what a plugin sees. No TLS. |
+
+## Jobs: the batch-worker shape and its four workers — D-804 continued (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `jobs.BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker` (jobs/batch_*.go), `JobServer.CancellationWatcher`, `UpdateInProgressJobData` | `mm_app::job_runtime` (`BatchWorker`, `batch_migration_worker`, `batch_report_worker`, `do_batch_job`, `Workers::add_batch`) | DONE | `db_job_worker` (6 new), 4 unit; `scripts/mutations/jobs-batch-j2.plan` — 13 run, 11 caught (after a fixture fix), 2 controls survived | No cancellation watcher on this shape: a `cancel_requested` row finishes `success` at the progress it had. `add`/`get` keep the `SimpleWorker` API. |
+| `delete_empty_drafts_migration`, `delete_orphan_drafts_migration`, `delete_dms_preferences_migration`, `export_users_to_csv`; `SaveReportChunk`, `CompileReportChunks`, `SendReportToUser`, `CleanupReportChunks`; the three draft and one preference store queries; `System.Save` | `mm_app::job_runtime`, `mm_app::report`, `mm_store` | DONE | `parity::batch_jobs` (4: rows, files, posts and job rows against Go's worker on identical plantings) | The orphan migration deletes every channel draft (an empty root names no post) — Go's. Draft suites hold `common::DRAFT_ROWS` against it. |
+| `encoding/csv.Writer`; `time.Time.String()`'s zone abbreviation | `mm_model::go_csv`, `mm_model::report::go_time_string` (`local_time_zone`) | DONE | `behaviour_go_stdlib.json` (`encoding_csv`, `time_string` now compared whole) | The CSV's timestamps end in `IST` like Go's; the abbreviation divergence the report model documented is gone. |
 
 ## Persistent notifications and the notify jobs — J3 (2026-09-25)
 

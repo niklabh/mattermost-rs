@@ -86,7 +86,7 @@ const SUPPORT_GO_OFFSET: u16 = 87;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
-fn repo() -> PathBuf {
+pub(super) fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
@@ -240,7 +240,7 @@ fn lay_out(run: &Path) -> PathBuf {
 }
 
 /// The Go server this suite starts: killed on drop.
-struct GoServer {
+pub(super) struct GoServer {
     child: std::process::Child,
     base: String,
     /// The tour's scratch directory: the parent of both hosts' run directories.
@@ -277,7 +277,7 @@ fn go_port() -> u16 {
 /// `parity::plugin_startup` does. **Two database connections, not fifty**: the stack's servers
 /// already hold most of the ceiling, and a server with Go's default `MaxIdleConns` takes the
 /// database down for every suite running beside this one.
-async fn start_go(run: &Path, env: &[(&str, &str)], offset: u16) -> GoServer {
+pub(super) async fn start_go(run: &Path, env: &[(&str, &str)], offset: u16) -> GoServer {
     start_go_binary("mattermost", run, env, offset).await
 }
 
@@ -2912,6 +2912,8 @@ static CHANNEL_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec:
 /// GM's name is a function of its members' ids, so it is scrubbed whole rather than piecewise.
 #[tokio::test]
 async fn the_channel_hooks_fire_as_go_fires_them() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     use futures_util::FutureExt as _;
 
     if !stack_enabled() {
@@ -3481,6 +3483,8 @@ async fn transcript_reaches(path: &Path, expected: usize, side: &str) -> Vec<Jso
 /// host starts from a plugin that is not enabled.
 #[tokio::test]
 async fn the_install_hook_fires_as_go_fires_it() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     use futures_util::FutureExt as _;
 
     if !stack_enabled() {
@@ -3671,6 +3675,8 @@ static SCHEDULED_CHANNEL: std::sync::Mutex<Option<String>> = std::sync::Mutex::n
 /// answers off the post's message, as it does for drafts.
 #[tokio::test]
 async fn the_scheduled_post_hook_fires_as_go_fires_it() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     use futures_util::FutureExt as _;
 
     if !stack_enabled() {
