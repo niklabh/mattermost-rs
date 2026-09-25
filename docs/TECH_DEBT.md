@@ -10207,3 +10207,16 @@ around it. **What is owed:** a purge that enforcement does not block — enrol t
 administrator (a TOTP secret the process holds), or a route `MFARequired` exempts — and a parity row
 that writes here after Go has read.
 
+---
+
+## D-1340 · The plugin driver opens a session per `Conn`, outside any pool
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (UNIT P2)
+
+Go's `DriverImpl.Conn` takes a connection from the store's `*sql.DB` pool, so
+`SqlSettings.MaxOpenConns` bounds what plugins hold (a plugin waits up to `QueryTimeout` for one)
+and `ConnClose` returns the session for reuse. `mm_app::plugin_driver` opens a fresh `gopq`
+session per `Conn` and ends it on close: nothing limits how many a plugin holds, and no session
+state carries over between `Conn`s. **What is owed:** a `gopq` pool honouring `MaxOpenConns`,
+`MaxIdleConns` and `ConnMaxLifetimeMilliseconds`, with Go's wait-then-`context deadline exceeded`,
+and a parity row that exhausts it.

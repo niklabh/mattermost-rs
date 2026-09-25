@@ -26,6 +26,7 @@ impl mm_plugin::rpc::PluginApiDynamic for NoApi {}
 
 struct NoDriver;
 impl mm_plugin::rpc::Driver for NoDriver {}
+impl mm_plugin::rpc::AppDriver for NoDriver {}
 
 /// `examples/env_plugin`, built by this test for the same reason `sdk_conformance` builds its
 /// plugin: `cargo test` does not rebuild examples.
