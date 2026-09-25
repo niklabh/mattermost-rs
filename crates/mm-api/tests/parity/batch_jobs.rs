@@ -614,7 +614,8 @@ async fn delivery(pool: &sqlx::PgPool, job_id: &str) -> Delivery {
             .expect("the delivering post");
     let file_ids: Vec<String> = serde_json::from_str(&file_ids).unwrap_or_default();
     let dir = std::path::PathBuf::from(common::stack_data_dir());
-    let csv = std::fs::read_to_string(dir.join(&path)).expect("the compiled report is on disk");
+    let csv = std::fs::read_to_string(dir.join(&path))
+        .unwrap_or_else(|e| panic!("the compiled report {path} is not on disk: {e}"));
     let chunk_left = dir
         .join(format!("admin_reports/batch_report_{job_id}__0.csv"))
         .exists();
@@ -637,6 +638,32 @@ async fn delivery(pool: &sqlx::PgPool, job_id: &str) -> Delivery {
 /// `FileInfo` and post from the system bot to the requester, the chunk removed, and the same job
 /// rows — `in_progress` at 0 with `file_count` and the cursor after the first chunk, then
 /// `success` at 100.
+/// Removes what each run delivered: the file, its `FileInfo` and the post that carried it. Left
+/// in place, the admin's DM accumulates `batch_report_*.csv` files that the file search then
+/// finds for the word "report".
+async fn drop_deliveries(pool: &sqlx::PgPool, job_ids: &[String]) {
+    let paths: Vec<String> = job_ids
+        .iter()
+        .map(|id| format!("admin_reports/batch_report_{id}.csv"))
+        .collect();
+    let posts: Vec<(String,)> =
+        sqlx::query_as("DELETE FROM fileinfo WHERE path = ANY($1) RETURNING postid")
+            .bind(&paths)
+            .fetch_all(pool)
+            .await
+            .expect("the FileInfo delete runs");
+    let posts: Vec<String> = posts.into_iter().map(|(id,)| id).collect();
+    sqlx::query("DELETE FROM posts WHERE id = ANY($1)")
+        .bind(&posts)
+        .execute(pool)
+        .await
+        .expect("the post delete runs");
+    let dir = std::path::PathBuf::from(common::stack_data_dir());
+    for path in &paths {
+        let _ = std::fs::remove_file(dir.join(path));
+    }
+}
+
 #[tokio::test]
 async fn the_user_export_writes_the_csv_go_writes_and_posts_it_alike() {
     if !stack_enabled() {
@@ -669,13 +696,17 @@ async fn the_user_export_writes_the_csv_go_writes_and_posts_it_alike() {
         .await
         .expect("Go answers");
     assert!(response.status().is_success(), "deactivating");
-    // The requester is not on the team, so the DM the first run creates changes no row the
-    // second run reports.
+    // The team's creator leaves it, and the requester is a user of another team, so the DM the
+    // first run creates changes no row the second run reports. A requester of its own also keeps
+    // the `batch_report_*.csv` files out of the shared admin's DM, where a concurrent file search
+    // for "report" would find them.
     common::remove_user_from_team(&http, &admin, &team, &admin_id).await;
+    let elsewhere = create_team(&http, &admin, "batchcsvr").await;
+    let requester = create_plain_user(&http, &admin, &elsewhere, "batchcsvr").await;
     common::invalidate_go_caches(&http, &admin).await;
 
     let data = serde_json::json!({
-        "requesting_user_id": admin_id,
+        "requesting_user_id": requester.id,
         "date_range": "all_time",
         "role": "",
         "team": team,
@@ -708,6 +739,7 @@ async fn the_user_export_writes_the_csv_go_writes_and_posts_it_alike() {
         jobs.push(id);
     }
     drop_jobs(&pool, &jobs).await;
+    drop_deliveries(&pool, &jobs).await;
 
     let rust = sides.pop().expect("two sides");
     let go = sides.pop().expect("two sides");
