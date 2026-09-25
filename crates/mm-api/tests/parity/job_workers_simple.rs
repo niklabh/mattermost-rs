@@ -321,6 +321,7 @@ async fn refresh_materialized_views_runs_like_go() {
         ));
         common::unplant_bot(&planted.bot).await;
     }
+    purge_views_fixture(&pool).await;
     let rust = sides.pop().expect("two sides");
     let go = sides.pop().expect("two sides");
     assert_eq!(go.0["status"], "success", "Go: {go:?}");
@@ -431,7 +432,7 @@ async fn set_extend_sessions(http: &reqwest::Client, admin: &str, on: bool) {
 }
 
 /// The mm-api that runs `expiry_notify`'s Rust half; see `second_server_ports`.
-const JOB_WORKER_RUST_PORT: u16 = 8113;
+const JOB_WORKER_RUST_PORT: u16 = 8125;
 
 /// A mobile session of `user_id` that expired five minutes ago and has not been notified, plus
 /// three that `GetSessionsExpired` must pass over: one expired two hours ago (outside the hour),
@@ -571,31 +572,33 @@ async fn expiry_notify_pushes_like_go() {
             .unwrap_or_else(|| panic!("{side}: no push for the expired session"));
         let mut body = common::push_proxy::normalize_push(push.json());
         body["device_id"] = serde_json::Value::from("<device>");
-        let others = [format!("{device_key}old"), format!("{device_key}told")];
-        let stray = proxy
-            .take(Duration::from_millis(500), |r| {
-                let device = r.json()["device_id"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned();
-                device.is_empty() || others.contains(&device)
-            })
-            .await;
+        // The three sessions that must be passed over, judged by their own flags rather than by
+        // the proxy: under the full suite other pushes with an empty device arrive from elsewhere,
+        // and a web session's push is exactly that. A session pushed to would have been flagged.
+        let untouched = [
+            !expired_notify(&pool, &id(&format!("o{nonce}"))).await,
+            expired_notify(&pool, &id(&format!("n{nonce}"))).await,
+            !expired_notify(&pool, &id(&format!("w{nonce}"))).await,
+        ] == [true; 3];
         sides.push((
             outcome(&job),
             push.path.clone(),
             body,
             expired_notify(&pool, &session).await,
-            stray.is_none(),
+            untouched,
         ));
     }
+    sqlx::query("DELETE FROM sessions WHERE id LIKE 'mmrsjs%'")
+        .execute(&pool)
+        .await
+        .expect("clears the planted sessions");
     let rust = sides.pop().expect("two sides");
     let go = sides.pop().expect("two sides");
     assert_eq!(go.0["status"], "success", "Go: {go:?}");
     assert!(go.3, "Go set ExpiredNotify");
     assert!(
         go.4,
-        "Go pushed nothing to the old or the already-notified session"
+        "Go left the old, the already-notified and the web session alone"
     );
     assert_eq!(rust, go, "the job, the push and the flag differ");
 
@@ -804,6 +807,12 @@ async fn cleanup_expired_access_tokens_runs_like_go() {
         sides
     })
     .await;
+    // Planted tokens outlive their deactivated owners, and `GET /users/tokens` lists every token
+    // on the server — `user_access_tokens` measured one of these in its answer.
+    sqlx::query("DELETE FROM useraccesstokens WHERE id LIKE 'mmrsjs%'")
+        .execute(&pool)
+        .await
+        .expect("clears the planted tokens");
     let mut sides = sides;
     let rust = sides.pop().expect("two sides");
     let go = sides.pop().expect("two sides");
@@ -917,6 +926,12 @@ async fn notify_expiring_access_tokens_runs_like_go() {
         sides
     })
     .await;
+    // Planted tokens outlive their deactivated owners, and `GET /users/tokens` lists every token
+    // on the server — `user_access_tokens` measured one of these in its answer.
+    sqlx::query("DELETE FROM useraccesstokens WHERE id LIKE 'mmrsjs%'")
+        .execute(&pool)
+        .await
+        .expect("clears the planted tokens");
     let mut sides = sides;
     let rust = sides.pop().expect("two sides");
     let go = sides.pop().expect("two sides");
