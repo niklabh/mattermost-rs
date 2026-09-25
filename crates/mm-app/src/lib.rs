@@ -4,6 +4,7 @@
 //! which is what keeps the API layer free of SQL and the store layer free of request semantics.
 
 pub mod access_control_policy;
+pub mod access_token_expiry;
 pub mod agents;
 pub mod analytics;
 pub mod audit;
@@ -45,6 +46,7 @@ pub mod desktop_login;
 pub mod draft;
 pub mod email;
 pub mod emoji;
+pub mod expiry_notify;
 /// Port of the file-backend half of `app/export.go`.
 pub mod export;
 /// The read side of `app/file.go` — `FileInfo` rows and, through [`filestore`], file bytes.
@@ -71,6 +73,7 @@ pub mod import;
 pub mod job;
 pub mod job_runtime;
 pub mod job_scheduler;
+pub mod job_workers;
 pub mod license;
 pub mod limits;
 pub mod link_image;
@@ -113,11 +116,13 @@ pub mod plugins;
 pub mod post;
 pub mod post_acknowledgement;
 pub mod post_create;
+pub mod post_persistent_notification;
 pub mod post_rest;
 pub mod post_search;
 pub mod post_unread;
 pub mod post_write;
 pub mod preference;
+pub mod profile_image;
 // Appended 2026-09-15: the notice cache and `GetProductNotices`.
 pub mod product_notices;
 pub mod properties;
@@ -142,6 +147,7 @@ pub mod terms_of_service;
 pub mod test_notification;
 pub mod thread;
 pub mod thread_read;
+pub mod toast;
 pub mod typing;
 /// Port of the two read functions in `app/upload.go`.
 pub mod upload;

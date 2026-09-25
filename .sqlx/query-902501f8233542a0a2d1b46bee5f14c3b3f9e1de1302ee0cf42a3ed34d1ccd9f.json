@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM notifyadmin WHERE trial = $1 AND createat < $2 AND sentat IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "902501f8233542a0a2d1b46bee5f14c3b3f9e1de1302ee0cf42a3ed34d1ccd9f"
+}

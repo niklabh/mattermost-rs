@@ -59,6 +59,7 @@
     "EnablePublicLink": false,
     "ExportDirectory": "./data/",
     "ExportDriverName": "local",
+    "InitialFont": "nunito-bold.ttf",
     "MaxFileSize": 104857600,
     "MaxImageResolution": 33177600
   },
@@ -96,6 +97,10 @@
   },
   "MessageExportSettings": {
     "DownloadExportResults": false
+  },
+  "MetricsSettings": {
+    "Enable": false,
+    "EnableClientMetrics": true
   },
   "Office365Settings": {
     "Enable": false
@@ -196,6 +201,7 @@
     "OutgoingIntegrationRequestsTimeout": 30,
     "PostEditTimeLimit": -1,
     "PostPriority": true,
+    "RefreshPostStatsRunTime": "00:00",
     "RestrictLinkPreviews": "",
     "ScheduledPosts": true,
     "SessionIdleTimeoutInMinutes": 43200,
@@ -213,6 +219,7 @@
     "WebserverMode": "gzip"
   },
   "SqlSettings": {
+    "AnalyticsQueryTimeout": 300,
     "DisableDatabaseSearch": false
   },
   "TeamSettings": {

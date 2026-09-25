@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(id) AS \"count!\"\n              FROM propertyfields\n             WHERE groupid = $1\n               AND targettype = $2\n               AND targetid = $3\n               AND ($4::bool OR deleteat = 0)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ce470f4e23506d087346d7257e1a935fcfde5912f0079632a5e0e034d951e4be"
+}

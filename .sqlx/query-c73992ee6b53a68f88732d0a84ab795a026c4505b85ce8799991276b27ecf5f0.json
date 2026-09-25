@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM sessions\n              WHERE token IN (SELECT token FROM useraccesstokens WHERE id = ANY($1))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c73992ee6b53a68f88732d0a84ab795a026c4505b85ce8799991276b27ecf5f0"
+}

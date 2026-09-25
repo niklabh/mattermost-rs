@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE notifyadmin SET sentat = $1 WHERE userid = $2 AND requiredplan = $3 AND requiredfeature = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6e54754f8aeb06ca9c972965f4d0b5c7b0ae44b4d73d7e47edcf86814a30913a"
+}

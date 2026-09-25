@@ -739,6 +739,37 @@ name. The tranche runs its script twice, unlicensed and licensed. `RevokeSession
 session answers not-implemented ([D-283]); `DeleteGroupConstrainedMemberships` sweeps the whole
 installation and is compared only where it refuses ([D-1070]).
 
+**Then 204 of 258:** the command, plugin, upload-session, team-icon, profile-image, typing,
+toast, push, channel and cluster twenty-eight (`plugin_api/server.rs`): `CreateCommand`,
+`GetCommand`, `UpdateCommand`, `DeleteCommand`, `GetPlugins`, `GetPluginStatus`, `EnablePlugin`,
+`DisablePlugin`, `RemovePlugin`, `CreateUploadSession`, `GetUploadSession`, `GetTeamIcon`,
+`SetTeamIcon`, `RemoveTeamIcon`, `SetProfileImage`, `PublishUserTyping`, `SendToastMessage`,
+`SendPushNotification`, `AddUserToChannel`, `GetChannelOfType`, `RestoreChannel`,
+`CreateTeamMembersGracefully`, `PublishPluginClusterEvent`, `RegisterCollectionAndTopic`,
+`GetLDAPUserAttributes`, `RequestTrialLicense` (its refusals), `LogAuditRec` and
+`LogAuditRecWithLevel`. The command reads answer the store's own error text; `UpdateCommand`
+keeps the plugin's creator, so a command sent with one fails `IsValid`; `SetTeamIcon` is
+`App::set_team_icon_from_file`, new here and byte-identical to Go's encoder; the audit record
+goes to no audit log ([D-1330]). The tranche's script runs under both hosts from the same
+planted rows and compares every answer, hook and frame. `RequestTrialLicense` past its refusals
+(the licence server) answers not-implemented.
+
+**Then 232 of 258:** the property twenty-eight (`plugin_api/properties.rs`): `RegisterPropertyGroup`,
+`GetPropertyGroup`, the ten field methods (`CreatePropertyField` … `DeletePropertyField`,
+`UpdatePropertyFields` for one field), the eleven value methods, and the five `*WithOptions`
+variants. Every one answers a Go `error`. A group the property hooks manage (`access_control`,
+`session_attributes`) answers not-implemented, since the hooks' plugin-caller arms are not ported
+([D-1331]); every other group — the PSAv1 groups plugins register, `boards`, `post_attributes` —
+is answered whole, `json.RawMessage` bytes included. `UpdatePropertyFields` with more than one
+field answers not-implemented. The server tour now also calls `LogAuditRecWithLevel` and lists
+two plugins, active then inactive.
+
+**Then 240 of 258:** the eight access-control methods (`plugin_api/access_control.rs`), as Go's
+public build answers them: the resource type's format and owner, the action, the ids and the
+acting user in Go's order, then a nil engine's 501 — and for `EvaluateAccessControl` the raw
+store read `resolvePluginPolicyExistence` falls back on (`no_policy`, or 503 when a policy of the
+requested type exists). The engine itself is private (enterprise) code.
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

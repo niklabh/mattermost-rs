@@ -6266,7 +6266,12 @@ pinned rather than assumed.
 
 ## D-204 · The generated initials avatar is not reproducible, so three routes forward
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, profile image)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, profile image)
+**Closed** 2026-09-25 — `crates/gofont` is a byte-exact port of freetype-go (unhinted), `x/image/font`
+and the two `image/draw` paths, and `mm_app::profile_image` draws Go's avatar over it; all three
+routes, the bot branch, the `LastPictureUpdate == 0` write-back and the username-change redraw are
+served. Oracle: `fixtures/behaviour_avatar.json` (161 glyph cases, 51 avatars, byte-identical PNGs);
+`parity::image_writes`.
 
 `users.GetDefaultProfileImage` rasterises a user's initials with `golang/freetype` over
 `fonts/nunito-bold.ttf`. Every pixel of the result depends on that rasteriser's hinting and
@@ -6288,9 +6293,6 @@ Two consequences:
   `LastPictureUpdate == 0`, so forwarding is doubly right.
 
 In practice the served branch is the common one: every account gets a `profile.png` at creation.
-The same fallback decides a notification mail's embedded sender avatar: with no stored image Go
-draws one and embeds it, and this server sends the mail without it (found 2026-09-25 by
-`parity::plugin_hooks`' notification tour, which now copies the sender's stored image).
 
 **What is owed:** nothing until someone wants those bytes. If it is ever attempted, it needs the
 same font file and a rasteriser that agrees with freetype pixel for pixel — measure before
@@ -7542,7 +7544,9 @@ be done without claiming on shapes we then forward.
 ## D-401 · createPost serves one shape and forwards the rest
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (createPost)
-**Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed), then `file_ids`
+**Narrowed** 2026-09-25 — `persistent_notifications: true` and a reply to a live
+persistent-notification root are served (`mm_app::post_persistent_notification`,
+`parity::persistent_notifications`); **Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed), then `file_ids`
 (`attachFilesToPost`) and a `PostPriority`; 2026-09-19 — a message with a link is served
 (`mm_app::link_metadata`: OpenGraph, image and plain-link previews, the image dimensions, the
 permalink preview and its `previewed_post` prop, the `LinkMetadata` row), and a permalink to a post
@@ -7556,8 +7560,6 @@ it:
 
 | forwarded shape | what it needs |
 |---|---|
-| a reply to a live persistent-notification root | `ResolvePersistentNotification` after the save — the [D-551] scan |
-| `persistent_notifications: true` | `forEachPersistentNotificationPost`'s recipients check, `savePostsPersistentNotifications`, and the job that sends from the row (a priority without it is served since 2026-09-14) |
 | `burn_on_read` | the `TemporaryPost` and `ReadReceipts` stores, and `RevealBurnOnReadPostsForUser` |
 | any non-default post type | `card` reads `FeatureFlags.IntegratedBoards`; `custom_*` is a plugin's |
 | a DM whose receiver has the auto-responder on | `SendAutoResponseIfNecessary`, which writes the response as a second post (group messages, and DMs with it off, are served since 2026-09-14) |
@@ -7623,7 +7625,9 @@ divergence at the one call site that would show it, before a route echoes a file
 
 ## D-411 · the default-avatar writes are Go's; the profile and brand writes only for unported formats
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+**Closed** 2026-09-25 — item 2, the last thing owed, is served with D-204 (the generated avatar,
+the embedded bot image, `ResetLastPictureUpdate` and the `user_updated` event).
 **Narrowed** 2026-09-20 (second time) — items 1 and 3 are served for every format:
 `SetProfileImage` (including `UpdateLastPictureUpdate`, the identical-bytes early return and
 `invalidateUserCacheAndPublish`) and `SaveBrandImage` (including the archive `MoveFile`), byte for
@@ -8526,21 +8530,13 @@ pins the hand-over and Go's own 400 for an invalid body.
 **What is owed:** `SchemeStore::save`/`update`/`delete` with the role cascade
 (sqlstore/scheme_store.go), the three app functions, and their audit records — behind these
 three routes, compared against the licensed pair.
-## D-551 · an acknowledgement on a persistent-notification post is forwarded, not served
+## D-551 · an acknowledgement on a persistent-notification post is forwarded, not served — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (licensed acknowledgements)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (licensed acknowledgements)
 
-`saveAcknowledgementForPostWithPost` (app/post_acknowledgements.go:44) runs
-`ResolvePersistentNotification` **after** the upsert and returns its error, which would leave the
-row written and the request failed. That order cannot be reproduced by declining afterwards, so
-`App::save_acknowledgement_for_post` decides before the write and hands the whole request to Go
-when the post is a live persistent-notification post (`PostStore::has_persistent_notification`),
-exactly as the reaction path does. Go's function gives up on its first lines for every other post
-— the author's own, the feature off, no row — so nearly every request is served.
-
-**What is owed:** `forEachPersistentNotificationPost` and the mention scan behind it
-(app/post_persistent_notification.go), shared with reactions. Reachable on the licensed pair by
-creating a post with `priority.persistent_notifications` through the oracle; not attempted here.
+Paid off: `ResolvePersistentNotification` is ported (`mm_app::post_persistent_notification`) and runs
+after the write on the acknowledgement, reaction and reply paths, as in Go;
+`parity::persistent_notifications` compares all three on the licensed pair.
 
 ---
 
@@ -9163,24 +9159,35 @@ they cannot drift silently.
    inputs agree, including the two that surprise — `"3:00"` is accepted by both, `"0300"` by
    neither.
 
-**What is owed:** a Go-faithful `"15:04"` parse (two digits for the minute, one or two for the
-hour) at the point a `DailyScheduler` is registered, and a decision on (1) — most likely to keep
+**(2) is paid (2026-09-25):** `mm_app::job_workers::parse_go_hhmm`, asserted against the whole
+corpus (now 24 inputs) with the `refresh_materialized_views` scheduler that registers it.
+
+**What is owed:** a decision on (1) — most likely to keep
 `None` and say so, since a job that skips a day is better than one that runs at an hour nobody
 configured.
 
-## D-804 · Twenty-four of the twenty-nine registered job types have no worker here
+## D-804 · Eighteen of the twenty-nine registered job types have no worker here
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (app/server.go:1585) · **Owner** the jobs subsystem
+**Narrowed** 2026-09-25 — `post_persistent_notifications`, `product_notices` and
+`install_plugin_notify_admin` have workers (and the last two their schedulers), each compared with
+Go's own run in `parity::persistent_notifications` / `parity::notify_jobs`. `upgrade_notify_admin`
+and `trial_notify_admin` are [D-1321]; `resend_invitation_email` is [D-1322]. The count in the title
+is as raised.
 
 `mm_app::job::REGISTERED_JOB_TYPES` lists the twenty-nine types the Go server registers a worker
 for, and `App::create_job` validates against it — so this server can create a job of any of them.
-`mm_app::job_runtime::registered_workers` runs `cleanup_desktop_tokens` and, since 2026-09-25, the
-batch shape (`BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker`) with its four users —
+`mm_app::job_runtime::registered_workers` runs eleven. `cleanup_desktop_tokens`; since 2026-09-25
+the batch shape (`BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker`) with its four users —
 `delete_empty_drafts_migration`, `delete_orphan_drafts_migration`,
-`delete_dms_preferences_migration`, `export_users_to_csv` (`parity::batch_jobs`). Every other type
-is created here and run by the Go server off the shared table. `CancellationWatcher` and
-`UpdateInProgressJobData` are ported and tested (`db_job_worker`) but have no user yet: their Go
-users are the `migrations` and `extract_content` workers.
+`delete_dms_preferences_migration`, `export_users_to_csv` (`parity::batch_jobs`); and six
+`SimpleWorker`s — `active_users`, `mobile_session_metadata`, `refresh_materialized_views`,
+`expiry_notify`, `cleanup_expired_access_tokens`, `notify_expiring_access_tokens`
+(`mm_app::job_workers`, `parity::job_workers_simple`). Every other type is created here and run by
+the Go server off the shared table. `last_accessible_post` and `last_accessible_file` are
+[D-1300]. `CancellationWatcher` and `UpdateInProgressJobData` are ported and tested
+(`db_job_worker`) but have no user yet: their Go users are the `migrations` and `extract_content`
+workers.
 
 **What is owed:** the remaining worker bodies one at a time, cheapest first
 (`cleanup_expired_access_tokens`, `expirynotify`, `last_accessible_post`), each with the store
@@ -9963,21 +9970,25 @@ or routing every `SetActiveChannel` through one of them.
 
 ---
 
-## D-1072 · A post's notification e-mail is never batched, and has no avatar for a sender without a picture
+## D-1072 · A post's notification e-mail is never batched
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (the post notification e-mail)
+**Blocked on** plural translations (2026-09-25): the digest's subject,
+`api.email_batching.send_batched_email_notification.subject`, is a go-i18n `one`/`other` entry
+chosen by the notification count, and `mm_app::i18n` drops plural entries (the CLDR plural rules are
+not ported). A parity run also needs a Go oracle started with `EnableEmailBatching` on:
+`InitEmailBatching` runs only at server start (app/server.go:511).
 
-Two arms of `sendNotificationEmail` are not ported (`mm_app::notification_email`):
+One arm of `sendNotificationEmail` is not ported (`mm_app::notification_email`); the second listed here is paid:
 
 - **Batching.** With `EmailSettings.EnableEmailBatching` on (off by default) Go queues the mail
   in `EmailBatchingJob` — a per-server buffer flushed on a timer into one digest per recipient
   (`app/email/email_batching.go`). This server sends the single notification instead and logs.
   It needs the batching job and its digest template, and it holds state only the process that
   queued it can flush — the two servers would each batch half a user's mail.
-- **The generated avatar.** `GetProfileImage` on a sender with no stored picture makes Go draw
-  the initials avatar and **write it**; this server's `get_profile_image` refuses that case, so
-  the mail goes without the embedded photo. It needs the initials renderer (the `gofont` port) in
-  `mm-app`. Once Go has written the file, both servers embed the same bytes.
+- ~~The generated avatar.~~ Paid 2026-09-25 with D-204: a sender with no stored picture gets the
+  drawn avatar embedded, and written back when `LastPictureUpdate == 0`
+  (`parity::email_send::a_mention_from_a_sender_without_a_picture_embeds_the_drawn_avatar`).
 
 ---
 
@@ -10161,6 +10172,53 @@ Ported: an empty `team_id` is filled from the stored hook and any other is the 4
 
 ---
 
+## D-1320 · A persistent-notification post this server cannot prepare fails the job run here
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (post_persistent_notifications)
+
+`sendPersistentNotifications` publishes the post as `PreparePostForClient` shapes it. When a due
+post is one of the shapes `mm_app::post::prepare_post_for_client` refuses (a custom post type, the
+image-proxy rewrite), a job run *claimed by this server* returns
+`PersistentNotificationError::Unreproducible` and records a job error before `UpdateLastActivity`,
+so that page's notifications are not sent until a later run — where Go sends them. The runtime
+cannot hand a claimed job back (its structure is the jobs owner's). Reachable only with the job
+workers on (`MM_API_ENABLE_JOB_WORKERS`).
+
+**What is owed:** either the refused prepare shapes, or a way for a worker to release a claimed job.
+
+---
+
+## D-1321 · `upgrade_notify_admin` and `trial_notify_admin` have no worker: their `isEnabled` is the licence
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (jobs/notify_admin/worker.go)
+
+Both bodies are ported — `App::do_check_for_admin_notifications`, the same send the
+`install_plugin_notify_admin` worker and `trigger-notify-admin-posts` run — but a worker's
+`isEnabled` is `license != nil && *license.Features.Cloud`, over the licence captured when the
+workers were registered, and a `SimpleWorker`'s `is_enabled` is a `fn(&Config)`: the licence is not
+reachable from it. Registering either as always-enabled would run a Cloud-only job on every server.
+Their schedulers (`notify_admin.MakeScheduler`, the same licence test) are unported for the same
+reason. Neither route nor job reaches them on a build without a Cloud licence.
+
+**What is owed:** an `is_enabled` that can read the licence (the runtime is the jobs owner's), then
+two `workers.add` lines.
+
+## D-1322 · `resend_invitation_email` has no worker: its `DoJob` never claims the job
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (jobs/resend_invitation_email/worker.go)
+
+`ResendInvitationEmailWorker` is not a `SimpleWorker`. Its `DoJob` does **not** call `ClaimJob`:
+it reads `Data["scheduledAt"]`, and only once 48 hours (or `MM_RESEND_INVITATION_EMAIL_JOB_DURATION`)
+have passed does it resend the invitations (`InviteNewUsersToTeamGracefully` to the addresses not
+yet in the team) and set the job successful — until then the job stays `pending` and is offered
+again on every poll. A `SimpleWorker` claims first, so registering one would move a waiting job to
+`in_progress` and then `success` without sending anything. It needs a worker shape the runtime does
+not have, plus the graceful invite (email sending is ported; the invite batch is not).
+
+**What is owed:** a non-claiming worker in the runtime, then this worker on it.
+
+---
+
 ## D-1240 · A `#[serde(flatten)]` type gets only part of Go's decoding rules
 
 **Status** CLOSED · **Severity** divergence · **Raised** 2026-09-25 (the body decoders, D-057/D-040)
@@ -10245,3 +10303,49 @@ session per `Conn` and ends it on close: nothing limits how many a plugin holds,
 state carries over between `Conn`s. **What is owed:** a `gopq` pool honouring `MaxOpenConns`,
 `MaxIdleConns` and `ConnMaxLifetimeMilliseconds`, with Go's wait-then-`context deadline exceeded`,
 and a parity row that exhausts it.
+
+---
+
+## D-1330 · The audit log (mlog's audit targets) is not kept
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (plugin API, `LogAuditRec`)
+
+Go writes every `MakeAuditRecord`/`LogAuditRec` record, and a plugin's `LogAuditRec`, to the
+audit logger (`Server.Audit`, app/audit.go), whose targets `ExperimentalAuditSettings.File*`,
+`AdvancedLoggingJSON` and `MM_EXPERIMENTALAUDITSETTINGS_ADDITIONAL` configure. With none set —
+every stack here — nothing is written anywhere, which is what this server does in every case: the
+REST handlers drop their records and `mm_app::plugin_api::server` logs a plugin's at debug. The
+`Audits` table rows (`c.LogAudit`) are a different thing and are written. **What is owed:** the
+file target (an mlog JSON line per record, `plugin_id` added for a plugin's) behind those
+settings, and a test with `FileEnabled` on comparing the two servers' files.
+
+---
+
+`mm_app::job_runtime::registered_workers` runs eleven. `cleanup_desktop_tokens`; since 2026-09-25
+the batch shape (`BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker`) with its four users —
+`delete_empty_drafts_migration`, `delete_orphan_drafts_migration`,
+`delete_dms_preferences_migration`, `export_users_to_csv` (`parity::batch_jobs`); and six
+`SimpleWorker`s — `active_users`, `mobile_session_metadata`, `refresh_materialized_views`,
+`expiry_notify`, `cleanup_expired_access_tokens`, `notify_expiring_access_tokens`
+(`mm_app::job_workers`, `parity::job_workers_simple`). Every other type is created here and run by
+the Go server off the shared table. `last_accessible_post` and `last_accessible_file` are
+[D-1300]. `CancellationWatcher` and `UpdateInProgressJobData` are ported and tested
+(`db_job_worker`) but have no user yet: their Go users are the `migrations` and `extract_content`
+workers.
+
+---
+
+## D-1331 · The plugin API's property methods answer not-implemented on the two hooked groups
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (UNIT P1b, `plugin_api/properties.rs`)
+
+Go runs a hook chain on the `access_control` group (licence, access control, attribute
+validation, value audit, field limit) and the `session_attributes` group (the schema guard). The
+REST paths port it for a session caller, but its plugin-caller arms do not exist here:
+`PropertyCaller::is_plugin` is always false, so `isCallerPlugin`, the owner identity a plugin
+caller gets and the `*WithOptions` `ActingAsScope` match are missing, as is `SessionAttributesHook`.
+So every plugin property call whose hooks would fire (Go gates on the `groupID` argument for
+writes, on the field's or value's own group for creates and upserts, and on the rows returned for
+reads) answers `API <Name> called but not implemented.` **What is owed:** the plugin-caller arms
+of the access-control hook (`pluginChecker` over the plugin environment), `SessionAttributesHook`,
+and a both-hosts script against the `access_control` group, licensed and unlicensed.

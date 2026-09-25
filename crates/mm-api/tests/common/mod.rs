@@ -2571,6 +2571,13 @@ impl SecondServer {
         for (key, value) in env {
             command.env(key, value);
         }
+        // `MMRS_STDOUT_LOG` in `env` is the harness's own: the child's log goes to that file,
+        // which is how a job test proves *this* server ran the job ([`job_server`]).
+        if let Some((_, path)) = env.iter().find(|(key, _)| *key == "MMRS_STDOUT_LOG")
+            && let Ok(file) = std::fs::File::create(path)
+        {
+            command.stdout(file);
+        }
         // The stack's run directory unless the caller named one: that is where the stack's own
         // mm-api runs (`scripts/mm-api-env.sh`), and it is where `i18n/` — which the process now
         // refuses to start without — actually is.
@@ -2721,6 +2728,10 @@ async fn start_licensed_rust(
         ("MM_SQLSETTINGS_DRIVERNAME", "postgres"),
         ("MM_SQLSETTINGS_DATASOURCE", database_url.as_str()),
         ("MM_SERVICESETTINGS_ENABLELOCALMODE", "false"),
+        // The licensed oracles run no jobs and no schedulers (`scripts/go-licensed.sh`), and
+        // both settings are in the configuration the two servers are compared on.
+        ("MM_JOBSETTINGS_RUNJOBS", "false"),
+        ("MM_JOBSETTINGS_RUNSCHEDULER", "false"),
     ];
     env.extend_from_slice(extra);
     SecondServer::start(port, &env)
@@ -3553,6 +3564,122 @@ pub fn json_skeleton(raw: &str) -> String {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------------------------------
+// Jobs: running one on the stack's Go, or on an mm-api of the test's own
+// ---------------------------------------------------------------------------------------------
+
+/// Insert a `pending` job of `job_type` straight into `Jobs`, returning its id. Several types
+/// (`post_persistent_notifications`, `product_notices`, the notify-admin three) are not ones the
+/// jobs API creates — only their schedulers do.
+///
+/// Who runs it: the stack's main Go server, whose watcher polls every fifteen seconds (the
+/// oracles run no jobs — `scripts/go-*.sh`), or a [`job_server`] of the test's own, whose watcher
+/// polls every 200 ms and so claims it first all but ~1% of the time.
+pub async fn insert_pending_job(
+    pool: &sqlx::PgPool,
+    job_type: &str,
+    data: serde_json::Value,
+) -> String {
+    let id = mm_model::utils::new_id();
+    sqlx::query(
+        "INSERT INTO jobs (id, type, priority, createat, startat, lastactivityat, status, \
+         progress, data) VALUES ($1, $2, 0, $3, 0, 0, 'pending', 0, $4)",
+    )
+    .bind(&id)
+    .bind(job_type)
+    .bind(mm_model::utils::get_millis())
+    .bind(data)
+    .execute(pool)
+    .await
+    .expect("the job row");
+    id
+}
+
+/// Held by every test that writes or reads `NotifyAdmin` rows: a notify-admin send
+/// (`parity::notify_jobs`) marks the plugin rows sent and deletes every other unsent row.
+pub static NOTIFY_ADMIN_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Held by every test that plants `ProductNoticeViewState` rows: a `product_notices` job run
+/// (`ClearOldNotices`) deletes each view of a notice the live feed no longer carries.
+pub static PRODUCT_NOTICE_VIEWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Wait for a job to reach `success` or `error`, returning the status and its `Data`.
+pub async fn wait_for_job(pool: &sqlx::PgPool, job_id: &str) -> (String, serde_json::Value) {
+    for _ in 0..200 {
+        let (status, data): (String, Option<serde_json::Value>) =
+            sqlx::query_as("SELECT status, data FROM jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(pool)
+                .await
+                .expect("the job");
+        if status == "success" || status == "error" {
+            return (status, data.unwrap_or(serde_json::Value::Null));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    panic!("job {job_id} never finished");
+}
+
+/// An mm-api of the caller's own with the job workers on and a 200 ms poll, pushing to the
+/// stack's push proxy and mailing the stack's SMTP sink as the stack's own servers do.
+pub struct JobServer {
+    pub server: SecondServer,
+    log: std::path::PathBuf,
+}
+
+impl Drop for JobServer {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.log);
+    }
+}
+
+impl JobServer {
+    /// Whether this server's worker completed `job_id` — its `SimpleWorker: Job is complete`
+    /// line. A job the Go server claimed first has no such line here.
+    pub fn ran(&self, job_id: &str) -> bool {
+        std::fs::read_to_string(&self.log).is_ok_and(|log| {
+            log.lines()
+                .any(|line| line.contains("SimpleWorker: Job is complete") && line.contains(job_id))
+        })
+    }
+}
+
+/// Held for the whole of every test that plants a pending job: a [`JobServer`] claims **every**
+/// type it has a worker for, so one test's job server would run another test's job — Go's
+/// phase included.
+pub static JOB_RUNS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Start a [`JobServer`] on `port`.
+pub async fn job_server(port: u16) -> JobServer {
+    let push_port = std::env::var("MMRS_PUSH_PORT").unwrap_or_default();
+    let smtp_port = std::env::var("MMRS_SMTP_PORT").unwrap_or_default();
+    let push_server = format!("http://localhost:{push_port}");
+    let log =
+        std::env::temp_dir().join(format!("mmrs-job-server-{port}-{}.log", std::process::id()));
+    let log_text = log.display().to_string();
+    let server = SecondServer::start(
+        port,
+        &[
+            ("MM_API_ENABLE_JOB_WORKERS", "true"),
+            ("MM_API_JOB_WATCHER_INTERVAL_MS", "200"),
+            ("MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS", "true"),
+            (
+                "MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER",
+                push_server.as_str(),
+            ),
+            ("MM_EMAILSETTINGS_SMTPPORT", smtp_port.as_str()),
+            (
+                "RUST_LOG",
+                "mm_api=info,mm_app=info,mm_app::job_runtime=debug",
+            ),
+            ("MMRS_STDOUT_LOG", log_text.as_str()),
+        ],
+    )
+    .await
+    .expect("the job server starts");
+    JobServer { server, log }
 }
 
 #[cfg(test)]

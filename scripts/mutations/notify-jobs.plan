@@ -1,0 +1,15 @@
+# J3 part (b): product_notices and the notify-admin send, against parity::notify_jobs.
+sku-filter-inverted	crates/mm-app/src/notify_admin.rs	            .filter(|d| d.required_plan != current_sku)	            .filter(|d| d.required_plan == current_sku)	api	notify_jobs
+no-admin-posts	crates/mm-app/src/notify_admin.rs	            if !by_user.is_empty() && !by_feature.is_empty() {	            if false {	api	notify_jobs
+no-stamp-means-wait	crates/mm-app/src/notify_admin.rs	            Ok(None) => return true,	            Ok(None) => return false,	api	notify_jobs
+unsent-rows-kept	crates/mm-app/src/notify_admin.rs	        if let Err(err) = self.store().notify_admin().delete_before(trial, now).await {	        if let Err(err) = self.store().notify_admin().delete_before(trial, 0).await {	api	notify_jobs
+plugin-row-not-marked	crates/mm-app/src/notify_admin.rs	                    .update(&row.user_id, &row.required_plan, &row.required_feature, now)	                    .update(&row.user_id, &row.required_plan, &MattermostFeature(String::new()), now)	api	notify_jobs
+plugin-feature-in-post	crates/mm-app/src/notify_admin.rs	        if d.required_feature.as_str().starts_with(PLUGIN_FEATURE) {\n            continue;	        if d.required_feature.as_str().starts_with("mmrs-never") {\n            continue;	api	notify_jobs
+stamp-misnamed	crates/mm-app/src/notify_admin.rs	            .save_or_update(name, &get_millis().to_string())	            .save_or_update("MMRS_NOT_THE_STAMP", &get_millis().to_string())	api	notify_jobs
+trial-prop-dropped	crates/mm-app/src/notify_admin.rs	        post.add_prop("trial", serde_json::Value::Bool(trial));	        let _ = trial;	api	notify_jobs
+single-message-plural	crates/mm-app/src/notify_admin.rs	            (false, true) => "app.cloud.upgrade_plan_bot_message_single",	            (false, true) => "app.cloud.upgrade_plan_bot_message",	api	notify_jobs
+notices-worker-disabled	crates/mm-app/src/job_runtime.rs	        |config| config.admin_notices_enabled || config.user_notices_enabled,	        |_config| false,	api	notify_jobs
+up-notification-unprepared	crates/mm-app/src/post.rs	            && original.post_type != crate::notify_admin::POST_TYPE_UP_NOTIFICATION	            && true	api	notify_jobs
+# Controls: must survive.
+control-message-id-arm-order	crates/mm-app/src/notify_admin.rs	            (true, false) => "app.cloud.trial_plan_bot_message",\n            (true, true) => "app.cloud.trial_plan_bot_message_single",	            (true, true) => "app.cloud.trial_plan_bot_message_single",\n            (true, false) => "app.cloud.trial_plan_bot_message",	api	notify_jobs
+control-sanitize-map-name	crates/mm-app/src/notify_admin.rs	        let none = std::collections::HashMap::new();\n        for user in &mut sysadmins {\n            user.sanitize(&none);	        let no_options = std::collections::HashMap::new();\n        for user in &mut sysadmins {\n            user.sanitize(&no_options);	api	notify_jobs

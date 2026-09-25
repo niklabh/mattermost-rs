@@ -1,0 +1,185 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT u.id, u.createat, u.updateat, u.deleteat, u.username, u.password, u.authdata,\n                   u.authservice, u.email, u.emailverified, u.nickname, u.firstname, u.lastname,\n                   u.position, u.roles, u.allowmarketing, u.props, u.notifyprops,\n                   u.lastpasswordupdate, u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts, u.locale, u.timezone, u.mfaactive,\n                   u.mfasecret, u.mfausedtimestamps, u.remoteid, u.lastlogin\n              FROM groupmembers gm\n              JOIN users u ON u.id = gm.userid\n             WHERE gm.groupid = $1\n               AND gm.userid IN (SELECT tm.userid FROM teammembers tm\n                                   JOIN teams t ON t.id = tm.teamid\n                                  WHERE tm.teamid = $2 AND tm.deleteat = 0)\n               AND gm.deleteat = 0 AND u.deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "password",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "authdata",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "authservice",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "email",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "emailverified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "nickname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "firstname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "lastname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "position",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "roles",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "allowmarketing",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "props",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 17,
+        "name": "notifyprops",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 18,
+        "name": "lastpasswordupdate",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 19,
+        "name": "lastpictureupdate",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 20,
+        "name": "failedattempts",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 21,
+        "name": "locale",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 22,
+        "name": "timezone",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 23,
+        "name": "mfaactive",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 24,
+        "name": "mfasecret",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 25,
+        "name": "mfausedtimestamps",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 26,
+        "name": "remoteid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 27,
+        "name": "lastlogin",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "00585692a918d362138a00c0835552406efc2835e45e59d7585da254ad91dc87"
+}

@@ -85,6 +85,9 @@ async fn viewing_writes_counts_and_dedupes_on_both_servers() {
     if !stack_enabled() {
         return;
     }
+    // A `product_notices` job run in `parity::notify_jobs` clears every view of a notice the
+    // feed no longer has — these rows included.
+    let _views = common::PRODUCT_NOTICE_VIEWS.lock().await;
     let Some(pool) = fixture_pool().await else {
         return;
     };

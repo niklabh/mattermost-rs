@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id                                   AS \"id!\",\n                   targetid                             AS \"targetid!\",\n                   targettype                           AS \"targettype!\",\n                   groupid                              AS \"groupid!\",\n                   fieldid                              AS \"fieldid!\",\n                   value::text                          AS \"value!\",\n                   createat                             AS \"createat!\",\n                   updateat                             AS \"updateat!\",\n                   deleteat                             AS \"deleteat!\",\n                   COALESCE(createdby, '')              AS \"createdby!\",\n                   COALESCE(updatedby, '')              AS \"updatedby!\"\n              FROM propertyvalues\n             WHERE id = ANY($1)\n               AND ($2 = '' OR groupid = $2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "targetid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "targettype!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "groupid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "fieldid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "value!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "deleteat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "createdby!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "updatedby!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "a386cdb8345a91fe078cf25707b4d7ebc6bbc9d2a049be3b3ce2ba8d5a1a716e"
+}

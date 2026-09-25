@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 use mm_model::post::Post;
 use mm_model::reaction::Reaction;
 use mm_model::utils::{AppError, AppResult};
-use mm_store::PostStore;
 use mm_store::reaction_store::ReactionStore;
 
 use crate::App;
@@ -115,7 +114,8 @@ impl App {
 
 /// What [`App::save_reaction_for_post`] or [`App::delete_reaction_for_post`] could not decide.
 ///
-/// Both write paths consult two things this server does not have. Rather than approximate either,
+/// The write paths consult things this server does not have (a persistent-notification post
+/// was one until it was served, 2026-09-25). Rather than approximate either,
 /// the app layer says so and `mm_api::reactions` forwards the whole request to Go, which is the
 /// standing "reproduce what we can measure, forward what we cannot" decision applied at the
 /// granularity of one request.
@@ -124,14 +124,6 @@ pub enum Undecidable {
     /// The post is `burn_on_read`, so Go consults a `ReadReceipts` row before allowing the
     /// reaction. That store is not ported.
     BurnOnReadPost,
-    /// The post really is a persistent-notification post, so Go calls
-    /// `ResolvePersistentNotification` after the write — which can *fail the whole request* — and
-    /// resolving it needs the mention parser and a delete of the notification row. Unported.
-    ///
-    /// Reached only when a live `PersistentNotifications` row exists, the reactor is not the
-    /// post's author, and the feature is on. The first three lines of Go's function decide every
-    /// other case, and they are ported.
-    PersistentNotifications,
     /// A bot is an active member of a restricted DM and its exemption is a plugin decision.
     BotInRestrictedDm,
 }
@@ -251,28 +243,6 @@ impl App {
             ));
         }
 
-        // Go runs `ResolvePersistentNotification` **after** the insert, and returns its error —
-        // which would leave the reaction written and the request failed. That ordering cannot be
-        // reproduced by declining afterwards, so the decision is taken *before* anything is
-        // written and the whole request is forwarded, letting Go do both halves.
-        //
-        // Most requests are decided here without forwarding, because Go's own function gives up
-        // on its first three lines: the post's author reacting to their own post is exempt, the
-        // feature can be off, and above all **the post has to be a persistent-notification post**,
-        // which almost none are. Only a live row makes this undecidable.
-        if post.root_id.is_empty()
-            && post.user_id != reaction.user_id
-            && self.is_persistent_notifications_enabled()
-            && self
-                .store()
-                .post()
-                .has_persistent_notification(&post.id)
-                .await
-                .map_err(|err| save_store_error("persistent notification lookup", err))?
-        {
-            return Ok(ReactionWrite::Forward(Undecidable::PersistentNotifications));
-        }
-
         reaction.channel_id = post.channel_id.clone();
         reaction.pre_save();
         reaction.is_valid()?;
@@ -282,6 +252,13 @@ impl App {
             .save(&reaction)
             .await
             .map_err(|err| save_store_error("reaction save", err))?;
+
+        // `ResolvePersistentNotification` on a root, **after** the insert, and its error is the
+        // request's although the reaction is written — Go's order.
+        if post.root_id.is_empty() {
+            self.resolve_persistent_notification(&post, &reaction.user_id)
+                .await?;
+        }
 
         // `InvalidateLastPostTimeCache` has no counterpart here, so this is where Go's
         // `ReactionHasBeenAdded` sits: after the row, before the websocket event.

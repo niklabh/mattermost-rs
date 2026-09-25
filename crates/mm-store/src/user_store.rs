@@ -11,6 +11,13 @@ use crate::error::StoreError;
 
 /// The subset of Go's `store.UserStore` (store/store.go:448-550) that is ported.
 pub trait UserStore {
+    /// Port of `SqlUserStore.RefreshPostStatsForUsers` (user_store.go:2438): `poststats` under an
+    /// `analyticsContext` of `timeout_seconds`.
+    fn refresh_post_stats_for_users(
+        &self,
+        timeout_seconds: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlUserStore.Get` (user_store.go:609).
     /// Port of `SqlUserStore.GetUnreadCount` (user_store.go:1583) — the mobile badge: the sum of
     /// `MentionCount` (or `MentionCountRoot` under collapsed threads) over the user's memberships
@@ -445,6 +452,15 @@ pub trait UserStore {
     /// Port of `SqlUserStore.UpdateLastPictureUpdate` (user_store.go:380): `LastPictureUpdate` and
     /// `UpdateAt` both set to one `GetMillis()`. A miss writes nothing and is not an error.
     fn update_last_picture_update(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.ResetLastPictureUpdate` (user_store.go:390): `LastPictureUpdate` set
+    /// to **minus** the current millis and `UpdateAt` to the same instant. The sign is the whole
+    /// point — a negative value marks a generated avatar, which the next username change may
+    /// regenerate, where a positive one marks an upload that must be kept.
+    fn reset_last_picture_update(
         &self,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
@@ -1152,6 +1168,17 @@ pub(crate) fn user_from_row(row: UserRow) -> Result<User, StoreError> {
 }
 
 impl UserStore for SqlUserStore {
+    #[tracing::instrument(skip(self))]
+    async fn refresh_post_stats_for_users(&self, timeout_seconds: i64) -> Result<(), StoreError> {
+        crate::post_store::refresh_materialized_view(
+            &self.pool,
+            "poststats",
+            timeout_seconds,
+            "users_refresh_post_stats_exec",
+        )
+        .await
+    }
+
     #[tracing::instrument(skip(self), fields(user_id = %user_id))]
     async fn get_unread_count(
         &self,
@@ -3500,6 +3527,25 @@ impl UserStore for SqlUserStore {
         let cur_time = mm_model::utils::get_millis();
         let result = sqlx::query!(
             "UPDATE users SET lastpictureupdate = $1, updateat = $1 WHERE id = $2",
+            cur_time,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(updated))]
+    async fn reset_last_picture_update(&self, user_id: &str) -> Result<(), StoreError> {
+        let cur_time = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            "UPDATE users SET lastpictureupdate = $1, updateat = $2 WHERE id = $3",
+            -cur_time,
             cur_time,
             user_id,
         )

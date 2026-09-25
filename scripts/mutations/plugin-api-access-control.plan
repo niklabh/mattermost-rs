@@ -1,0 +1,9 @@
+# P1b: the plugin API access-control tranche.
+a_foreign_type	crates/mm-app/src/plugin_api/access_control.rs	Ok(policy) if policy.type_ != resource_type	Ok(policy) if policy.type_ == resource_type	api	the_plugin_api_property_methods
+a_resource_id_checked	crates/mm-app/src/plugin_api/access_control.rs	if !is_valid_id(user_id) || !is_valid_id(resource_id)	if !is_valid_id(user_id)	api	the_plugin_api_property_methods
+a_acting_user_exists	crates/mm-app/src/plugin_api/access_control.rs	.map_err(|_| refuse())?;	.ok();	api	the_plugin_api_property_methods
+a_autocomplete_where	crates/mm-app/src/plugin_api/access_control.rs	"GetPluginAccessControlFieldsAutocomplete",	"GetAccessControlFieldsAutocomplete",	api	the_plugin_api_property_methods
+a_query_where	crates/mm-app/src/plugin_api/access_control.rs	pap_not_initialized("TestExpression"	pap_not_initialized("CheckExpression"	api	the_plugin_api_property_methods
+a_unavailable_status	crates/mm-app/src/plugin_api/access_control.rs	503,	500,	api	the_plugin_api_property_methods
+control_a_action_format	crates/mm-app/src/plugin_api/access_control.rs	format!("action={action}")	format!("action={}", action)	api	the_plugin_api_property_methods
+control_a_invalid_id_detail	crates/mm-app/src/plugin_api/access_control.rs	return Err(invalid_id(WHERE, ""));	return Err(invalid_id(WHERE, &String::new()));	api	the_plugin_api_property_methods

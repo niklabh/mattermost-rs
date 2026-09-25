@@ -7,7 +7,7 @@
 //! The priority is written to `PostsPriority` inside the post's transaction and **echoed** back
 //! from the request rather than read from the row — so the create body has no `PostId` key and a
 //! `null` for every boolean the client left out, while the read a moment later has both. An
-//! urgent mention moves `UrgentMentionCount`. A persistent notification is still forwarded, and
+//! urgent mention moves `UrgentMentionCount`. A persistent notification is served licensed, and
 //! without a licence is refused before either server would write anything.
 
 use crate::common;
@@ -419,9 +419,9 @@ async fn a_priority_on_a_reply_is_refused() {
 }
 
 /// Without a licence a persistent notification is the handler's 501 on both; on the licensed
-/// pair it is forwarded whole, because the notification row and its job have no port.
+/// pair it is served here, row and all (compared in `parity::persistent_notifications`).
 #[tokio::test]
-async fn a_persistent_notification_is_refused_unlicensed_and_forwarded_licensed() {
+async fn a_persistent_notification_is_refused_unlicensed_and_served_licensed() {
     if !stack_enabled() {
         return;
     }
@@ -467,12 +467,12 @@ async fn a_persistent_notification_is_refused_unlicensed_and_forwarded_licensed(
     .await;
     let body = json(&body);
     assert_eq!(status, 201, "licensed: {body}");
-    assert!(!served, "licensed: forwarded to Go: {body}");
+    assert!(served, "licensed: served here: {body}");
     let post_id = body["id"].as_str().expect("an id");
     assert_eq!(
         priority_row(post_id).await,
         Some(("urgent".to_owned(), Some(false), Some(true))),
-        "Go wrote the row"
+        "the priority row is written with the post"
     );
 }
 

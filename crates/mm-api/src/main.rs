@@ -263,9 +263,14 @@ async fn main() -> anyhow::Result<()> {
     if job_workers_enabled() {
         let app = app.clone();
         let workers = std::sync::Arc::new(mm_app::job_runtime::registered_workers());
-        let watcher = mm_app::job_runtime::Watcher::new(
-            mm_app::job_runtime::DEFAULT_WATCHER_POLLING_INTERVAL_MS,
-        );
+        // `MM_API_JOB_WATCHER_INTERVAL_MS` lowers the poll for the parity suite, which needs
+        // this server's watcher to claim a job before the Go server's fifteen-second poll does.
+        // Go's own interval is a `var` "so tests can lower" it, for the same reason.
+        let interval = std::env::var("MM_API_JOB_WATCHER_INTERVAL_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(mm_app::job_runtime::DEFAULT_WATCHER_POLLING_INTERVAL_MS);
+        let watcher = mm_app::job_runtime::Watcher::new(interval);
         tracing::info!(
             workers = workers.len(),
             "job workers enabled; the watcher will poll Jobs for pending rows"

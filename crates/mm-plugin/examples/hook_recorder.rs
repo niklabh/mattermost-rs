@@ -242,6 +242,10 @@ mod auth;
 mod files;
 #[path = "recorder/guards.rs"]
 mod guards;
+#[path = "recorder/properties.rs"]
+mod properties;
+#[path = "recorder/server.rs"]
+mod server;
 
 /// `plugin.DismissPostError` (public/plugin/hooks.go:82).
 const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
@@ -605,6 +609,21 @@ impl Hooks for Recorder {
                 None => vec![json!({ "error": "no API client" })],
             };
             self.record(&json!({ "hook": "AuthScript", "calls": calls }));
+        }
+        if message == server::SERVER_SCRIPT {
+            let channel = args.b.as_deref().map_or("", |p| p.channel_id.as_str());
+            let calls = match self.api.get() {
+                Some(api) => server::run(api.client(), &server::Inputs::from_env(channel)).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "ServerScript", "calls": calls }));
+        }
+        if message == properties::PROPERTIES_SCRIPT {
+            let calls = match self.api.get() {
+                Some(api) => properties::run(api.client(), &properties::Inputs::from_env()).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "PropertiesScript", "calls": calls }));
         }
         if message == config::CONFIG_SCRIPT {
             let calls = match self.api.get() {

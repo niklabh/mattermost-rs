@@ -495,3 +495,83 @@ async fn a_mentions_notification_email_matches_gos() {
     common::delete_channel(&http, &admin, &channel).await;
     common::delete_plain_user(&http, &admin, &user.id).await;
 }
+
+/// D-1072's avatar half: a mention from a sender with **no stored picture** embeds the generated
+/// initials avatar — `GetProfileImage`'s fallback — and, `LastPictureUpdate` being 0, writes it
+/// back. Before each server's post the picture is removed again, so each draws and writes it.
+#[tokio::test]
+async fn a_mention_from_a_sender_without_a_picture_embeds_the_drawn_avatar() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = common::fixture_pool().await else {
+        return;
+    };
+    let sink = sink();
+    let tag = "mailnopic";
+    let email = address(tag);
+    let (recipient, admin) = fixture_user(tag).await;
+    let http = client();
+    let (team_id, _) = common::a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let sender = common::create_plain_user(&http, &admin, &team_id, "mailnopicsender").await;
+    let channel = common::create_channel(&http, &admin, &team_id, tag).await;
+    for member in [&recipient.id, &sender.id] {
+        common::add_user_to_channel(&http, &admin, &channel, member).await;
+    }
+    let _ = sink.take(&email, Duration::from_secs(5)).await;
+    let username = common::plain_username(tag);
+    let message = format!("@{username} no picture here");
+    let file = format!(
+        "{}/users/{}/profile.png",
+        common::stack_data_dir(),
+        sender.id
+    );
+
+    for attempt in 0..3 {
+        let mut mails = Vec::new();
+        let mut minutes = Vec::new();
+        let mut written = Vec::new();
+        for base in [GO, RUST] {
+            let _ = std::fs::remove_file(&file);
+            sqlx::query("UPDATE users SET lastpictureupdate = 0 WHERE id = $1")
+                .bind(&sender.id)
+                .execute(&pool)
+                .await
+                .expect("the picture is forgotten");
+            common::invalidate_go_caches(&http, &admin).await;
+
+            let (id, at) = post_as_admin(base, &sender.token, &channel, &message, None).await;
+            let mut mail = sink
+                .take(&email, WAIT)
+                .await
+                .unwrap_or_else(|| panic!("{base} sent no notification mail"));
+            mail.data = mask_across_soft_breaks(&mail.data_str(), &id, 'P').into_bytes();
+            mails.push(mail);
+            minutes.push(at / 60_000);
+            written.push(std::fs::read(&file).ok());
+        }
+        if minutes[0] != minutes[1] && attempt < 2 {
+            continue;
+        }
+        assert!(
+            mails[0].data_str().contains("user-avatar.png"),
+            "Go embedded an avatar for a sender with no picture"
+        );
+        assert_same_mail(
+            &mails[0],
+            &mails[1],
+            "mention from a sender without a picture",
+        );
+        assert!(written[0].is_some(), "Go wrote the drawn avatar back");
+        assert_eq!(
+            written[1], written[0],
+            "and so did this server, the same bytes"
+        );
+        break;
+    }
+
+    common::delete_channel(&http, &admin, &channel).await;
+    for id in [&recipient.id, &sender.id] {
+        common::delete_plain_user(&http, &admin, id).await;
+    }
+}

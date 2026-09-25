@@ -1,3 +1,7 @@
+// The job runtime's future, awaited in-process by `parity::job_workers_simple`, is deeper than the
+// default query depth allows for its layout (measured after the batch-worker shape landed).
+#![recursion_limit = "256"]
+
 //! Consolidated integration test suite for mm-api cross-server parity.
 //!
 //! This binary consolidates all the parity tests that were previously separate
@@ -115,6 +119,7 @@ mod parity {
     pub mod image_writes;
     pub mod incoming_hooks;
     pub mod invite_info;
+    pub mod job_workers_simple;
     pub mod job_writes;
     pub mod jobs;
     pub mod latest_version;
@@ -326,4 +331,8 @@ mod parity {
     pub mod url_length;
     // Appended 2026-09-25: MFA enrolment and the MFA login across both servers (D-500, D-1210).
     pub mod mfa_enrolment;
+    // Appended 2026-09-25: persistent notifications, their resolution and their job (D-401, D-551).
+    pub mod persistent_notifications;
+    // Appended 2026-09-25: the product-notices and notify-admin jobs (D-804).
+    pub mod notify_jobs;
 }
