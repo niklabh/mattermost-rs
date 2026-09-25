@@ -9955,6 +9955,11 @@ or routing every `SetActiveChannel` through one of them.
 ## D-1072 · A post's notification e-mail is never batched
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (the post notification e-mail)
+**Blocked on** plural translations (2026-09-25): the digest's subject,
+`api.email_batching.send_batched_email_notification.subject`, is a go-i18n `one`/`other` entry
+chosen by the notification count, and `mm_app::i18n` drops plural entries (the CLDR plural rules are
+not ported). A parity run also needs a Go oracle started with `EnableEmailBatching` on:
+`InitEmailBatching` runs only at server start (app/server.go:511).
 
 One arm of `sendNotificationEmail` is not ported (`mm_app::notification_email`); the second listed here is paid:
 
