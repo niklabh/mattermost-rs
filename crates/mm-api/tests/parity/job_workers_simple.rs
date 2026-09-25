@@ -432,7 +432,7 @@ async fn set_extend_sessions(http: &reqwest::Client, admin: &str, on: bool) {
 }
 
 /// The mm-api that runs `expiry_notify`'s Rust half; see `second_server_ports`.
-const JOB_WORKER_RUST_PORT: u16 = 8125;
+const JOB_WORKER_RUST_PORT: u16 = 8147;
 
 /// A mobile session of `user_id` that expired five minutes ago and has not been notified, plus
 /// three that `GetSessionsExpired` must pass over: one expired two hours ago (outside the hour),
