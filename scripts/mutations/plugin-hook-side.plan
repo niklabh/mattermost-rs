@@ -1,0 +1,25 @@
+# Mutation plan for UNIT P3: the plugin host's hook side (notifications, /join, guards, websocket
+# hooks) and the plugin driver's pool.
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hook-side.plan
+
+join-not-lowercased	crates/mm-app/src/command_join.rs	None => message.to_lowercase(),	None => message.to_owned(),	api	the_join_command
+join-finds-archived	crates/mm-app/src/command_join.rs	.get_by_name(&args.team_id, &channel_name, false)	.get_by_name(&args.team_id, &channel_name, true)	api	the_join_command
+join-rejoins-a-member	crates/mm-app/src/command_join.rs	            .is_ok()\n        {\n            return Ok(JoinOutcome::Joined);	            .is_ok()\n            && false\n        {\n            return Ok(JoinOutcome::Joined);	api	the_join_command
+join-hook-dropped	crates/mm-app/src/command_join.rs	        self.user_has_joined_channel(ctx, &member, None);	        let _ = (&member, ctx);	api	the_notification_join_and_guard
+guard-register-no-reload	crates/mm-app/src/channel_guards.rs	        self.reload_after_write("Register", channel_id, plugin_id)	        let _ = ("Register", channel_id, plugin_id);\n        async {}	api	the_notification_join_and_guard
+guard-empty-is-invalid	crates/mm-app/src/channel_guards.rs	    if channel_id.is_empty() {	    if false && channel_id.is_empty() {	api	the_notification_join_and_guard
+guard-unregister-wrong-plugin	crates/mm-app/src/channel_guards.rs	            .delete(channel_id, plugin_id)	            .delete(channel_id, "")	api	the_notification_join_and_guard
+ws-remote-addr-is-peer	crates/mm-api/src/websocket.rs	remote_addr: crate::client_ip::client_ip(&parts.headers, &parts.extensions),	remote_addr: crate::client_ip::go_remote_addr(&parts.extensions),	api	the_notification_join_and_guard
+ws-message-not-posted	crates/mm-api/src/websocket.rs	        plugin_posted.post(conn, &request).await;	        let _ = (plugin_posted, &request);	api	the_notification_join_and_guard
+ws-session-id-dropped	crates/mm-app/src/plugin_hooks.rs	            id: session_id.to_owned(),	            id: String::new(),	api	the_notification_join_and_guard
+ws-connect-not-fired	crates/mm-api/src/websocket.rs	        .on_web_socket_connect(&conn.connection_id(), &user_id);	        .plugin_host();	api	the_notification_join_and_guard
+mail-refusal-ignored	crates/mm-app/src/notification_email.rs	            if !returns.b.is_empty() {	            if false && !returns.b.is_empty() {	api	the_notification_join_and_guard
+push-refusal-ignored	crates/mm-app/src/push.rs	            if !returns.b.is_empty() {	            if false && !returns.b.is_empty() {	api	the_notification_join_and_guard
+pool-never-keeps	crates/mm-app/src/plugin_driver_pool.rs	            if idle.len() < pool.settings.idle_bound() {	            if false && idle.len() < pool.settings.idle_bound() {	api	plugin_driver
+pool-unbounded	crates/mm-app/src/plugin_driver_pool.rs	.filter(|n| *n > 0)	.filter(|n| *n > 1000)	api	plugin_driver
+pool-slot-kept	crates/mm-app/src/plugin_driver.rs	            pooled.release_slot();	            let _ = &pooled;	api	plugin_driver
+
+# ---- controls
+control-missing-account-concat	crates/mm-app/src/command_join.rs	const MISSING_ACCOUNT_ERROR: &str = "app.user.missing_account.const";	const MISSING_ACCOUNT_ERROR: &str = concat!("app.user.", "missing_account.const");	api	the_join_command
+control-retry-delay-sum	crates/mm-app/src/channel_guards.rs	(delay * 2).min(RETRY_MAX_DELAY)	(delay + delay).min(RETRY_MAX_DELAY)	api	the_notification_join_and_guard

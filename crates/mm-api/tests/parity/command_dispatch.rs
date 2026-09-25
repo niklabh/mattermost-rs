@@ -648,6 +648,27 @@ async fn the_join_command_answers_as_go_does() {
         );
     }
 
+    // `/join` into a channel the user is already in changes nothing: no join post of theirs there
+    // (the admin's is the one creating the channel wrote).
+    let home_posts: serde_json::Value = http
+        .get(format!("{GO}/api/v4/channels/{home}/posts"))
+        .bearer_auth(&admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("posts");
+    assert!(
+        !home_posts["posts"]
+            .as_object()
+            .expect("a post map")
+            .values()
+            .any(|p| p["type"] == "system_join_channel"
+                && users.iter().any(|u| p["user_id"] == u.id.as_str())),
+        "a join post in a channel both were already in"
+    );
+
     for user in &users {
         delete_plain_user(&http, &admin, &user.id).await;
     }
