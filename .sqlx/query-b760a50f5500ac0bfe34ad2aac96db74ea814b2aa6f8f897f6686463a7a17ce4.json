@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO persistentnotifications (postid, createat, lastsentat, deleteat, sentcount) VALUES ($1, $2, 0, 0, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b760a50f5500ac0bfe34ad2aac96db74ea814b2aa6f8f897f6686463a7a17ce4"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE persistentnotifications SET deleteat = $1 WHERE deleteat = 0 AND sentcount >= $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e4a93b0db51325ace9a0f5543d6a5c5382e30699220180d50270e07875c8d71b"
+}

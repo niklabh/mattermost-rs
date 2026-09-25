@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE persistentnotifications SET lastsentat = $1, sentcount = sentcount + 1 WHERE postid = ANY($2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6bcd24f87542d3b45efca2f589a4099ae1a525923bc9bd8861142d666ae10978"
+}
