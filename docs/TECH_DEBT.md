@@ -9165,26 +9165,24 @@ hour) at the point a `DailyScheduler` is registered, and a decision on (1) — m
 `None` and say so, since a job that skips a day is better than one that runs at an hour nobody
 configured.
 
-## D-804 · Twenty-eight of the twenty-nine registered job types have no worker here
+## D-804 · Twenty-four of the twenty-nine registered job types have no worker here
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (app/server.go:1585) · **Owner** the jobs subsystem
 
 `mm_app::job::REGISTERED_JOB_TYPES` lists the twenty-nine types the Go server registers a worker
 for, and `App::create_job` validates against it — so this server can create a job of any of them.
-`mm_app::job_runtime::registered_workers` runs exactly one: `cleanup_desktop_tokens`. Every other
-type is created here and run by the Go server off the shared table.
+`mm_app::job_runtime::registered_workers` runs `cleanup_desktop_tokens` and, since 2026-09-25, the
+batch shape (`BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker`) with its four users —
+`delete_empty_drafts_migration`, `delete_orphan_drafts_migration`,
+`delete_dms_preferences_migration`, `export_users_to_csv` (`parity::batch_jobs`). Every other type
+is created here and run by the Go server off the shared table. `CancellationWatcher` and
+`UpdateInProgressJobData` are ported and tested (`db_job_worker`) but have no user yet: their Go
+users are the `migrations` and `extract_content` workers.
 
-The runtime is not the gap; each worker's **body** is. They range from a single `DELETE`
-(`cleanup_expired_access_tokens`) to the import and export pipelines, and several need store
-methods that do not exist yet (`RefreshPostStats`, `RefreshFileStats`,
-`RefreshPostStatsForUsers` for `refresh_materialized_views`). Two also need shapes the runtime
-does not have: `BatchWorker`/`BatchMigrationWorker`/`BatchReportWorker` are not `SimpleWorker`,
-and they are the only users of `JobServer.CancellationWatcher`, `SetJobProgress` mid-run and
-`UpdateInProgressJobData` — none of which is ported.
-
-**What is owed:** one worker at a time, cheapest first (`cleanup_expired_access_tokens`,
-`expirynotify`, `last_accessible_post`), each with the store methods it needs; then the batch
-worker shape and the cancellation watcher with it.
+**What is owed:** the remaining worker bodies one at a time, cheapest first
+(`cleanup_expired_access_tokens`, `expirynotify`, `last_accessible_post`), each with the store
+methods it needs (`RefreshPostStats`, `RefreshFileStats`, `RefreshPostStatsForUsers` for
+`refresh_materialized_views`).
 
 ## D-805 · The committed `.sqlx` offline cache is thirty queries stale; `SQLX_OFFLINE=true` does not build
 

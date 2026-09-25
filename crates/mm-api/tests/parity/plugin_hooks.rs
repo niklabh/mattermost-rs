@@ -2912,6 +2912,8 @@ static CHANNEL_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec:
 /// GM's name is a function of its members' ids, so it is scrubbed whole rather than piecewise.
 #[tokio::test]
 async fn the_channel_hooks_fire_as_go_fires_them() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     use futures_util::FutureExt as _;
 
     if !stack_enabled() {
@@ -3481,6 +3483,8 @@ async fn transcript_reaches(path: &Path, expected: usize, side: &str) -> Vec<Jso
 /// host starts from a plugin that is not enabled.
 #[tokio::test]
 async fn the_install_hook_fires_as_go_fires_it() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     use futures_util::FutureExt as _;
 
     if !stack_enabled() {
@@ -3671,6 +3675,8 @@ static SCHEDULED_CHANNEL: std::sync::Mutex<Option<String>> = std::sync::Mutex::n
 /// answers off the post's message, as it does for drafts.
 #[tokio::test]
 async fn the_scheduled_post_hook_fires_as_go_fires_it() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     use futures_util::FutureExt as _;
 
     if !stack_enabled() {

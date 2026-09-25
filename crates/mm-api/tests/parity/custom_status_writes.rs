@@ -605,6 +605,8 @@ async fn setting_another_users_custom_status_needs_edit_other_users() {
 /// The three `user_updated` events, plus the two `UpdatePreferences` publishes.
 #[tokio::test]
 async fn a_custom_status_publishes_the_same_events_on_both_servers() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }

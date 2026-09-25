@@ -1366,6 +1366,8 @@ async fn the_delete_route_refuses_the_same_way() {
 /// member's sees the sanitized one, which has no `delete_by` at all.
 #[tokio::test]
 async fn deleting_a_post_publishes_two_events_to_two_audiences() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1472,6 +1474,8 @@ async fn deleting_a_post_publishes_two_events_to_two_audiences() {
 /// assertions read back through the server that made the write and Go's side is retried.
 #[tokio::test]
 async fn deleting_a_post_clears_its_flag_its_drafts_and_its_files() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
