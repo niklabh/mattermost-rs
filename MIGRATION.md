@@ -14881,3 +14881,12 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `c.AppContext.Path()` = `r.URL.Path` from `url.ParseRequestURI`; `net/http`'s own 400 for a target it cannot parse | `mm_api::audit_log::go_request_path`, `mux_guard::decide` | DONE | 3 unit, `audit_rows::an_encoded_path_is_recorded_decoded`, `…a_target_go_cannot_parse_is_its_400_and_writes_no_row`; `scripts/mutations/hook-updates-d1220.plan` — 10 run, 8 caught (after a fixture fix), 2 controls survived | `/users/m%65/patch` is served and recorded as `/users/me/patch`; an invalid escape now goes to Go on every route (it was our 401 on a non-id parameter). |
 | `updateIncomingHook`'s `ValidateIncomingWebhookUserChannelAccess` on a move (webhook.go:176); `updateOutgoingHook`'s team fill and mismatch 400 (webhook.go:425) | `mm_api::webhooks`, `App::validate_incoming_webhook_user_channel_access` | DONE, closes [D-1220], [D-1221] | `webhook_writes::moving_an_incoming_hook_checks_its_owner_can_read_the_new_channel`, `…an_outgoing_update_naming_another_team_is_refused` | The move check is the **old owner's**, not the caller's, and only when the channel changes; `read_channel_content` needs channel membership even on an open channel. |
+
+## Persistent notifications and the notify jobs — J3 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `app/post_persistent_notification.go` (`ResolvePersistentNotification`, `forEachPersistentNotificationPost`, `SendPersistentNotifications`), `insertGroupMentions`, `savePostsPersistentNotifications`, the `PersistentNotification` store's `Get`/`UpdateLastActivity`/`DeleteExpired`, `GetMemberUsersInTeam` | `mm_app::post_persistent_notification`, `mm_store::post_store`, `group_lookup_store` | DONE, closes [D-551]; narrows [D-401], [D-804]; opens [D-1320] | `parity::persistent_notifications` (3); 13 mutations, 11 caught, 2 controls survived | The recipient check wraps its own two 400s in one 500. The job's `mentions` list is sorted here and random in Go. |
+| `jobs/post_persistent_notifications` worker | `job_runtime::post_persistent_notifications_worker` | DONE | the job test above, Go's run against a second mm-api's | Oracles now run no jobs or schedulers (`scripts/go-*.sh`), so a pending job is the stack's main Go's. |
+| `FillInPostProps`' `disable_group_highlight` (post.go:629) | `mm_app::post_write::fill_in_post_props` | DONE | exercised by every licensed post with an `@` | Was a forward of every licensed post with an `@`. |
+

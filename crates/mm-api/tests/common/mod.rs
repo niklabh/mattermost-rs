@@ -2713,6 +2713,10 @@ async fn start_licensed_rust(
         ("MM_SQLSETTINGS_DRIVERNAME", "postgres"),
         ("MM_SQLSETTINGS_DATASOURCE", database_url.as_str()),
         ("MM_SERVICESETTINGS_ENABLELOCALMODE", "false"),
+        // The licensed oracles run no jobs and no schedulers (`scripts/go-licensed.sh`), and
+        // both settings are in the configuration the two servers are compared on.
+        ("MM_JOBSETTINGS_RUNJOBS", "false"),
+        ("MM_JOBSETTINGS_RUNSCHEDULER", "false"),
     ];
     env.extend_from_slice(extra);
     SecondServer::start(port, &env)

@@ -715,10 +715,28 @@ pub fn cleanup_desktop_tokens_worker() -> SimpleWorker {
     )
 }
 
+/// Port of `jobs/post_persistent_notifications/worker.go`: enabled while
+/// `IsPersistentNotificationsEnabled` — `ServiceSettings.PostPriority` and
+/// `AllowPersistentNotifications` — and the body is [`App::send_persistent_notifications`].
+pub fn post_persistent_notifications_worker() -> SimpleWorker {
+    SimpleWorker::new(
+        "PostPersistentNotifications",
+        job::JOB_TYPE_POST_PERSISTENT_NOTIFICATIONS,
+        |config| config.post_priority && config.allow_persistent_notifications,
+        |app, _job| {
+            Box::pin(async move {
+                app.send_persistent_notifications()
+                    .await
+                    .map_err(WorkerError::from)
+            })
+        },
+    )
+}
+
 /// The workers this build registers, which is the Rust half of `Server.initJobs`
 /// (app/server.go:1585).
 ///
-/// One so far. [`crate::job::REGISTERED_JOB_TYPES`] lists the twenty-nine types the *Go* server
+/// A few so far. [`crate::job::REGISTERED_JOB_TYPES`] lists the twenty-nine types the *Go* server
 /// beside this one registers a worker for, and that list — not this one — is what
 /// [`App::create_job`] validates against, because a job created here is run by whichever server
 /// polls first. The two lists converge as workers are ported; until they do, a type in the first
@@ -726,6 +744,7 @@ pub fn cleanup_desktop_tokens_worker() -> SimpleWorker {
 pub fn registered_workers() -> Workers {
     let mut workers = Workers::new();
     workers.add(cleanup_desktop_tokens_worker());
+    workers.add(post_persistent_notifications_worker());
     workers
 }
 
@@ -741,7 +760,12 @@ mod tests {
             workers.get("CleanupDesktopTokens").is_none(),
             "the worker's log name must not be a registry key"
         );
-        assert_eq!(workers.len(), 1);
+        assert!(
+            workers
+                .get(job::JOB_TYPE_POST_PERSISTENT_NOTIFICATIONS)
+                .is_some()
+        );
+        assert_eq!(workers.len(), 2);
     }
 
     #[test]

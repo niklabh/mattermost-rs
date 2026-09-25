@@ -73,6 +73,15 @@ pub trait GroupLookupStore {
         group_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
+    /// Port of `SqlGroupStore.GetMemberUsersInTeam` (group_store.go:613): [`Self::get_member_users`]
+    /// restricted to users with a live `TeamMembers` row on `team_id` (the `Teams` join only
+    /// requires the team to exist). The one caller reads the ids.
+    fn get_member_users_in_team(
+        &self,
+        group_id: &str,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
     /// Port of `SqlGroupStore.GetMemberUsersSortedPage` (group_store.go:515) as
     /// `GetMemberUsersPage` calls it: no view restrictions, `model.ShowUsername`, so ordered by
     /// username. See the module note for a negative page.
@@ -291,6 +300,41 @@ impl GroupLookupStore for SqlGroupStore {
         .await
         .map_err(|source| StoreError::Db {
             context: format!("failed to find member Users for Group with id={group_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter().map(|row| member_user!(row)).collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(group_id = %group_id, team_id = %team_id, found))]
+    async fn get_member_users_in_team(
+        &self,
+        group_id: &str,
+        team_id: &str,
+    ) -> Result<Vec<User>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT u.id, u.createat, u.updateat, u.deleteat, u.username, u.password, u.authdata,
+                   u.authservice, u.email, u.emailverified, u.nickname, u.firstname, u.lastname,
+                   u.position, u.roles, u.allowmarketing, u.props, u.notifyprops,
+                   u.lastpasswordupdate, u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts, u.locale, u.timezone, u.mfaactive,
+                   u.mfasecret, u.mfausedtimestamps, u.remoteid, u.lastlogin
+              FROM groupmembers gm
+              JOIN users u ON u.id = gm.userid
+             WHERE gm.groupid = $1
+               AND gm.userid IN (SELECT tm.userid FROM teammembers tm
+                                   JOIN teams t ON t.id = tm.teamid
+                                  WHERE tm.teamid = $2 AND tm.deleteat = 0)
+               AND gm.deleteat = 0 AND u.deleteat = 0
+            "#,
+            group_id,
+            team_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to member Users for groupId={group_id} and teamId={team_id}"),
             source,
         })?;
         tracing::Span::current().record("found", rows.len());

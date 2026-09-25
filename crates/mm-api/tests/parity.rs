@@ -320,4 +320,6 @@ mod parity {
     pub mod null_columns;
     // Appended 2026-09-25: set_unread's open-channel and reply arms (D-421).
     pub mod set_unread_mentions;
+    // Appended 2026-09-25: persistent notifications, their resolution and their job (D-401, D-551).
+    pub mod persistent_notifications;
 }

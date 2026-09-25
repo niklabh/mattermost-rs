@@ -102,9 +102,12 @@ fn no_two_second_servers_share_a_port() {
     // at + 91, and its client plugin-HTTP tranche at + 98. Its auth tranche's is at + 61: an
     // offset of 100 or more is the next stack's Go server (stack k's Go is 8065 + 100k), so a
     // tranche's Go offset stays below 100. `parity::ratelimit` starts its Go servers at + 75, + 82 and + 83.
+    // The `EnableTesting` oracle (`MMRS_EDITLIMIT_VARIANT=testing`) is at + 70: until 2026-09-25
+    // `plugin_hooks`' onboarding host started on it and killed the oracle, which is why
+    // `parity::manualtest` so often found no oracle to ask.
     let reserved: Vec<u16> = [
-        8065, 8066, 8115, 8126, 8138, 8139, 8140, 8147, 8148, 8152, 8153, 8154, 8155, 8156, 8157,
-        8159, 8162, 8163,
+        8065, 8066, 8115, 8126, 8135, 8138, 8139, 8140, 8147, 8148, 8152, 8153, 8154, 8155, 8156,
+        8157, 8159, 8162, 8163,
     ]
     .into_iter()
     .chain(8095..=8104)

@@ -358,11 +358,31 @@ mod tests {
         );
     }
 
+    /// Workers with no scheduler here, each for a stated reason. Nothing starts a scheduler in
+    /// this server (see the module note), so a missing one changes nothing at run time; the list
+    /// keeps the gap named rather than silent.
+    ///
+    /// - `post_persistent_notifications`: `enabledFunc` is `MinimumProfessionalLicense` and the
+    ///   period is half `PersistentNotificationIntervalMinutes`, neither of which a
+    ///   [`Scheduler`] can read from [`Config`].
+    const WORKERS_WITHOUT_A_SCHEDULER: &[&str] =
+        &[mm_model::job::JOB_TYPE_POST_PERSISTENT_NOTIFICATIONS];
+
     #[test]
     fn the_registered_schedulers_match_the_registered_workers() {
         let schedulers = registered_schedulers();
         let workers = crate::job_runtime::registered_workers();
-        assert_eq!(schedulers.len(), workers.len());
+        assert_eq!(
+            schedulers.len() + WORKERS_WITHOUT_A_SCHEDULER.len(),
+            workers.len()
+        );
+        for job_type in WORKERS_WITHOUT_A_SCHEDULER {
+            assert!(workers.get(job_type).is_some(), "{job_type} has a worker");
+            assert!(
+                schedulers.iter().all(|s| s.job_type() != *job_type),
+                "{job_type} is listed as unscheduled but has a scheduler"
+            );
+        }
         for scheduler in &schedulers {
             assert!(
                 workers.get(scheduler.job_type()).is_some(),

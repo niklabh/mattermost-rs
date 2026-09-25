@@ -107,6 +107,7 @@ pub mod plugins;
 pub mod post;
 pub mod post_acknowledgement;
 pub mod post_create;
+pub mod post_persistent_notification;
 pub mod post_rest;
 pub mod post_search;
 pub mod post_unread;

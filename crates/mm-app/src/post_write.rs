@@ -56,7 +56,6 @@ use mm_store::{ChannelStore, DraftStore, FileInfoStore, PostStore, PreferenceSto
 
 use crate::App;
 use crate::channel::RestrictedDm;
-use crate::license::LicenseState;
 use crate::post::{PrepareError, PreparePostForClientOpts};
 
 impl App {
@@ -941,14 +940,32 @@ impl App {
             post.del_prop(POST_PROPS_CHANNEL_MENTIONS);
         }
 
-        // `a.Srv().License() != nil && *License.Features.LDAPGroups && matched` — the feature bit
-        // lives in the signed licence body, which this server never parses. Unlicensed, the
-        // conjunction is false whatever the message says, so the licence is only consulted when
-        // there is an `@` for it to matter to.
-        if has_at_mention(&post.message) && self.license_state().await? == LicenseState::Licensed {
-            return Err(PrepareError::Unreproducible(
-                "the group-mention prop turns on the licence's LDAPGroups feature bit",
-            ));
+        // `a.Srv().License() != nil && *License.Features.LDAPGroups && matched`: an `@` in the
+        // message on a server licensed for LDAP groups, by an author without
+        // `use_group_mentions` in the channel, turns off the client's group highlighting. The
+        // licence is only read when there is an `@` for it to matter to.
+        if has_at_mention(&post.message) {
+            let ldap_groups = self
+                .license()
+                .await
+                .map_err(PrepareError::App)?
+                .and_then(|license| license.features.as_ref().and_then(|f| f.ldap_groups))
+                .unwrap_or(false);
+            if ldap_groups {
+                let (has_permission, _) = self
+                    .has_permission_to_channel(
+                        &post.user_id,
+                        &post.channel_id,
+                        &mm_model::permission::PERMISSION_USE_GROUP_MENTIONS,
+                    )
+                    .await;
+                if !has_permission {
+                    post.add_prop(
+                        mm_model::post::POST_PROPS_GROUP_HIGHLIGHT_DISABLED,
+                        serde_json::Value::Bool(true),
+                    );
+                }
+            }
         }
 
         if post.get_prop(POST_PROPS_AI_GENERATED_BY_USER_ID).is_some() {
