@@ -261,6 +261,7 @@ pub fn registered_schedulers() -> Vec<Box<dyn Scheduler>> {
         Box::new(crate::job_workers::active_users_scheduler()),
         Box::new(crate::job_workers::mobile_session_metadata_scheduler()),
         Box::new(crate::job_workers::refresh_materialized_views_scheduler()),
+        Box::new(crate::job_workers::expiry_notify_scheduler()),
     ]
 }
 

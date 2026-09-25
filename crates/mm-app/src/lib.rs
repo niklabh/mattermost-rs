@@ -43,6 +43,7 @@ pub mod desktop_login;
 pub mod draft;
 pub mod email;
 pub mod emoji;
+pub mod expiry_notify;
 /// Port of the file-backend half of `app/export.go`.
 pub mod export;
 /// The read side of `app/file.go` — `FileInfo` rows and, through [`filestore`], file bytes.

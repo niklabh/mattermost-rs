@@ -9164,15 +9164,15 @@ corpus (now 24 inputs) with the `refresh_materialized_views` scheduler that regi
 `None` and say so, since a job that skips a day is better than one that runs at an hour nobody
 configured.
 
-## D-804 · Twenty-five of the twenty-nine registered job types have no worker here
+## D-804 · Twenty-four of the twenty-nine registered job types have no worker here
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (app/server.go:1585) · **Owner** the jobs subsystem
 
 `mm_app::job::REGISTERED_JOB_TYPES` lists the twenty-nine types the Go server registers a worker
 for, and `App::create_job` validates against it — so this server can create a job of any of them.
-`mm_app::job_runtime::registered_workers` runs four: `cleanup_desktop_tokens`, and since 2026-09-25
-`active_users`, `mobile_session_metadata` and `refresh_materialized_views` (`mm_app::job_workers`,
-`parity::job_workers_simple`). Every other type is created here and run by the Go server off the
+`mm_app::job_runtime::registered_workers` runs five: `cleanup_desktop_tokens`, and since 2026-09-25
+`active_users`, `mobile_session_metadata`, `refresh_materialized_views` and `expiry_notify`
+(`mm_app::job_workers`, `parity::job_workers_simple`). Every other type is created here and run by the Go server off the
 shared table. `last_accessible_post` and `last_accessible_file` are [D-1300].
 
 The runtime is not the gap; each worker's **body** is. They range from a single `DELETE`

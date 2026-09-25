@@ -29,6 +29,10 @@ use crate::common;
 
 use common::{RUST, client, go_minted_token, stack_enabled};
 
+/// One test at a time: the `expiry_notify` test starts an mm-api whose watcher claims **any**
+/// pending job of a type it runs, which includes the Go halves of the other tests here.
+static JOBS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn pool() -> PgPool {
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     sqlx::postgres::PgPoolOptions::new()
@@ -88,8 +92,8 @@ fn outcome(job: &Job) -> serde_json::Value {
     })
 }
 
-/// Wait for Go's worker to take the pending row and finish it.
-async fn go_runs(pool: &PgPool, job_id: &str) -> Job {
+/// Wait for whichever server's worker takes the pending row to finish it.
+async fn wait_done(pool: &PgPool, job_id: &str) -> Job {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
     loop {
         let job = read_job(pool, job_id).await;
@@ -284,6 +288,7 @@ async fn refresh_materialized_views_runs_like_go() {
     if !stack_enabled() {
         return;
     }
+    let _jobs = JOBS.lock().await;
     let http = client();
     let _ = go_minted_token(&http).await;
     let pool = pool().await;
@@ -297,7 +302,7 @@ async fn refresh_materialized_views_runs_like_go() {
         let job_id = id(&format!("rmv{side}"));
         let job = if side == "go" {
             plant_job(&pool, &job_id, job_type).await;
-            go_runs(&pool, &job_id).await
+            wait_done(&pool, &job_id).await
         } else {
             rust_runs(&pool, &job_id, job_type).await
         };
@@ -326,11 +331,12 @@ async fn mobile_session_metadata_runs_like_go() {
     if !stack_enabled() {
         return;
     }
+    let _jobs = JOBS.lock().await;
     let pool = pool().await;
     let job_type = "mobile_session_metadata";
     let go_id = id("msmgo");
     plant_job(&pool, &go_id, job_type).await;
-    let go = outcome(&go_runs(&pool, &go_id).await);
+    let go = outcome(&wait_done(&pool, &go_id).await);
     let rust = outcome(&rust_runs(&pool, &id("msmrs"), job_type).await);
     assert_eq!(go["status"], "success", "{go}");
     assert_eq!(rust, go);
@@ -359,6 +365,7 @@ async fn active_users_runs_like_go() {
     if !stack_enabled() {
         return;
     }
+    let _jobs = JOBS.lock().await;
     let _document = common::CONFIG_DOCUMENT.write().await;
     let http = client();
     let admin = go_minted_token(&http).await;
@@ -382,9 +389,10 @@ async fn active_users_runs_like_go() {
     patch_metrics(&http, &admin, true, ":0").await;
     let go_id = id("augo");
     plant_job(&pool, &go_id, job_type).await;
-    let go =
-        futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(go_runs(&pool, &go_id)))
-            .await;
+    let go = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(wait_done(
+        &pool, &go_id,
+    )))
+    .await;
     patch_metrics(&http, &admin, false, &listen).await;
     let go = match go {
         Ok(job) => job,
@@ -395,4 +403,193 @@ async fn active_users_runs_like_go() {
     let rust = outcome(&rust_runs(&pool, &id("aurs"), job_type).await);
     assert_eq!(go["status"], "success", "{go}");
     assert_eq!(rust, go);
+}
+
+// -------------------------------------------------------------------------------------------
+// expiry_notify
+// -------------------------------------------------------------------------------------------
+
+async fn set_extend_sessions(http: &reqwest::Client, admin: &str, on: bool) {
+    let response = http
+        .put(format!("{RUST}/api/v4/config/patch"))
+        .header("Authorization", format!("Bearer {admin}"))
+        .json(&serde_json::json!({ "ServiceSettings": { "ExtendSessionLengthWithActivity": on } }))
+        .send()
+        .await
+        .expect("mm-api answers");
+    let status = response.status().as_u16();
+    let body = response.text().await.unwrap_or_default();
+    assert_eq!(status, 200, "ExtendSessionLengthWithActivity={on}: {body}");
+}
+
+/// The mm-api that runs `expiry_notify`'s Rust half; see `second_server_ports`.
+const JOB_WORKER_RUST_PORT: u16 = 8113;
+
+/// A mobile session of `user_id` that expired five minutes ago and has not been notified, plus
+/// three that `GetSessionsExpired` must pass over: one expired two hours ago (outside the hour),
+/// one already notified, and a web session, which has no device.
+async fn plant_expired_sessions(pool: &PgPool, user_id: &str, device: &str, nonce: &str) -> String {
+    let at = now();
+    let rows = [
+        (
+            format!("x{nonce}"),
+            device.to_owned(),
+            at - 5 * 60 * 1000,
+            false,
+        ),
+        (
+            format!("o{nonce}"),
+            format!("{device}old"),
+            at - 2 * 60 * 60 * 1000,
+            false,
+        ),
+        (
+            format!("n{nonce}"),
+            format!("{device}told"),
+            at - 5 * 60 * 1000,
+            true,
+        ),
+        // A web session: no `DeviceId`, so not mobile.
+        (
+            format!("w{nonce}"),
+            String::new(),
+            at - 5 * 60 * 1000,
+            false,
+        ),
+    ];
+    for (tag, device_id, expires_at, notified) in &rows {
+        sqlx::query(
+            "INSERT INTO sessions (id, token, createat, expiresat, lastactivityat, userid,
+                                   deviceid, roles, isoauth, props, expirednotify)
+             VALUES ($1, $2, $3, $4, $3, $5, $6, 'system_user', false, '{}', $7)",
+        )
+        .bind(id(tag))
+        .bind(id(&format!("k{tag}")))
+        .bind(at - 24 * 60 * 60 * 1000)
+        .bind(expires_at)
+        .bind(user_id)
+        .bind(device_id)
+        .bind(notified)
+        .execute(pool)
+        .await
+        .expect("a session");
+    }
+    id(&format!("x{nonce}"))
+}
+
+async fn expired_notify(pool: &PgPool, session_id: &str) -> bool {
+    sqlx::query_scalar("SELECT expirednotify FROM sessions WHERE id = $1")
+        .bind(session_id)
+        .fetch_one(pool)
+        .await
+        .expect("the session is there")
+}
+
+/// `expiry_notify` pushes a v2 `session` message — unsigned, in the user's locale, naming the
+/// site and the mobile session length — to each mobile session that expired in the last hour and
+/// was not yet told, and then sets `ExpiredNotify`. Go needs `ExtendSessionLengthWithActivity`
+/// for the worker to run at all, so the Go half patches it on and restores it.
+#[tokio::test]
+async fn expiry_notify_pushes_like_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let _jobs = JOBS.lock().await;
+    let _document = common::CONFIG_DOCUMENT.write().await;
+    let _setting = common::SESSION_EXPIRY_SETTING.write().await;
+    let proxy = common::push_proxy::push_proxy().expect("the push proxy is bound");
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let pool = pool().await;
+    sqlx::query("DELETE FROM sessions WHERE id LIKE 'mmrsjs%'")
+        .execute(&pool)
+        .await
+        .expect("purges old sessions");
+    let (team, _) = common::a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let user = common::create_plain_user(&http, &admin, &team, "jsexpiry").await;
+
+    let mut sides = Vec::new();
+    for side in ["go", "rs"] {
+        let nonce = format!("{side}{}", now() % 100_000_000);
+        let device = format!("android_rn:mmrsjs{nonce}");
+        let session = plant_expired_sessions(&pool, &user.id, &device, &nonce).await;
+        let job_id = id(&format!("en{side}"));
+        let job = if side == "go" {
+            set_extend_sessions(&http, &admin, true).await;
+            plant_job(&pool, &job_id, "expiry_notify").await;
+            let job = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                wait_done(&pool, &job_id),
+            ))
+            .await;
+            set_extend_sessions(&http, &admin, false).await;
+            match job {
+                Ok(job) => job,
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+        } else {
+            // **On a running mm-api, not in this process.** The stack hands the push settings
+            // to its servers through the environment (`MM_EMAILSETTINGS_*`), not the stored
+            // document, so an in-process `App` reads push as off and sends nothing — measured.
+            // A second mm-api with the stack's push environment, its job workers on, and
+            // `ExtendSessionLengthWithActivity` on **in its environment only** is the one
+            // process whose `expiry_notify` worker is enabled: Go's reads the stored `false`
+            // and never claims the row.
+            plant_job(&pool, &job_id, "expiry_notify").await;
+            let push_server = format!("http://localhost:{}", common::push_proxy::push_port());
+            let server = common::SecondServer::start(
+                JOB_WORKER_RUST_PORT,
+                &[
+                    ("MM_API_ENABLE_JOB_WORKERS", "true"),
+                    ("MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS", "true"),
+                    (
+                        "MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER",
+                        push_server.as_str(),
+                    ),
+                    ("MM_SERVICESETTINGS_EXTENDSESSIONLENGTHWITHACTIVITY", "true"),
+                ],
+            )
+            .await
+            .expect("the job-worker mm-api starts");
+            let job = wait_done(&pool, &job_id).await;
+            drop(server);
+            job
+        };
+        let device_key = device.trim_start_matches("android_rn:").to_owned();
+        let push = proxy
+            .take(Duration::from_secs(10), |r| {
+                r.json()["device_id"].as_str() == Some(device_key.as_str())
+            })
+            .await
+            .unwrap_or_else(|| panic!("{side}: no push for the expired session"));
+        let mut body = common::push_proxy::normalize_push(push.json());
+        body["device_id"] = serde_json::Value::from("<device>");
+        let others = [format!("{device_key}old"), format!("{device_key}told")];
+        let stray = proxy
+            .take(Duration::from_millis(500), |r| {
+                let device = r.json()["device_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                device.is_empty() || others.contains(&device)
+            })
+            .await;
+        sides.push((
+            outcome(&job),
+            push.path.clone(),
+            body,
+            expired_notify(&pool, &session).await,
+            stray.is_none(),
+        ));
+    }
+    let rust = sides.pop().expect("two sides");
+    let go = sides.pop().expect("two sides");
+    assert_eq!(go.0["status"], "success", "Go: {go:?}");
+    assert!(go.3, "Go set ExpiredNotify");
+    assert!(
+        go.4,
+        "Go pushed nothing to the old or the already-notified session"
+    );
+    assert_eq!(rust, go, "the job, the push and the flag differ");
+
+    common::delete_plain_user(&http, &admin, &user.id).await;
 }

@@ -96,6 +96,23 @@ pub fn refresh_materialized_views_worker() -> SimpleWorker {
     )
 }
 
+/// Port of `jobs/expirynotify/worker.go`: [`crate::App::notify_sessions_expired`]. Enabled by
+/// `ServiceSettings.ExtendSessionLengthWithActivity`.
+pub fn expiry_notify_worker() -> SimpleWorker {
+    SimpleWorker::new(
+        "ExpiryNotify",
+        job::JOB_TYPE_EXPIRY_NOTIFY,
+        |config| config.extend_session_length_with_activity,
+        |app, _job| {
+            Box::pin(async move {
+                app.notify_sessions_expired()
+                    .await
+                    .map_err(|err| -> WorkerError { err })
+            })
+        },
+    )
+}
+
 // ---------------------------------------------------------------------------
 // The schedulers that queue these workers' jobs (registered, not started — D-802)
 // ---------------------------------------------------------------------------
@@ -127,6 +144,16 @@ pub fn refresh_materialized_views_scheduler() -> DailyScheduler {
         job::JOB_TYPE_REFRESH_MATERIALIZED_VIEWS,
         |config| parse_go_hhmm(&config.refresh_post_stats_run_time),
         |_config| true,
+    )
+}
+
+/// Port of `jobs/expirynotify/scheduler.go`: every ten minutes, while
+/// `ServiceSettings.ExtendSessionLengthWithActivity`.
+pub fn expiry_notify_scheduler() -> PeriodicScheduler {
+    PeriodicScheduler::new(
+        job::JOB_TYPE_EXPIRY_NOTIFY,
+        Duration::from_secs(10 * 60),
+        |config| config.extend_session_length_with_activity,
     )
 }
 

@@ -729,6 +729,7 @@ pub fn registered_workers() -> Workers {
     workers.add(crate::job_workers::active_users_worker());
     workers.add(crate::job_workers::mobile_session_metadata_worker());
     workers.add(crate::job_workers::refresh_materialized_views_worker());
+    workers.add(crate::job_workers::expiry_notify_worker());
     workers
 }
 
@@ -744,7 +745,7 @@ mod tests {
             workers.get("CleanupDesktopTokens").is_none(),
             "the worker's log name must not be a registry key"
         );
-        assert_eq!(workers.len(), 4);
+        assert_eq!(workers.len(), 5);
     }
 
     #[test]
