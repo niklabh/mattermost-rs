@@ -15,7 +15,7 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
 | Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 71/258, Driver 20/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 204/258 (2026-09-25), Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 232/258 (2026-09-25), Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
@@ -14911,4 +14911,11 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
-| `PluginAPI` `CreateCommand` … `LogAuditRecWithLevel` — the twenty-eight in docs/PLUGIN_PLAN.md Phase 6 (app/plugin_api.go), `App.SetTeamIconFromFile`, `App.SendToastMessage`, `App.SetProfileImageFromFile` | `mm_app::plugin_api::server`, `App::set_team_icon_from_file`, `mm_app::toast`, `App::set_profile_image_from_file`, `App::create_command_ungated` | DONE (204 of 258) | `parity::plugin_hooks::the_plugin_api_server_methods_answer_as_go_answers` (61 calls, hooks and frames under both hosts; `LogAuditRecWithLevel` is not called), 3 unit | Team-icon and profile bytes match Go's encoder; `RequestTrialLicense` past its refusals is not-implemented; the audit record reaches no audit log ([D-1330]). |
+| `PluginAPI` `CreateCommand` … `LogAuditRecWithLevel` — the twenty-eight in docs/PLUGIN_PLAN.md Phase 6 (app/plugin_api.go), `App.SetTeamIconFromFile`, `App.SendToastMessage`, `App.SetProfileImageFromFile` | `mm_app::plugin_api::server`, `App::set_team_icon_from_file`, `mm_app::toast`, `App::set_profile_image_from_file`, `App::create_command_ungated` | DONE (204 of 258) | `parity::plugin_hooks::the_plugin_api_server_methods_answer_as_go_answers` (64 calls, hooks and frames under both hosts; `GetPlugins` lists an active and an inactive plugin), 3 unit | Team-icon and profile bytes match Go's encoder; `RequestTrialLicense` past its refusals is not-implemented; the audit record reaches no audit log ([D-1330]). |
+
+## Plugin API: property groups, fields and values (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `PluginAPI` `RegisterPropertyGroup` … `DeletePropertyValuesForFieldWithOptions` — the twenty-eight in docs/PLUGIN_PLAN.md Phase 6 (app/plugin_api.go:1713), their `App`/`PropertyService`/store paths, `rejectTemplateValues` | `mm_app::plugin_api::properties`, `mm_store::PropertyStore` (eleven methods, `RawPropertyValue`) | DONE (232 of 258); opens [D-1331] | `parity::plugin_hooks::the_plugin_api_property_methods_answer_as_go_answers` (86 calls and the `property_values_updated` frames under both hosts), 5 unit; `scripts/mutations/plugin-api-properties.plan` (17 run, 15 caught, 2 controls survived) | `Value` bytes are Go's: the sanitised input on create/update, Postgres's `jsonb` text on reads and upserts. The two hooked groups answer not-implemented ([D-1331]). |
+| `createPropertyField`/`updatePropertyFields`' `enforceFieldGroupVersionMatch` via `GroupByID`; `DeletePropertyField`'s `Where` | `App::cpa_create_field`, `App::cpa_update_field`, `App::delete_property_field_with_hooks` | DONE | the same suite | The version check reads the group by the field's (create) or argument's (update) id, so an unknown or empty one is the 404 Go gives. |

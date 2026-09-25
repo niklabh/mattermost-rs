@@ -16,6 +16,7 @@
 //! upload session's id — so the suite can scrub the tag and find the rows to remove.
 
 use go_netrpc::Client;
+use mm_plugin::wire::logr::Level;
 use mm_plugin::wire::model::{
     AuditRecord, Channel, Command, PluginClusterEvent, PluginClusterEventSendOptions,
     PushNotification, SendToastMessageOptions, UploadSession,
@@ -501,6 +502,22 @@ async fn quiet(api: &Client, out: &mut Vec<Json>) {
     };
     let _: Option<Z_LogAuditRecReturns> =
         call(api, out, "LogAuditRec", Z_LogAuditRecArgs { a: record() }).await;
+    for rec in [record(), None] {
+        let _: Option<Z_LogAuditRecWithLevelReturns> = call(
+            api,
+            out,
+            "LogAuditRecWithLevel",
+            Z_LogAuditRecWithLevelArgs {
+                a: rec,
+                b: Level {
+                    id: 100,
+                    name: "audit-api".into(),
+                    ..Level::default()
+                },
+            },
+        )
+        .await;
+    }
 }
 
 /// The whole script, in a fixed order.

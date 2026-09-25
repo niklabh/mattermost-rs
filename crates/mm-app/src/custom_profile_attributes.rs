@@ -320,8 +320,14 @@ impl App {
             self.field_limit_pre_create_field(&field).await?;
         }
 
-        // createPropertyField (property_field.go:118).
-        enforce_field_group_version_match("CreatePropertyField", group, &field)?;
+        // createPropertyField (property_field.go:118): the version check reads the group by the
+        // *field's* id, not the caller's group — a missing one is the store's not-found.
+        let version_group = self
+            .store()
+            .property()
+            .get_group_by_id(&field.group_id)
+            .await?;
+        enforce_field_group_version_match("CreatePropertyField", &version_group, &field)?;
         if field.is_psav1() {
             return Ok(self.store().property().create_field(field).await?);
         }
@@ -636,8 +642,10 @@ impl App {
                 .await?;
         }
 
-        // updatePropertyFields (property_field.go:317).
-        enforce_field_group_version_match(WHERE, group, &field)?;
+        // updatePropertyFields (property_field.go:317): `GroupByID(groupID)`, so an empty group
+        // id — which the reads above treat as any group — is the store's not-found here.
+        let version_group = self.store().property().get_group_by_id(&group.id).await?;
+        enforce_field_group_version_match(WHERE, &version_group, &field)?;
         if !field.is_psav1() {
             let refuse = |id: &str, detail: &str, status: i32| {
                 PropertyServiceError::App(AppError::boxed(WHERE, id, None, detail, status))
@@ -760,7 +768,17 @@ impl App {
         connection_id: &str,
     ) -> AppResult<()> {
         const WHERE: &str = "DeletePropertyField";
-        let existing = self.cpa_get_field(group, caller, field_id).await?;
+        // The service's `GetPropertyField`, mapped by `DeletePropertyField` — so `Where` is this
+        // function's on a miss or a licence refusal, which only gob (the plugin API) carries.
+        let existing = self
+            .store()
+            .property()
+            .get_field(&group.id, field_id)
+            .await
+            .map_err(|err| property_read_error(WHERE, err))?;
+        let existing = self
+            .managed_post_get_field(group, existing, caller, WHERE)
+            .await?;
         if existing.protected {
             return Err(AppError::boxed(
                 WHERE,
@@ -962,7 +980,7 @@ impl App {
     /// Port of `resolveValueBroadcastParams` (app/property_value.go:15): `(teamID, channelID)`
     /// for the `property_values_updated` event — a post's channel, a channel itself, and
     /// system-wide for `user` and `system`; any other object type is the 400.
-    async fn resolve_value_broadcast_params(
+    pub(crate) async fn resolve_value_broadcast_params(
         &self,
         ctx: &crate::plugin_hooks::HookContext,
         object_type: &str,

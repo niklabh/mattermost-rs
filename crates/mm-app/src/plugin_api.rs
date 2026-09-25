@@ -169,6 +169,7 @@ mod auth;
 mod channels;
 mod files;
 mod http;
+mod properties;
 mod server;
 mod users;
 
@@ -568,6 +569,250 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         self.server_log_audit_rec(args.a.as_deref(), &args.b.name);
         Ok(api::Z_LogAuditRecWithLevelReturns {})
     }
+    // -- properties -------------------------------------------------------------------------
+
+    /// `PluginAPI.RegisterPropertyGroup`; see [`AppPluginApi::properties_register_group`].
+    async fn register_property_group(
+        &self,
+        args: api::Z_RegisterPropertyGroupArgs,
+    ) -> Result<api::Z_RegisterPropertyGroupReturns, NotImplemented> {
+        self.properties_register_group(args).await
+    }
+
+    /// `PluginAPI.GetPropertyGroup`; see [`AppPluginApi::properties_get_group`].
+    async fn get_property_group(
+        &self,
+        args: api::Z_GetPropertyGroupArgs,
+    ) -> Result<api::Z_GetPropertyGroupReturns, NotImplemented> {
+        self.properties_get_group(args).await
+    }
+
+    /// `PluginAPI.CreatePropertyField`; see [`AppPluginApi::properties_create_field`].
+    async fn create_property_field(
+        &self,
+        args: api::Z_CreatePropertyFieldArgs,
+    ) -> Result<api::Z_CreatePropertyFieldReturns, NotImplemented> {
+        self.properties_create_field(args).await
+    }
+
+    /// `PluginAPI.GetPropertyField`; see [`AppPluginApi::properties_get_field`].
+    async fn get_property_field(
+        &self,
+        args: api::Z_GetPropertyFieldArgs,
+    ) -> Result<api::Z_GetPropertyFieldReturns, NotImplemented> {
+        self.properties_get_field(args).await
+    }
+
+    /// `PluginAPI.GetPropertyFields`; see [`AppPluginApi::properties_get_fields`].
+    async fn get_property_fields(
+        &self,
+        args: api::Z_GetPropertyFieldsArgs,
+    ) -> Result<api::Z_GetPropertyFieldsReturns, NotImplemented> {
+        self.properties_get_fields(args).await
+    }
+
+    /// `PluginAPI.GetPropertyFieldByName`; see [`AppPluginApi::properties_get_field_by_name`].
+    async fn get_property_field_by_name(
+        &self,
+        args: api::Z_GetPropertyFieldByNameArgs,
+    ) -> Result<api::Z_GetPropertyFieldByNameReturns, NotImplemented> {
+        self.properties_get_field_by_name(args).await
+    }
+
+    /// `PluginAPI.SearchPropertyFields`; see [`AppPluginApi::properties_search_fields`].
+    async fn search_property_fields(
+        &self,
+        args: api::Z_SearchPropertyFieldsArgs,
+    ) -> Result<api::Z_SearchPropertyFieldsReturns, NotImplemented> {
+        self.properties_search_fields(args).await
+    }
+
+    /// `PluginAPI.CountPropertyFields`; see [`AppPluginApi::properties_count_fields`].
+    async fn count_property_fields(
+        &self,
+        args: api::Z_CountPropertyFieldsArgs,
+    ) -> Result<api::Z_CountPropertyFieldsReturns, NotImplemented> {
+        self.properties_count_fields(args).await
+    }
+
+    /// `PluginAPI.CountPropertyFieldsForTarget`; see [`AppPluginApi::properties_count_fields_for_target`].
+    async fn count_property_fields_for_target(
+        &self,
+        args: api::Z_CountPropertyFieldsForTargetArgs,
+    ) -> Result<api::Z_CountPropertyFieldsForTargetReturns, NotImplemented> {
+        self.properties_count_fields_for_target(args).await
+    }
+
+    /// `PluginAPI.UpdatePropertyField`; see [`AppPluginApi::properties_update_field`].
+    async fn update_property_field(
+        &self,
+        args: api::Z_UpdatePropertyFieldArgs,
+    ) -> Result<api::Z_UpdatePropertyFieldReturns, NotImplemented> {
+        self.properties_update_field(args).await
+    }
+
+    /// `PluginAPI.UpdatePropertyFields`; see [`AppPluginApi::properties_update_fields`].
+    async fn update_property_fields(
+        &self,
+        args: api::Z_UpdatePropertyFieldsArgs,
+    ) -> Result<api::Z_UpdatePropertyFieldsReturns, NotImplemented> {
+        self.properties_update_fields(args).await
+    }
+
+    /// `PluginAPI.DeletePropertyField`; see [`AppPluginApi::properties_delete_field`].
+    async fn delete_property_field(
+        &self,
+        args: api::Z_DeletePropertyFieldArgs,
+    ) -> Result<api::Z_DeletePropertyFieldReturns, NotImplemented> {
+        self.properties_delete_field(args).await
+    }
+
+    /// `PluginAPI.CreatePropertyValue`; see [`AppPluginApi::properties_create_value`].
+    async fn create_property_value(
+        &self,
+        args: api::Z_CreatePropertyValueArgs,
+    ) -> Result<api::Z_CreatePropertyValueReturns, NotImplemented> {
+        self.properties_create_value(args).await
+    }
+
+    /// `PluginAPI.GetPropertyValue`; see [`AppPluginApi::properties_get_value`].
+    async fn get_property_value(
+        &self,
+        args: api::Z_GetPropertyValueArgs,
+    ) -> Result<api::Z_GetPropertyValueReturns, NotImplemented> {
+        self.properties_get_value(args).await
+    }
+
+    /// `PluginAPI.GetPropertyValues`; see [`AppPluginApi::properties_get_values`].
+    async fn get_property_values(
+        &self,
+        args: api::Z_GetPropertyValuesArgs,
+    ) -> Result<api::Z_GetPropertyValuesReturns, NotImplemented> {
+        self.properties_get_values(args).await
+    }
+
+    /// `PluginAPI.SearchPropertyValues`; see [`AppPluginApi::properties_search_values`].
+    async fn search_property_values(
+        &self,
+        args: api::Z_SearchPropertyValuesArgs,
+    ) -> Result<api::Z_SearchPropertyValuesReturns, NotImplemented> {
+        self.properties_search_values(args).await
+    }
+
+    /// `PluginAPI.UpdatePropertyValue`; see [`AppPluginApi::properties_update_value`].
+    async fn update_property_value(
+        &self,
+        args: api::Z_UpdatePropertyValueArgs,
+    ) -> Result<api::Z_UpdatePropertyValueReturns, NotImplemented> {
+        self.properties_update_value(args).await
+    }
+
+    /// `PluginAPI.UpdatePropertyValues`; see [`AppPluginApi::properties_update_values`].
+    async fn update_property_values(
+        &self,
+        args: api::Z_UpdatePropertyValuesArgs,
+    ) -> Result<api::Z_UpdatePropertyValuesReturns, NotImplemented> {
+        self.properties_update_values(args).await
+    }
+
+    /// `PluginAPI.UpsertPropertyValue`; see [`AppPluginApi::properties_upsert_value`].
+    async fn upsert_property_value(
+        &self,
+        args: api::Z_UpsertPropertyValueArgs,
+    ) -> Result<api::Z_UpsertPropertyValueReturns, NotImplemented> {
+        let (a, b) = self.properties_upsert_value(args.a.as_deref()).await?;
+        Ok(api::Z_UpsertPropertyValueReturns { a, b })
+    }
+
+    /// `PluginAPI.UpsertPropertyValueWithOptions`: the scope matters only to the hooks.
+    async fn upsert_property_value_with_options(
+        &self,
+        args: api::Z_UpsertPropertyValueWithOptionsArgs,
+    ) -> Result<api::Z_UpsertPropertyValueWithOptionsReturns, NotImplemented> {
+        let (a, b) = self.properties_upsert_value(args.a.as_deref()).await?;
+        Ok(api::Z_UpsertPropertyValueWithOptionsReturns { a, b })
+    }
+
+    /// `PluginAPI.UpsertPropertyValues`; see [`AppPluginApi::properties_upsert_values`].
+    async fn upsert_property_values(
+        &self,
+        args: api::Z_UpsertPropertyValuesArgs,
+    ) -> Result<api::Z_UpsertPropertyValuesReturns, NotImplemented> {
+        let (a, b) = self.properties_upsert_values(&args.a).await?;
+        Ok(api::Z_UpsertPropertyValuesReturns { a, b })
+    }
+
+    /// `PluginAPI.UpsertPropertyValuesWithOptions`.
+    async fn upsert_property_values_with_options(
+        &self,
+        args: api::Z_UpsertPropertyValuesWithOptionsArgs,
+    ) -> Result<api::Z_UpsertPropertyValuesWithOptionsReturns, NotImplemented> {
+        let (a, b) = self.properties_upsert_values(&args.a).await?;
+        Ok(api::Z_UpsertPropertyValuesWithOptionsReturns { a, b })
+    }
+
+    /// `PluginAPI.DeletePropertyValue`; see [`AppPluginApi::properties_delete_value`].
+    async fn delete_property_value(
+        &self,
+        args: api::Z_DeletePropertyValueArgs,
+    ) -> Result<api::Z_DeletePropertyValueReturns, NotImplemented> {
+        let a = self.properties_delete_value(&args.a, &args.b).await?;
+        Ok(api::Z_DeletePropertyValueReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValueWithOptions`.
+    async fn delete_property_value_with_options(
+        &self,
+        args: api::Z_DeletePropertyValueWithOptionsArgs,
+    ) -> Result<api::Z_DeletePropertyValueWithOptionsReturns, NotImplemented> {
+        let a = self.properties_delete_value(&args.a, &args.b).await?;
+        Ok(api::Z_DeletePropertyValueWithOptionsReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValuesForTarget`.
+    async fn delete_property_values_for_target(
+        &self,
+        args: api::Z_DeletePropertyValuesForTargetArgs,
+    ) -> Result<api::Z_DeletePropertyValuesForTargetReturns, NotImplemented> {
+        let a = self
+            .properties_delete_values_for_target(&args.a, &args.b, &args.c)
+            .await?;
+        Ok(api::Z_DeletePropertyValuesForTargetReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValuesForTargetWithOptions`.
+    async fn delete_property_values_for_target_with_options(
+        &self,
+        args: api::Z_DeletePropertyValuesForTargetWithOptionsArgs,
+    ) -> Result<api::Z_DeletePropertyValuesForTargetWithOptionsReturns, NotImplemented> {
+        let a = self
+            .properties_delete_values_for_target(&args.a, &args.b, &args.c)
+            .await?;
+        Ok(api::Z_DeletePropertyValuesForTargetWithOptionsReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValuesForField`.
+    async fn delete_property_values_for_field(
+        &self,
+        args: api::Z_DeletePropertyValuesForFieldArgs,
+    ) -> Result<api::Z_DeletePropertyValuesForFieldReturns, NotImplemented> {
+        let a = self
+            .properties_delete_values_for_field(&args.a, &args.b)
+            .await?;
+        Ok(api::Z_DeletePropertyValuesForFieldReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValuesForFieldWithOptions`.
+    async fn delete_property_values_for_field_with_options(
+        &self,
+        args: api::Z_DeletePropertyValuesForFieldWithOptionsArgs,
+    ) -> Result<api::Z_DeletePropertyValuesForFieldWithOptionsReturns, NotImplemented> {
+        let a = self
+            .properties_delete_values_for_field(&args.a, &args.b)
+            .await?;
+        Ok(api::Z_DeletePropertyValuesForFieldWithOptionsReturns { a })
+    }
+
     // -- users ------------------------------------------------------------------------------
 
     /// Port of `PluginAPI.GetUser` (app/plugin_api.go:285): the store row, **unsanitised** —

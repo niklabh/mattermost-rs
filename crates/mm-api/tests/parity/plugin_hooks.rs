@@ -11295,11 +11295,55 @@ impl ServerSide {
     }
 }
 
+/// The id of the server tour's second plugin, which no state enables.
+const SERVER_INACTIVE_ID: &str = "mmrs.srvinactive";
+
+/// A bundle holding nothing but a manifest: `GetPlugins` lists it after the active recorder,
+/// as `PluginAPI.GetPlugins` appends the inactive manifests to the active ones.
+fn server_inactive_bundle() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-inactive");
+            let stage = scratch.join(SERVER_INACTIVE_ID);
+            let _ = std::fs::remove_dir_all(&scratch);
+            std::fs::create_dir_all(&stage).expect("the staging directory");
+            std::fs::write(
+                stage.join("plugin.json"),
+                format!(
+                    r#"{{"id": "{SERVER_INACTIVE_ID}", "name": "Inactive", "version": "0.0.1"}}"#
+                ),
+            )
+            .expect("the manifest");
+            let tarball = scratch.join(format!("{SERVER_INACTIVE_ID}.tar.gz"));
+            let status = Command::new("sh")
+                .arg("-c")
+                .arg(format!(
+                    "tar -c -C {stage} {SERVER_INACTIVE_ID} | gzip -1 > {out}",
+                    stage = scratch.display(),
+                    out = tarball.display()
+                ))
+                .status()
+                .expect("tar runs");
+            assert!(status.success(), "packing the inactive bundle failed");
+            tarball
+        })
+        .clone()
+}
+
 async fn run_the_server_tour(client: &reqwest::Client, admin: &str) {
     let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-server");
     let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
     let go_log = lay_out(&go_run);
     let rust_log = lay_out(&rs_run);
+    for run in [&go_run, &rs_run] {
+        std::fs::copy(
+            server_inactive_bundle(),
+            run.join("data/plugins")
+                .join(format!("{SERVER_INACTIVE_ID}.tar.gz")),
+        )
+        .expect("the inactive bundle reaches the file store");
+    }
 
     plant_state(client, admin, Some(true)).await;
 
@@ -11560,6 +11604,17 @@ fn assert_server_answers_are_gos(calls: &[Json], frames: &[Json]) {
     };
     let error_id = |name: &str, n: usize, key: &str| -> Json { answer(name, n)[key]["Id"].clone() };
 
+    let plugins: Vec<Json> = answer("GetPlugins", 0)["A"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|m| m["Name"].clone())
+        .collect();
+    assert_eq!(
+        plugins,
+        [Json::from("Hook Recorder"), Json::from("Inactive")],
+        "the active plugin, then the inactive one"
+    );
     assert_eq!(
         error_id("GetChannelOfType", 1, "B"),
         "app.channel.get.existing.app_error",
@@ -11631,5 +11686,521 @@ fn assert_server_answers_are_gos(calls: &[Json], frames: &[Json]) {
     assert!(
         frames.iter().any(|f| f["event"] == "show_toast"),
         "the toast reached its user: {frames:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: property groups, fields and values (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the property tranche; see `second_server_ports`.
+const PROPS_HOST_PORT: u16 = 8170;
+/// Its Go server: **below 100**, because Go's port + 100 is the next stack's Go server.
+const PROPS_GO_OFFSET: u16 = 95;
+/// Each side's tag: in its user's name, its team, and its property group's name.
+const PROPS_SIDES: [&str; 2] = ["propsidego", "propsiders"];
+
+/// The plain users the property tour makes, for the cleanup.
+static PROPS_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the plugin API's property methods (`mm_app::plugin_api::properties`):
+/// groups, fields, values and the five `*WithOptions` variants.
+///
+/// A `!properties-script` post runs `examples/recorder/properties.rs` inside
+/// `MessageWillBePosted` on each host, in a PSAv1 group of the side's own (`prop_<side>`), as a
+/// plugin registers one. Every answer is compared in order — the values' `json.RawMessage` bytes
+/// among them, so which bytes each method hands back (the input sanitised, or Postgres's
+/// rendering of the `jsonb`) is compared exactly — and every frame the own user's socket
+/// received: the `property_values_updated` events of the deletes and of a type change's cleanup.
+#[tokio::test]
+async fn the_plugin_api_property_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    props_purge_rows().await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_props_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *PROPS_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in &users {
+        common::delete_plain_user(&client, &admin, id).await;
+    }
+    props_purge_rows().await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// Each side's team with its channels, members and posts, and its property group with every
+/// field and value in it.
+async fn props_purge_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let teams: Vec<String> = PROPS_SIDES
+        .iter()
+        .map(|side| format!("mmrs-parity-hookprops{side}"))
+        .collect();
+    let groups: Vec<String> = PROPS_SIDES
+        .iter()
+        .map(|side| format!("prop_{side}"))
+        .collect();
+    for statement in [
+        "DELETE FROM propertyvalues WHERE groupid IN (SELECT id FROM propertygroups WHERE name = ANY($1))",
+        "DELETE FROM propertyfields WHERE groupid IN (SELECT id FROM propertygroups WHERE name = ANY($1))",
+        "DELETE FROM propertygroups WHERE name = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&groups)
+            .execute(&pool)
+            .await
+            .expect("the side groups go");
+    }
+    for statement in [
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM sidebarchannels WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM threads WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM posts WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM publicchannels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM channels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM sidebarcategories WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teams WHERE name = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&teams)
+            .execute(&pool)
+            .await
+            .expect("the side teams go");
+    }
+}
+
+/// One side of the property tour.
+struct PropsSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    channel: String,
+}
+
+impl PropsSide {
+    fn env(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("HOOK_RECORDER_PROPS_OWN", self.own.id.clone()),
+            ("HOOK_RECORDER_PROPS_SIDE", self.tag.to_owned()),
+        ]
+    }
+
+    /// The ids the script's answers taught it, then the fixture.
+    fn pairs(&self, calls: &[Json]) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        for (name, n, pointer, token) in [
+            ("RegisterPropertyGroup", 2, "/returns/A/ID", "<group>"),
+            ("CreatePropertyField", 1, "/returns/A/ID", "<colour>"),
+            ("CreatePropertyField", 2, "/returns/A/ID", "<size>"),
+            ("CreatePropertyValue", 1, "/returns/A/ID", "<first>"),
+            ("CreatePropertyValue", 2, "/returns/A/ID", "<second>"),
+            ("CreatePropertyValue", 7, "/returns/A/ID", "<late>"),
+        ] {
+            if let Some(value) = learned(calls, name, n, pointer) {
+                pairs.push((value, token.to_owned()));
+            }
+        }
+        pairs.extend([
+            (self.own.id.clone(), "<own>".to_owned()),
+            (self.channel.clone(), "<own-channel>".to_owned()),
+            (self.own.token.clone(), "<token>".to_owned()),
+            (self.tag.to_owned(), "<side>".to_owned()),
+        ]);
+        pairs
+    }
+}
+
+/// A `json.RawMessage` as the transcript renders it (`{"$bytes": base64}`), decoded, so the two
+/// sides' bytes are compared — and asserted — as text. Scrubbing ran on the base64, so an id
+/// inside a value would be missed; no value this script writes holds one.
+fn props_decode_bytes(value: &mut Json) {
+    use base64::Engine as _;
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(props_decode_bytes),
+        Json::Object(map) => {
+            if let Some(text) = map.get("$bytes").and_then(Json::as_str) {
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(text) {
+                    *value = Json::String(String::from_utf8_lossy(&bytes).into_owned());
+                    return;
+                }
+            }
+            map.values_mut().for_each(props_decode_bytes);
+        }
+        _ => {}
+    }
+}
+
+async fn run_the_props_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-props");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(client, admin, Some(true)).await;
+
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+
+    let mut sides = Vec::new();
+    for tag in PROPS_SIDES {
+        let team = common::create_team(client, admin, &format!("hookprops{tag}")).await;
+        let own = common::create_plain_user(client, admin, &team, &format!("prown{tag}")).await;
+        PROPS_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(own.id.clone());
+        let channel = common::create_channel(client, admin, &team, &format!("prp{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        common::remove_user_from_team(client, admin, &team, &admin_id).await;
+        sides.push(PropsSide { tag, own, channel });
+    }
+
+    let go_env = sides[0].env();
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    env.extend(go_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let go = start_go(&go_run, &env, PROPS_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_env = sides[1].env();
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    env.extend(rust_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let rust = SecondServer::start_in(PROPS_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let shared_ids = vec![admin_id.clone(), CORE_MISSING.to_owned()];
+    let mut recorded = Vec::new();
+    for (side, base, log, host) in [
+        (&sides[0], go.base.as_str(), go_log.as_path(), "Go"),
+        (&sides[1], rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "channel_id": side.channel,
+            "message": "!properties-script",
+        }))
+        .expect("the post");
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(&side.own.token),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(
+            status,
+            201,
+            "{host}: the trigger: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        if host == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the trigger was forwarded"
+            );
+        }
+        script_transcript_settles(log, "PropertiesScript", host).await;
+        core_frames_settle(&mut probe).await;
+
+        let calls = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+            .find(|e| e["hook"] == "PropertiesScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .unwrap_or_default();
+        let pairs = side.pairs(&calls);
+        let mut entries = transcript_of(log, &pairs);
+        for entry in entries.iter_mut() {
+            props_decode_bytes(entry);
+            mask_core(entry, &shared_ids);
+        }
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, &shared_ids))
+            .filter(|f| f["event"] == "property_values_updated")
+            .collect();
+        frames.sort_by_key(Json::to_string);
+        recorded.push((entries, frames));
+    }
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "PropertiesScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {:?}",
+        go_calls
+            .iter()
+            .filter(|c| c.get("error").is_some())
+            .collect::<Vec<_>>()
+    );
+    let differing: Vec<String> = go_calls
+        .iter()
+        .zip(&rust_calls)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("call {index} ({}):\n  go:   {g}\n  rust: {r}", g["call"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    assert_eq!(
+        go_side.1, rust_side.1,
+        "the property_values_updated frames the own user received"
+    );
+
+    assert_props_answers_are_gos(&go_calls, &go_side.1);
+
+    drop(rust);
+    drop(go);
+    for side in &sides {
+        common::delete_channel(client, admin, &side.channel).await;
+    }
+}
+
+/// What parity alone would not pin, read off Go's scrubbed answers.
+fn assert_props_answers_are_gos(calls: &[Json], frames: &[Json]) {
+    let answer = |name: &str, n: usize| -> Json {
+        calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    let error = |name: &str, n: usize, key: &str| -> (Json, Json, Json) {
+        let e = answer(name, n)[key]["value"].clone();
+        (e["Id"].clone(), e["StatusCode"].clone(), e["Where"].clone())
+    };
+    let e = |id: &str, status: i64, where_: &str| {
+        (Json::from(id), Json::from(status), Json::from(where_))
+    };
+
+    assert!(
+        answer("GetPropertyGroup", 0)["B"]["value"]["Err"]
+            .as_str()
+            .is_some_and(|t| t.contains("has been deprecated")),
+        "the deprecated name is a plain error: {}",
+        answer("GetPropertyGroup", 0)
+    );
+    assert_eq!(
+        error("RegisterPropertyGroup", 1, "B"),
+        e(
+            "app.property_group.register.app_error",
+            500,
+            "RegisterPropertyGroup"
+        ),
+        "an invalid name is the 500"
+    );
+    assert_eq!(
+        answer("RegisterPropertyGroup", 3)["A"]["ID"],
+        "<group>",
+        "a second registration answers the first"
+    );
+    assert_eq!(
+        error("GetPropertyGroup", 2, "B"),
+        e("app.property_group.get.app_error", 404, "GetPropertyGroup")
+    );
+    assert_eq!(
+        error("CreatePropertyField", 0, "B"),
+        e(
+            "app.property_field.invalid_input.app_error",
+            400,
+            "CreatePropertyField"
+        )
+    );
+    assert_eq!(
+        answer("CreatePropertyField", 1)["A"]["Name"],
+        "colour",
+        "trimmed"
+    );
+    assert_eq!(
+        [3, 4, 5, 6, 7, 8].map(|n| error("CreatePropertyField", n, "B")),
+        [
+            e(
+                "app.property_field.create.app_error",
+                500,
+                "CreatePropertyField"
+            ),
+            e(
+                "app.property_field.create.app_error",
+                500,
+                "CreatePropertyField"
+            ),
+            e(
+                "app.property_field.create.protected.app_error",
+                400,
+                "CreatePropertyField"
+            ),
+            e(
+                "app.property_field.version_mismatch.app_error",
+                400,
+                "CreatePropertyField"
+            ),
+            e(
+                "app.property.not_found.app_error",
+                404,
+                "CreatePropertyField"
+            ),
+            e(
+                "model.property_field.is_valid.app_error",
+                400,
+                "PropertyField.IsValid"
+            ),
+        ],
+        "a duplicate, an id, protected, a v2 field, a missing group, a blank name"
+    );
+    assert_eq!(
+        error("GetPropertyFields", 1, "B"),
+        e(
+            "app.property_field.not_found.app_error",
+            404,
+            "GetPropertyFields"
+        )
+    );
+    assert_eq!(
+        answer("CreatePropertyValue", 1)["A"]["Value"],
+        "\"\\u003cblue\\u003e\"",
+        "trimmed, and re-marshalled as json.Marshal writes it"
+    );
+    assert_eq!(
+        answer("CreatePropertyValue", 2)["A"]["Value"],
+        "[\"a\",\"b\"]"
+    );
+    assert_eq!(
+        error("CreatePropertyValue", 4, "B"),
+        e(
+            "app.property.not_found.app_error",
+            404,
+            "CreatePropertyValue"
+        ),
+        "a missing field is the template check's mismatch"
+    );
+    assert_eq!(
+        answer("UpdatePropertyValue", 1)["A"]["Value"],
+        "{\"k\":  [1, 2]}",
+        "an update hands back the bytes it was given"
+    );
+    assert_eq!(
+        answer("GetPropertyValue", 0)["A"]["Value"],
+        "\"<blue>\"",
+        "a read is Postgres's rendering"
+    );
+    assert_eq!(
+        answer("UpsertPropertyValueWithOptions", 0)["A"]["Value"],
+        "{\"a\": 2, \"b\": 1}",
+        "an upsert hands back the row as jsonb renders it"
+    );
+    assert_eq!(
+        [1, 2, 3].map(|n| error("UpsertPropertyValues", n, "B").0),
+        [
+            Json::from("app.property_value.upsert.invalid_field_id.app_error"),
+            Json::from("app.property_value.upsert.duplicate_field_id.app_error"),
+            Json::from("app.property_value.upsert.mixed_groups.app_error"),
+        ]
+    );
+    assert_eq!(
+        error("UpdatePropertyFields", 0, "B"),
+        e(
+            "app.property_field.invalid_input.app_error",
+            400,
+            "UpdatePropertyFields"
+        )
+    );
+    assert_eq!(answer("UpdatePropertyField", 0)["A"]["Name"], "hue");
+    assert_eq!(
+        error("UpdatePropertyField", 2, "B"),
+        e(
+            "app.property.not_found.app_error",
+            404,
+            "UpdatePropertyFields"
+        ),
+        "an empty group finds the field and fails the group lookup"
+    );
+    assert_eq!(
+        error("DeletePropertyValue", 1, "A"),
+        e("app.property.not_found.app_error", 404, "GetPropertyValue"),
+        "the delete reads first, under the read's name"
+    );
+    assert_eq!(
+        error("DeletePropertyField", 2, "A"),
+        e(
+            "app.property.not_found.app_error",
+            404,
+            "DeletePropertyField"
+        )
+    );
+    assert!(
+        answer("DeletePropertyField", 1)["A"].is_null(),
+        "a deleted field deletes again"
+    );
+    assert_eq!(
+        error("UpdatePropertyValue", 2, "B"),
+        e(
+            "app.property_value.update.app_error",
+            500,
+            "UpdatePropertyValue"
+        ),
+        "a missing value is the store's row count"
+    );
+    assert_eq!(
+        answer("UpdatePropertyValues", 1)["A"][1]["Value"],
+        "[\"c\"]",
+        "each value handed back sanitised"
+    );
+    assert!(
+        frames
+            .iter()
+            .any(|f| f["data"]["field_id"] == "<size>"
+                && f["data"]["values"] == serde_json::json!([])),
+        "the type change cleared the field's values: {frames:?}"
     );
 }

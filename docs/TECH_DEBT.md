@@ -10233,3 +10233,20 @@ REST handlers drop their records and `mm_app::plugin_api::server` logs a plugin'
 `Audits` table rows (`c.LogAudit`) are a different thing and are written. **What is owed:** the
 file target (an mlog JSON line per record, `plugin_id` added for a plugin's) behind those
 settings, and a test with `FileEnabled` on comparing the two servers' files.
+
+---
+
+## D-1331 · The plugin API's property methods answer not-implemented on the two hooked groups
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (UNIT P1b, `plugin_api/properties.rs`)
+
+Go runs a hook chain on the `access_control` group (licence, access control, attribute
+validation, value audit, field limit) and the `session_attributes` group (the schema guard). The
+REST paths port it for a session caller, but its plugin-caller arms do not exist here:
+`PropertyCaller::is_plugin` is always false, so `isCallerPlugin`, the owner identity a plugin
+caller gets and the `*WithOptions` `ActingAsScope` match are missing, as is `SessionAttributesHook`.
+So every plugin property call whose hooks would fire (Go gates on the `groupID` argument for
+writes, on the field's or value's own group for creates and upserts, and on the rows returned for
+reads) answers `API <Name> called but not implemented.` **What is owed:** the plugin-caller arms
+of the access-control hook (`pluginChecker` over the plugin environment), `SessionAttributesHook`,
+and a both-hosts script against the `access_control` group, licensed and unlicensed.

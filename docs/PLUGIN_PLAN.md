@@ -749,6 +749,16 @@ goes to no audit log ([D-1330]). The tranche's script runs under both hosts from
 planted rows and compares every answer, hook and frame. `RequestTrialLicense` past its refusals
 (the licence server) answers not-implemented.
 
+**Then 232 of 258:** the property twenty-eight (`plugin_api/properties.rs`): `RegisterPropertyGroup`,
+`GetPropertyGroup`, the ten field methods (`CreatePropertyField` … `DeletePropertyField`,
+`UpdatePropertyFields` for one field), the eleven value methods, and the five `*WithOptions`
+variants. Every one answers a Go `error`. A group the property hooks manage (`access_control`,
+`session_attributes`) answers not-implemented, since the hooks' plugin-caller arms are not ported
+([D-1331]); every other group — the PSAv1 groups plugins register, `boards`, `post_attributes` —
+is answered whole, `json.RawMessage` bytes included. `UpdatePropertyFields` with more than one
+field answers not-implemented. The server tour now also calls `LogAuditRecWithLevel` and lists
+two plugins, active then inactive.
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,
