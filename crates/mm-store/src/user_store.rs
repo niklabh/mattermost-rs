@@ -11,6 +11,13 @@ use crate::error::StoreError;
 
 /// The subset of Go's `store.UserStore` (store/store.go:448-550) that is ported.
 pub trait UserStore {
+    /// Port of `SqlUserStore.RefreshPostStatsForUsers` (user_store.go:2438): `poststats` under an
+    /// `analyticsContext` of `timeout_seconds`.
+    fn refresh_post_stats_for_users(
+        &self,
+        timeout_seconds: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlUserStore.Get` (user_store.go:609).
     /// Port of `SqlUserStore.GetUnreadCount` (user_store.go:1583) — the mobile badge: the sum of
     /// `MentionCount` (or `MentionCountRoot` under collapsed threads) over the user's memberships
@@ -1152,6 +1159,17 @@ pub(crate) fn user_from_row(row: UserRow) -> Result<User, StoreError> {
 }
 
 impl UserStore for SqlUserStore {
+    #[tracing::instrument(skip(self))]
+    async fn refresh_post_stats_for_users(&self, timeout_seconds: i64) -> Result<(), StoreError> {
+        crate::post_store::refresh_materialized_view(
+            &self.pool,
+            "poststats",
+            timeout_seconds,
+            "users_refresh_post_stats_exec",
+        )
+        .await
+    }
+
     #[tracing::instrument(skip(self), fields(user_id = %user_id))]
     async fn get_unread_count(
         &self,

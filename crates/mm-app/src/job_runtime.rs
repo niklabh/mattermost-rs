@@ -1370,6 +1370,12 @@ pub fn export_users_to_csv_worker() -> BatchWorker {
 pub fn registered_workers() -> Workers {
     let mut workers = Workers::new();
     workers.add(cleanup_desktop_tokens_worker());
+    workers.add(crate::job_workers::active_users_worker());
+    workers.add(crate::job_workers::mobile_session_metadata_worker());
+    workers.add(crate::job_workers::refresh_materialized_views_worker());
+    workers.add(crate::job_workers::expiry_notify_worker());
+    workers.add(crate::job_workers::cleanup_expired_access_tokens_worker());
+    workers.add(crate::job_workers::notify_expiring_access_tokens_worker());
     workers.add_batch(delete_empty_drafts_migration_worker());
     workers.add_batch(delete_orphan_drafts_migration_worker());
     workers.add_batch(export_users_to_csv_worker());
@@ -1389,7 +1395,7 @@ mod tests {
             workers.get("CleanupDesktopTokens").is_none(),
             "the worker's log name must not be a registry key"
         );
-        assert_eq!(workers.len(), 5);
+        assert_eq!(workers.len(), 11);
         for job_type in [
             job::JOB_TYPE_DELETE_EMPTY_DRAFTS_MIGRATION,
             job::JOB_TYPE_DELETE_ORPHAN_DRAFTS_MIGRATION,

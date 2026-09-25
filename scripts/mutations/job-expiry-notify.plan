@@ -1,0 +1,11 @@
+# job-expiry-notify.plan — D-804 expiry_notify (NotifySessionsExpired, GetSessionsExpired, UpdateExpiredNotify), 2026-09-25.
+# The Rust half runs on a second mm-api (:8113 + offset), which mutate.sh's rebuild of mm-api covers.
+no-push-gate-inverted	crates/mm-app/src/expiry_notify.rs	if !self.can_send_push_notifications().await {	if self.can_send_push_notifications().await {	api	expiry_notify_pushes_like_go
+notified-included	crates/mm-app/src/expiry_notify.rs	.get_sessions_expired(ONE_HOUR_MILLIS, true, true)	.get_sessions_expired(ONE_HOUR_MILLIS, true, false)	api	expiry_notify_pushes_like_go
+web-included	crates/mm-app/src/expiry_notify.rs	.get_sessions_expired(ONE_HOUR_MILLIS, true, true)	.get_sessions_expired(ONE_HOUR_MILLIS, false, true)	api	expiry_notify_pushes_like_go
+window-unbounded	crates/mm-store/src/session_store.rs	               AND expiresat > $2\n               AND (NOT $3 OR deviceid <> '')	               AND (expiresat > $2 OR NOT (expiresat > $2))\n               AND (NOT $3 OR deviceid <> '')	api	expiry_notify_pushes_like_go
+flag-not-set	crates/mm-app/src/expiry_notify.rs	.update_expired_notify(&session.id, true)	.update_expired_notify(&session.id, false)	api	expiry_notify_pushes_like_go
+hours-dropped	crates/mm-app/src/expiry_notify.rs	("hoursCount".to_owned(), serde_json::Value::from(hours)),	("hoursCount".to_owned(), serde_json::Value::from(0)),	api	expiry_notify_pushes_like_go
+# no-op controls
+control-annotate-server-id	crates/mm-app/src/expiry_notify.rs	let server_id = self.server_id().await;	let server_id: String = self.server_id().await;	api	expiry_notify_pushes_like_go
+control-reorder-where	crates/mm-store/src/session_store.rs	               AND expiresat < $1\n               AND expiresat > $2\n	               AND expiresat > $2\n               AND expiresat < $1\n	api	expiry_notify_pushes_like_go

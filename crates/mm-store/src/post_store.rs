@@ -69,6 +69,13 @@ use crate::error::StoreError;
 
 /// Port of `store.PostStore`, narrowed to what `GET /posts/{post_id}` reaches.
 pub trait PostStore {
+    /// Port of `SqlPostStore.RefreshPostStats` (post_store.go:3358): `posts_by_team_day`, then
+    /// `bot_posts_by_team_day`, each under its own `analyticsContext` of `timeout_seconds`.
+    fn refresh_post_stats(
+        &self,
+        timeout_seconds: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlPostPersistentNotificationStore.GetSingle`
     /// (post_persistent_notification_store.go:25), narrowed to the one question its only reachable
     /// caller asks: **does an undeleted persistent-notification row exist for this post**.
@@ -1727,6 +1734,24 @@ pub(crate) fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
 }
 
 impl PostStore for SqlPostStore {
+    #[tracing::instrument(skip(self))]
+    async fn refresh_post_stats(&self, timeout_seconds: i64) -> Result<(), StoreError> {
+        refresh_materialized_view(
+            &self.pool,
+            "posts_by_team_day",
+            timeout_seconds,
+            "error refreshing materialized view posts_by_team_day",
+        )
+        .await?;
+        refresh_materialized_view(
+            &self.pool,
+            "bot_posts_by_team_day",
+            timeout_seconds,
+            "error refreshing materialized view bot_posts_by_team_day",
+        )
+        .await
+    }
+
     #[tracing::instrument(skip(self), fields(post_id = %post_id))]
     async fn has_persistent_notification(&self, post_id: &str) -> Result<bool, StoreError> {
         // `DeleteAt = 0` bare, not coalesced — the column is NOT NULL here, unlike `Reactions`.
@@ -5351,4 +5376,37 @@ mod search_term_tests {
         assert_eq!(like_pattern("a_b"), "%a\\_b%");
         assert_eq!(like_pattern("a\\b"), "%ab%");
     }
+}
+
+/// `REFRESH MATERIALIZED VIEW <view>` under Go's `analyticsContext`
+/// (`context.WithTimeout(…, AnalyticsQueryTimeout seconds)`, store.go:489).
+///
+/// The deadline is `SET LOCAL statement_timeout` inside a transaction of its own, so it is the
+/// server that stops the refresh, as the cancelled context makes `lib/pq` do; a Rust-side
+/// timeout would stop waiting and leave the refresh running. Not `CONCURRENTLY`, as in Go ("takes
+/// less resources and completes faster at the expense of locking the mat view"). `view` is always
+/// one of four literals, never input.
+pub(crate) async fn refresh_materialized_view(
+    pool: &sqlx::PgPool,
+    view: &'static str,
+    timeout_seconds: i64,
+    context: &'static str,
+) -> Result<(), StoreError> {
+    let db = |source| StoreError::Db {
+        context: context.to_owned(),
+        source,
+    };
+    let mut tx = pool.begin().await.map_err(db)?;
+    // A zero or negative timeout is an already-expired context in Go; `statement_timeout = 0`
+    // would mean "none" here, so the smallest positive deadline stands in for it.
+    let millis = timeout_seconds.saturating_mul(1000).max(1);
+    sqlx::query(&format!("SET LOCAL statement_timeout = {millis}"))
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    sqlx::query(&format!("REFRESH MATERIALIZED VIEW {view}"))
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    tx.commit().await.map_err(db)
 }

@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT t.id                          AS \"id!\",\n                   ''                            AS \"token!\",\n                   COALESCE(t.userid, '')        AS \"userid!\",\n                   COALESCE(t.description, '')   AS \"description!\",\n                   COALESCE(t.isactive, false)   AS \"isactive!\",\n                   t.expiresat                   AS \"expiresat!\",\n                   t.lastnotifiedat\n              FROM useraccesstokens t\n             INNER JOIN users ON users.id = t.userid\n              LEFT JOIN bots ON bots.userid = t.userid\n             WHERE t.isactive = true\n               AND t.expiresat > $1\n               AND users.deleteat = 0\n               AND bots.userid IS NULL\n               AND EXISTS (\n                     SELECT 1 FROM unnest($2::bigint[]) AS bucket(millis)\n                      WHERE t.expiresat <= $1 + bucket.millis\n                        AND (t.lastnotifiedat IS NULL\n                             OR t.lastnotifiedat < t.expiresat - bucket.millis))\n             ORDER BY t.expiresat ASC\n             LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "token!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "description!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "isactive!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "expiresat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "lastnotifiedat",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8Array",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      false,
+      true
+    ]
+  },
+  "hash": "c3a3f9f2b94b2f9bf6c1cb831fe2f8b29962cc074a6e9dbf8aa56d0f3ec612a3"
+}

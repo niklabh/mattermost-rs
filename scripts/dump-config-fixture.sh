@@ -120,6 +120,7 @@ MODELLED = {
         # the fixture has to record that a real document *has* the key. The value is "" here and
         # is never read; it is projected so the presence is measured rather than asserted.
         "SiteURL",
+        "RefreshPostStatsRunTime",
     ],
     "ComplianceSettings": ["Enable"],
     # `EnableSharedChannels` here is the legacy key `ConnectedWorkspacesSettings` falls back to
@@ -153,7 +154,8 @@ MODELLED = {
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
     ],
-    "SqlSettings": ["DisableDatabaseSearch"],
+    "SqlSettings": ["DisableDatabaseSearch", "AnalyticsQueryTimeout"],
+    "MetricsSettings": ["Enable", "EnableClientMetrics"],
     "ElasticsearchSettings": ["EnableSearching", "EnableIndexing"],
     "AccessControlSettings": ["EnableAttributeBasedAccessControl", "EnableChannelPolicyIndicators"],
     "AIRecapSettings": ["Enable"],

@@ -9160,24 +9160,30 @@ they cannot drift silently.
    inputs agree, including the two that surprise — `"3:00"` is accepted by both, `"0300"` by
    neither.
 
-**What is owed:** a Go-faithful `"15:04"` parse (two digits for the minute, one or two for the
-hour) at the point a `DailyScheduler` is registered, and a decision on (1) — most likely to keep
+**(2) is paid (2026-09-25):** `mm_app::job_workers::parse_go_hhmm`, asserted against the whole
+corpus (now 24 inputs) with the `refresh_materialized_views` scheduler that registers it.
+
+**What is owed:** a decision on (1) — most likely to keep
 `None` and say so, since a job that skips a day is better than one that runs at an hour nobody
 configured.
 
-## D-804 · Twenty-four of the twenty-nine registered job types have no worker here
+## D-804 · Eighteen of the twenty-nine registered job types have no worker here
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (app/server.go:1585) · **Owner** the jobs subsystem
 
 `mm_app::job::REGISTERED_JOB_TYPES` lists the twenty-nine types the Go server registers a worker
 for, and `App::create_job` validates against it — so this server can create a job of any of them.
-`mm_app::job_runtime::registered_workers` runs `cleanup_desktop_tokens` and, since 2026-09-25, the
-batch shape (`BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker`) with its four users —
+`mm_app::job_runtime::registered_workers` runs eleven. `cleanup_desktop_tokens`; since 2026-09-25
+the batch shape (`BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker`) with its four users —
 `delete_empty_drafts_migration`, `delete_orphan_drafts_migration`,
-`delete_dms_preferences_migration`, `export_users_to_csv` (`parity::batch_jobs`). Every other type
-is created here and run by the Go server off the shared table. `CancellationWatcher` and
-`UpdateInProgressJobData` are ported and tested (`db_job_worker`) but have no user yet: their Go
-users are the `migrations` and `extract_content` workers.
+`delete_dms_preferences_migration`, `export_users_to_csv` (`parity::batch_jobs`); and six
+`SimpleWorker`s — `active_users`, `mobile_session_metadata`, `refresh_materialized_views`,
+`expiry_notify`, `cleanup_expired_access_tokens`, `notify_expiring_access_tokens`
+(`mm_app::job_workers`, `parity::job_workers_simple`). Every other type is created here and run by
+the Go server off the shared table. `last_accessible_post` and `last_accessible_file` are
+[D-1300]. `CancellationWatcher` and `UpdateInProgressJobData` are ported and tested
+(`db_job_worker`) but have no user yet: their Go users are the `migrations` and `extract_content`
+workers.
 
 **What is owed:** the remaining worker bodies one at a time, cheapest first
 (`cleanup_expired_access_tokens`, `expirynotify`, `last_accessible_post`), each with the store
@@ -10233,3 +10239,17 @@ REST handlers drop their records and `mm_app::plugin_api::server` logs a plugin'
 `Audits` table rows (`c.LogAudit`) are a different thing and are written. **What is owed:** the
 file target (an mlog JSON line per record, `plugin_id` added for a plugin's) behind those
 settings, and a test with `FileEnabled` on comparing the two servers' files.
+
+---
+
+`mm_app::job_runtime::registered_workers` runs eleven. `cleanup_desktop_tokens`; since 2026-09-25
+the batch shape (`BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker`) with its four users —
+`delete_empty_drafts_migration`, `delete_orphan_drafts_migration`,
+`delete_dms_preferences_migration`, `export_users_to_csv` (`parity::batch_jobs`); and six
+`SimpleWorker`s — `active_users`, `mobile_session_metadata`, `refresh_materialized_views`,
+`expiry_notify`, `cleanup_expired_access_tokens`, `notify_expiring_access_tokens`
+(`mm_app::job_workers`, `parity::job_workers_simple`). Every other type is created here and run by
+the Go server off the shared table. `last_accessible_post` and `last_accessible_file` are
+[D-1300]. `CancellationWatcher` and `UpdateInProgressJobData` are ported and tested
+(`db_job_worker`) but have no user yet: their Go users are the `migrations` and `extract_content`
+workers.

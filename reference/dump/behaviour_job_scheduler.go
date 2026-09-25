@@ -205,7 +205,10 @@ func jobSchedulerDSTCases() ([]map[string]any, error) {
 // `time.Parse("15:04", s)` — the daily scheduler's whole input validation. A parse failure is the
 // `nil` start time that switches the scheduler off (base_schedulers.go:70).
 func jobSchedulerParseCases() []map[string]any {
-	inputs := []string{"03:00", "00:00", "23:59", "3:00", "03:0", "24:00", "23:60", "", "0300", "03:00:00", "abc"}
+	inputs := []string{"03:00", "00:00", "23:59", "3:00", "03:0", "24:00", "23:60", "", "0300", "03:00:00", "abc",
+		// Added with the refresh_materialized_views scheduler (D-804): the digit rules of stdHour and
+		// stdZeroMinute at their edges.
+		" 3:00", "03:00 ", "3:5", "003:00", "-1:00", "+3:00", "3:00Z", "1:2", "09:09", "9:59", ":00", "3:", "٣:00"}
 	out := make([]map[string]any, 0, len(inputs))
 	for _, in := range inputs {
 		parsed, err := time.Parse("15:04", in)
