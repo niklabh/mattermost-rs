@@ -1127,9 +1127,18 @@ async fn a_username_change_redraws_the_generated_avatar_like_go() {
     let admin = go_minted_token(&client).await;
     let (team_id, _) = a_team_and_channel_the_user_is_in(&client, &admin).await;
 
+    let Some(pool) = common::fixture_pool().await else {
+        return;
+    };
+    // A fresh tag per run: a renamed user is outside the `mmrsplain%` purge, so a fixed tag's
+    // user from an earlier run still holds the name and the e-mail. Each is renamed back before it
+    // is deleted, so the next purge does take it.
+    let nonce = mm_model::utils::get_millis() % 1_000_000;
     let mut answers = Vec::new();
-    for (base, tag) in [(GO, "imgrengo"), (RUST, "imgrenrs")] {
-        let user = create_plain_user(&client, &admin, &team_id, tag).await;
+    for (base, side) in [(GO, "go"), (RUST, "rs")] {
+        let tag = format!("ren{side}{nonce:06}");
+        let user = create_plain_user(&client, &admin, &team_id, &tag).await;
+        // A different first letter, so a redraw that did not happen is visible in the file.
         let renamed = format!("q{tag}");
         let response = client
             .put(format!("{base}/api/v4/users/{}/patch", user.id))
@@ -1166,6 +1175,12 @@ async fn a_username_change_redraws_the_generated_avatar_like_go() {
             written == go_default,
             body["last_picture_update"].as_i64().is_some_and(|v| v < 0),
         ));
+        sqlx::query("UPDATE users SET username = $2 WHERE id = $1")
+            .bind(&user.id)
+            .bind(common::plain_username(&tag))
+            .execute(&pool)
+            .await
+            .expect("the name is given back for the purge");
         delete_plain_user(&client, &admin, &user.id).await;
     }
     let rust = answers.pop().expect("two answers");
