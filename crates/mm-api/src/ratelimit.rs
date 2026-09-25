@@ -16,7 +16,7 @@
 //!    everything else: static files, the websocket upgrade, the api4 catch-all. [`global`].
 //! 3. **Per user** — `web.Handler.ServeHTTP` (web/handlers.go:288) rate-limits by the session's
 //!    user id on the global limiter's store when `VaryByUser` is on, for every request that
-//!    carries a token, after the session lookup and before the CSRF check. [`per_user`], and
+//!    carries a token, after the session lookup and before the CSRF check. `serve_http::preamble`, and
 //!    `web_static::fallback` for the handlers outside the API router.
 //!
 //! All three exist only when `RateLimitSettings.Enable` was true **when the process started**:
@@ -41,7 +41,7 @@
 //!
 //! - every request is counted here: the global and route limiters at the front ([`global`]), the
 //!   per-user step on every request Go would hand a `web.Handler` — the served routes
-//!   ([`per_user`]) and, in `web_static::fallback`, the web client's page and the Go web routes
+//!   (`serve_http::preamble`) and, in `web_static::fallback`, the web client's page and the Go web routes
 //!   it forwards;
 //! - the forward leg tells Go who the client was, through the header Go trusts
 //!   (`client_ip::forwarded_address_header`), so Go keys each forwarded request as this server
@@ -61,7 +61,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use axum::body::Body;
-use axum::extract::{ConnectInfo, RawPathParams, Request, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
@@ -576,7 +576,7 @@ fn is_go_refusal(response: &Response) -> bool {
 
 /// `Server.Start`'s `RateLimitHandler` around the whole TCP router (app/server.go:1056), and then
 /// the matching `RateLimitedHandler` (api4/handlers.go:222) — the order Go runs them in, since
-/// the route's limiter sits **outside** `ServeHTTP` and so outside [`per_user`]. Outermost, so it
+/// the route's limiter sits **outside** `ServeHTTP` and so outside `serve_http::preamble`. Outermost, so it
 /// sees every request — served, forwarded or the web client's — before anything else runs.
 ///
 /// # This server's limiters decide, for forwarded requests too
@@ -716,38 +716,6 @@ pub(crate) fn per_user_static_refusal(verdict: &Verdict, headers: HeaderMap) -> 
     response
         .extensions_mut()
         .insert(crate::web_static::WebOwnHeaders);
-    response
-}
-
-/// `UserIdRateLimit` in `web.Handler.ServeHTTP` (web/handlers.go:288), as a `route_layer` over
-/// every route this server serves — each is a `web.Handler` in Go — and not over the fallbacks:
-/// the web client's pages and the Go web routes it forwards are counted by
-/// `web_static::fallback`, and nothing else a fallback reaches is a `web.Handler`.
-///
-/// **Not for a path segment gorilla would not have matched.** Such a request is forwarded by
-/// `mux_segments_or_forward` and answered by Go's api4 catch-all, a bare `HandlerFunc` with no
-/// per-user step; this layer runs before that one, so it asks the same question itself.
-pub(crate) async fn per_user(
-    State(state): State<AppState>,
-    params: RawPathParams,
-    request: Request,
-    next: Next,
-) -> Response {
-    if params
-        .iter()
-        .any(|(name, value)| !crate::segment_matches_go_mux_for(name, value))
-    {
-        return next.run(request).await;
-    }
-    let (parts, body) = request.into_parts();
-    let Some(verdict) = per_user_verdict(&state, &parts).await else {
-        return next.run(Request::from_parts(parts, body)).await;
-    };
-    if verdict.limited {
-        return per_user_refusal(&verdict);
-    }
-    let mut response = next.run(Request::from_parts(parts, body)).await;
-    append_verdict(&mut response, &verdict);
     response
 }
 

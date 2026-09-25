@@ -90,6 +90,8 @@ pub mod notify_admin;
 pub mod oauth;
 pub mod onboarding;
 pub mod opengraph;
+/// TOTP and the enrolment QR code — port of `platform/shared/mfa` and `dgoogauth`.
+pub mod otp;
 pub mod password;
 pub mod peer_cache;
 pub mod peer_config;

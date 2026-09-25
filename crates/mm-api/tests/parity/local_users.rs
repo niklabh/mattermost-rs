@@ -811,8 +811,8 @@ async fn the_local_auth_token_and_conversion_routes_match_over_the_socket() {
         common::assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, action);
     }
 
-    // The MFA deactivation: the `GetUser` is ours, the two `UPDATE`s and the e-mail are Go's —
-    // and Go's *local* handler's, reached over the socket, not a port 401.
+    // The MFA deactivation, served over the socket since 2026-09-25 (D-500): the local session
+    // passes the permission and enforcement checks, then the two `UPDATE`s and the e-mail.
     let ((go_status, go_body), (rs_status, rs_body), served_here) = each_on_its_own(
         "PUT",
         &format!("/api/v4/users/{go_id}/mfa"),
@@ -820,7 +820,7 @@ async fn the_local_auth_token_and_conversion_routes_match_over_the_socket() {
         r#"{"activate":false}"#,
     )
     .await;
-    assert!(!served_here, "the MFA deactivation is forwarded");
+    assert!(served_here, "the MFA deactivation is served");
     assert_eq!(go_status, 200, "{}", String::from_utf8_lossy(&go_body));
     assert_eq!(rs_status, 200, "{}", String::from_utf8_lossy(&rs_body));
     assert_eq!(go_body, rs_body);

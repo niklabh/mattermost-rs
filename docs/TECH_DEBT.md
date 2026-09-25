@@ -8275,7 +8275,10 @@ licensed by construction and a licensed server is forwarded whole before anythin
 
 ## D-500 · The MFA pair serves only refusals; anything that touches a secret forwards
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (authentication data)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-13 (authentication data)
+**Closed** 2026-09-25 — both routes are served whole: `mm_app::otp` (TOTP, base32, the `otpauth://` link) and
+the new `goqr` crate (rsc/qr and its PNG) are checked against Go's own output in `behaviour_mfa.json`, with the
+random secret fixed by recording Go's; `parity::mfa_enrolment` enrols on each server and logs in on the other.
 
 `PUT /users/{user_id}/mfa` and `POST /users/{user_id}/mfa/generate` are registered and answer
 every refusal: the id 400, the OAuth-app 403, the `edit_other_users` 403, the `activate` and
@@ -10095,11 +10098,18 @@ here on the client's key and then in Go's route limiter on one key shared by eve
 MFA logins, 2/s for registrations, across the deployment — and Go's 429 is passed through.
 **What is owed:** port those branches (MFA login first), so no request of these three routes reaches Go.
 
+**2026-09-25:** the MFA branch is served (D-500), so an MFA login no longer reaches Go. Still forwarded:
+the guest magic link (public code, not yet ported), LDAP (the LDAP client is private Enterprise code, so
+that forward is permanent), the cloud branch (needs a cloud licence and the CWS client), and the DCR
+registration (public code, not yet ported).
+
 ---
 
 ## D-1211 · An API request over `MaximumURLLength` is answered, where Go's `basicSecurityChecks` refuses it
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+**Closed** 2026-09-25 — `mm_api::serve_http` refuses it on every served route of both routers, after
+gorilla's charset match and before the per-user limit, with Go's bare 414; `parity::url_length`.
 
 `ServeHTTP` refuses a request URI longer than `ServiceSettings.MaximumURLLength` (default 2048) with
 the 414 `basic_security_check.url.too_long_error` before anything else it does (web/handlers.go:143),
@@ -10181,3 +10191,19 @@ the i18n files (go-i18n reads a map), the oEmbed `Ordered` visitor (already Go's
 invalid-UTF-8 rewrite the helpers lack), the dynamic-list response (Go uses its partial decode),
 and documents this server or Go marshalled itself (licence, token extra, Systems rows, config row,
 log lines, link-metadata rows).
+
+---
+
+## D-1260 · Under `EnforceMultifactorAuthentication`, Go's cached user is never purged after a write here
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-500)
+
+`mm_api::go_cache` purges Go's cached user through `POST /users/{id}/reset_failed_attempts` as the
+minted administrator (`MM_API_GO_CACHE_USER`). With MFA enforced, that administrator gets
+`MFARequired`'s 403 unless they have enrolled (measured on the licensed MFA pair's log), so every
+purge fails and Go keeps the user it read before the write: an MFA activation or deactivation made
+here is invisible to logins through Go until the entry ages out. `parity::mfa_enrolment` is ordered
+around it. **What is owed:** a purge that enforcement does not block — enrol the cache
+administrator (a TOTP secret the process holds), or a route `MFARequired` exempts — and a parity row
+that writes here after Go has read.
+

@@ -61,7 +61,10 @@
 #     the whole string. `)x(Windows Phone 8.0; Trident/5.0` is decided by `agentPlatform` alone
 #     and moves from Windows Phone to a bare Windows without the fix-up.
 #
-# The **one** genuine survivor is `mfa-probe-blank-password-guard-dropped`, and it stays one.
+# 2026-09-25: the MFA branch is served (D-500), the probe and `db_login_mfa_probe.rs` are gone,
+# and so are the two `mfa-probe-*` lines; `scripts/mutations/mfa.plan` covers the branch now.
+#
+# The **one** genuine survivor was `mfa-probe-blank-password-guard-dropped`, and it stayed one.
 # Dropping `!password.is_empty() &&` only changes an answer on a server with MFA enabled, where a
 # body with no password would be forwarded instead of answering `blank_pwd`. This stack has MFA
 # off for every suite in the binary and turning it on is a server-wide configuration change. The
@@ -76,14 +79,12 @@ mask-status-is-400-not-401	crates/mm-api/src/login.rs	ApiError::from(AppError::b
 magic-link-forward-inverted	crates/mm-api/src/login.rs	    if !get("magic_link_token").is_empty() {	    if get("magic_link_token").is_empty() {	api	parity::login
 ldap-forward-inverted	crates/mm-api/src/login.rs	    if state.app.config().ldap_enable {	    if !state.app.config().ldap_enable {	api	parity::login
 licensed-forward-fires-when-unlicensed	crates/mm-api/src/login.rs	        Ok(mm_app::license::LicenseState::Licensed) => {	        Ok(mm_app::license::LicenseState::Unlicensed) => {	api	parity::login
-mfa-probe-blank-password-guard-dropped	crates/mm-api/src/login.rs	    if !password.is_empty() && state.app.login_needs_mfa(id, login_id).await {	    if state.app.login_needs_mfa(id, login_id).await {	api	parity::login
 cookie-gate-accepts-any-requested-with	crates/mm-api/src/login.rs	        == Some(HEADER_REQUESTED_WITH_XML)\n    {	        .is_some()\n    {	api	parity::login
 cookie-user-id-is-http-only	crates/mm-api/src/login.rs	            SESSION_COOKIE_USER,\n            &session.user_id,\n            &subpath,\n            &domain,\n            max_age_seconds,\n            expires_at,\n            false,	            SESSION_COOKIE_USER,\n            &session.user_id,\n            &subpath,\n            &domain,\n            max_age_seconds,\n            expires_at,\n            true,	unit	login::tests
 cookie-csrf-carries-the-session-token	crates/mm-api/src/login.rs	            SESSION_COOKIE_CSRF,\n            session.get_csrf(),	            SESSION_COOKIE_CSRF,\n            &session.token,	api	parity::login
 cookies-use-the-mobile-session-length	crates/mm-api/src/login.rs	    let hours = state.app.config().session_length_web_in_hours;\n    let max_age_seconds = hours * 60 * 60;	    let hours = state.app.config().session_length_mobile_in_hours;\n    let max_age_seconds = hours * 60 * 60;	unit	login::tests
 body-loses-its-trailing-newline	crates/mm-api/src/login.rs	    body.push(b'\\n');\n\n    let mut response = (	    body.truncate(body.len());\n\n    let mut response = (	api	parity::login
 login-type-gate-needs-only-one-flag	crates/mm-api/src/login.rs	    config.enable_guest_magic_link && config.guest_accounts_enable\n}	    config.enable_guest_magic_link || config.guest_accounts_enable\n}	unit	login::tests
-mfa-probe-ignores-mfa-active	crates/mm-app/src/login.rs	            self.get_user_for_login(id, login_id).await,\n            Ok(user) if user.mfa_active	            self.get_user_for_login(id, login_id).await,\n            Ok(_user)	app	login_needs_mfa
 preflight-bot-checked-before-deactivation	crates/mm-app/src/login.rs	        check_user_not_disabled(user)?;\n        check_user_not_bot(user)?;	        check_user_not_bot(user)?;\n        check_user_not_disabled(user)?;	unit	login::tests
 preflight-attempts-checked-before-the-bot	crates/mm-app/src/login.rs	        check_user_not_bot(user)?;\n        check_user_login_attempts(user, self.config().maximum_login_attempts)	        check_user_login_attempts(user, self.config().maximum_login_attempts)?;\n        check_user_not_bot(user)	unit	login::tests
 lockout-predicate-is-strictly-greater	crates/mm-app/src/login.rs	    if user.failed_attempts >= max_attempts {	    if user.failed_attempts > max_attempts {	unit	login::tests
