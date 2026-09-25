@@ -294,13 +294,13 @@ fn team_member_with_error_to_wire(
 
 impl AppPluginApi {
     /// An `*AppError` in an `error` return: translated, then crossing whole.
-    fn app_error_as_error(&self, err: Box<AppError>) -> Option<Interface> {
+    pub(super) fn app_error_as_error(&self, err: Box<AppError>) -> Option<Interface> {
         self.wire(err)
             .and_then(|w| encodable_error(Some(&PluginError::App(w))))
     }
 
     /// A plain Go `error` in an `error` return: its text in an `ErrorString`.
-    fn message_as_error(text: String) -> Option<Interface> {
+    pub(super) fn message_as_error(text: String) -> Option<Interface> {
         encodable_error(Some(&PluginError::Message(text)))
     }
 

@@ -220,6 +220,8 @@ mod channels;
 mod auth;
 #[path = "recorder/files.rs"]
 mod files;
+#[path = "recorder/properties.rs"]
+mod properties;
 #[path = "recorder/server.rs"]
 mod server;
 
@@ -481,6 +483,13 @@ impl Hooks for Recorder {
                 None => vec![json!({ "error": "no API client" })],
             };
             self.record(&json!({ "hook": "ServerScript", "calls": calls }));
+        }
+        if message == properties::PROPERTIES_SCRIPT {
+            let calls = match self.api.get() {
+                Some(api) => properties::run(api.client(), &properties::Inputs::from_env()).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "PropertiesScript", "calls": calls }));
         }
         if message == config::CONFIG_SCRIPT {
             let calls = match self.api.get() {

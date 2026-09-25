@@ -98,7 +98,7 @@ fn no_two_second_servers_share_a_port() {
     // `parity::plugin_startup` starts its own Go server at + 73, and `parity::plugin_hooks` at
     // + 74.
     // `parity::plugin_hooks`' support-packet tranche starts its Go server at + 87, and its
-    // plugin API tranches at + 88, + 89, + 90, + 92, + 94 and + 97, its slash-command tranche
+    // plugin API tranches at + 88, + 89, + 90, + 92, + 93, + 94, + 95 and + 97, its slash-command tranche
     // at + 91, and its client plugin-HTTP tranche at + 98. Its auth tranche's is at + 61: an
     // offset of 100 or more is the next stack's Go server (stack k's Go is 8065 + 100k), so a
     // tranche's Go offset stays below 100. `parity::ratelimit` starts its Go servers at + 75, + 48 and + 49 (+ 82 and + 83 are

@@ -749,6 +749,22 @@ goes to no audit log ([D-1330]). The tranche's script runs under both hosts from
 planted rows and compares every answer, hook and frame. `RequestTrialLicense` past its refusals
 (the licence server) answers not-implemented.
 
+**Then 232 of 258:** the property twenty-eight (`plugin_api/properties.rs`): `RegisterPropertyGroup`,
+`GetPropertyGroup`, the ten field methods (`CreatePropertyField` … `DeletePropertyField`,
+`UpdatePropertyFields` for one field), the eleven value methods, and the five `*WithOptions`
+variants. Every one answers a Go `error`. A group the property hooks manage (`access_control`,
+`session_attributes`) answers not-implemented, since the hooks' plugin-caller arms are not ported
+([D-1331]); every other group — the PSAv1 groups plugins register, `boards`, `post_attributes` —
+is answered whole, `json.RawMessage` bytes included. `UpdatePropertyFields` with more than one
+field answers not-implemented. The server tour now also calls `LogAuditRecWithLevel` and lists
+two plugins, active then inactive.
+
+**Then 240 of 258:** the eight access-control methods (`plugin_api/access_control.rs`), as Go's
+public build answers them: the resource type's format and owner, the action, the ids and the
+acting user in Go's order, then a nil engine's 501 — and for `EvaluateAccessControl` the raw
+store read `resolvePluginPolicyExistence` falls back on (`no_policy`, or 503 when a policy of the
+requested type exists). The engine itself is private (enterprise) code.
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

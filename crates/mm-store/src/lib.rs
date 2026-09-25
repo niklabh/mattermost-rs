@@ -98,7 +98,7 @@ pub use post_acknowledgement_store::{PostAcknowledgementStore, SqlPostAcknowledg
 pub use post_store::{PostStore, SqlPostStore};
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
 pub use product_notices_store::{ProductNoticesStore, SqlProductNoticesStore};
-pub use property_store::{PropertyStore, SqlPropertyStore};
+pub use property_store::{PropertyStore, RawPropertyValue, SqlPropertyStore};
 pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use read_receipt_store::{ReadReceiptStore, SqlReadReceiptStore};
 pub use remote_cluster_store::{RemoteClusterStore, SqlRemoteClusterStore};
