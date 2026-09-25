@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM propertyvalues\n             WHERE targettype = $1\n               AND targetid = $2\n               AND ($3 = '' OR groupid = $3)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "389be4111ef42d8d9500ef9ac5ff4bd78d1ab9c5a6aa31583caa25fd98be7864"
+}

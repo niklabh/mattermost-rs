@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO propertygroups (id, name, version, schemaversion)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (name) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9c2ea2fd1c4fdd0bcc54633c96540fc459881fbb6d5adede4201392e576ffd8"
+}
