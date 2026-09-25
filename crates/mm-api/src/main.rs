@@ -142,6 +142,8 @@ async fn main() -> anyhow::Result<()> {
     // set while Go runs them too (see `mm_app::plugins`). Started before the config poll, whose
     // reloads drive it from then on, as Go's config listeners do.
     app = app.with_plugin_host(mm_app::plugins::plugin_host_from_env());
+    // `NewChannels`' guard-cache load (app/channels.go:244), before the plugins start.
+    app.load_guard_cache().await;
     if app.plugin_host().hosted() {
         let config = app.config();
         tracing::info!(

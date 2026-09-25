@@ -83,6 +83,11 @@ const SCHEDULED_GO_OFFSET: u16 = 86;
 const SUPPORT_HOST_PORT: u16 = 8137;
 /// Its Go server — licensed too: the packet is refused without a licence.
 const SUPPORT_GO_OFFSET: u16 = 87;
+/// The Rust host of the notification tranche, `EmailNotificationWillBeSent` and
+/// `NotificationWillBePushed`.
+const NOTIFY_HOST_PORT: u16 = 8125;
+/// Its Go server.
+const NOTIFY_GO_OFFSET: u16 = 62;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
@@ -11152,4 +11157,570 @@ fn assert_auth_answers_are_gos(calls: &[Json], hooks: &[Json], frames: &[Json], 
             "the own user heard {event}: {events:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The notification tranche
+// ---------------------------------------------------------------------------------------------
+
+/// The device the notification tranche's reader carries; no other test uses it.
+const NOTIFY_DEVICE: &str = "android_rn:mmrs-hook-notify";
+
+/// Every entry past the first `from`, once the transcript has held at least `from + expected` and
+/// then stopped growing: the two notification hooks run on detached tasks on both hosts.
+async fn grown(path: &Path, from: usize, expected: usize, pairs: &[(String, String)]) -> Vec<Json> {
+    let mut last = usize::MAX;
+    let mut since = std::time::Instant::now();
+    for _ in 0..300 {
+        let now = transcript_of(path, pairs);
+        if now.len() != last {
+            last = now.len();
+            since = std::time::Instant::now();
+        } else if now.len() >= from + expected && since.elapsed() >= QUIET {
+            return now[from..].to_vec();
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!(
+        "{}: waited for {expected} hooks past {from}; saw {:?}",
+        path.display(),
+        names(&transcript_of(path, pairs)[from.min(last)..])
+    );
+}
+
+/// `POST /plugins/{id}/{verb}` on `base`.
+async fn toggle(client: &reqwest::Client, admin: &str, base: &str, verb: &str) {
+    let (status, body, _) = request_raw(
+        client,
+        base,
+        reqwest::Method::POST,
+        Some(admin),
+        &format!("/api/v4/plugins/{PLUGIN_ID}/{verb}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "{base}: {verb}: {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+/// Wait until `base` no longer reports the recorder running.
+async fn wait_until_stopped(client: &reqwest::Client, admin: &str, base: &str) {
+    for _ in 0..200 {
+        let (status, body, _) = request_raw(
+            client,
+            base,
+            reqwest::Method::GET,
+            Some(admin),
+            "/api/v4/plugins/statuses",
+            None,
+        )
+        .await;
+        if status == 200 {
+            let value: Json = serde_json::from_slice(&body).unwrap_or(Json::Null);
+            if !value.as_array().is_some_and(|all| {
+                all.iter()
+                    .any(|s| s["plugin_id"] == PLUGIN_ID && s["state"] == 2)
+            }) {
+                return;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    panic!("{base}: the hook recorder never stopped");
+}
+
+/// A websocket hook's connection id (`A`), which each server mints, as a token. The message's
+/// `remote_addr` is compared as it is: `utils.GetIPAddress`, so no port.
+fn without_connection(mut value: Json) -> Json {
+    if let Some(id) = value["args"].get_mut("A")
+        && id.as_str().is_some_and(|s| s.len() == 26)
+    {
+        *id = Json::String("<connection>".into());
+    }
+    value
+}
+
+/// A push's hook argument and request carry the reader's badge, which each post raises by one; the
+/// two servers post one after the other, so the badge is the one value that must differ.
+fn without_badge(mut value: Json) -> Json {
+    fn walk(value: &mut Json) {
+        match value {
+            Json::Object(map) => {
+                for (key, entry) in map.iter_mut() {
+                    if key == "Badge" || key == "badge" {
+                        *entry = Json::String("<badge>".into());
+                    } else {
+                        walk(entry);
+                    }
+                }
+            }
+            Json::Array(items) => items.iter_mut().for_each(walk),
+            _ => {}
+        }
+    }
+    walk(&mut value);
+    value
+}
+
+/// `EmailNotificationWillBeSent` and `NotificationWillBePushed`, from a mention's e-mail and push
+/// under each host: what each hook was handed, and what the mail sink and the push proxy then
+/// received — nothing after a refusal, the plugin's content after a rewrite (with Go's transport
+/// put back on the push). Then `/join`, `JoinChannel`'s `UserHasJoinedChannel` (channel.go:2764)
+/// with a nil actor, after `AddUserToChannel`'s `ChannelMemberWillBeAdded`, and the join post's
+/// two hooks. Last, `RegisterChannelGuard` and `UnregisterChannelGuard` through each host's plugin
+/// API, and the guard's effect while its plugin is off: the post is refused from each host's
+/// guard cache, which only the register reloaded.
+#[tokio::test]
+async fn the_notification_join_and_guard_hooks_fire_as_go_fires_them() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_notification_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn run_the_notification_tour(client: &reqwest::Client, admin: &str) {
+    let sink = common::smtp_sink::smtp_sink().expect("the SMTP sink binds this stack's port");
+    let proxy = common::push_proxy::push_proxy().expect("the push proxy binds this stack's port");
+    let is_push = |kind: &'static str| {
+        move |r: &common::push_proxy::PushRequest| {
+            let body = r.json();
+            body["device_id"]
+                .as_str()
+                .is_some_and(|d| d.ends_with("mmrs-hook-notify"))
+                && body["type"] == kind
+        }
+    };
+
+    let tag = "hooknotify";
+    let (team, _) = common::a_team_and_channel_the_user_is_in(client, admin).await;
+    let reader = common::create_plain_user(client, admin, &team, tag).await;
+    let email = format!("{}@mmrs.invalid", common::plain_username(tag));
+    let status = client
+        .put(format!("{GO}/api/v4/users/sessions/device"))
+        .bearer_auth(&reader.token)
+        .header("X-Requested-With", "XMLHttpRequest")
+        .json(&serde_json::json!({ "device_id": NOTIFY_DEVICE }))
+        .send()
+        .await
+        .expect("Go answers")
+        .status();
+    assert_eq!(status, 200, "attaching the device");
+    let channel = common::create_channel(client, admin, &team, tag).await;
+    common::add_user_to_channel(client, admin, &channel, &reader.id).await;
+    // One channel for each host to `/join`: the same user cannot join one channel twice.
+    let join_targets = [
+        common::create_channel(client, admin, &team, "hookjoingo").await,
+        common::create_channel(client, admin, &team, "hookjoinrs").await,
+    ];
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-notify");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+    // The mail is rendered from `templates/` and the sender's avatar drawn with `fonts/`, both
+    // resolved against the working directory, as `start_go` links them for Go.
+    let src = repo().join("reference/mattermost/server");
+    for dir in ["templates", "fonts"] {
+        let _ = std::os::unix::fs::symlink(src.join(dir), rs_run.join(dir));
+    }
+    // The sender's stored avatar, which the mail embeds, lives in the stack's file store; each
+    // host here has a file store of its own, so both get a copy. Without one Go draws a default
+    // avatar and this server leaves the image out ([D-204]).
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let sender = me["id"].as_str().expect("an id");
+    let avatar = format!("users/{sender}/profile.png");
+    let stored = PathBuf::from(common::stack_data_dir()).join(&avatar);
+    for run in [&go_run, &rs_run] {
+        let target = run.join("data").join(&avatar);
+        std::fs::create_dir_all(target.parent().expect("a directory")).expect("the avatar dir");
+        std::fs::copy(&stored, &target).expect("the sender has a stored avatar");
+    }
+    plant_state(client, admin, Some(true)).await;
+    // The stack's servers get the sink's port and the push proxy from the environment
+    // (`scripts/go-server.sh`, `scripts/mm-api-env.sh`), not the shared document, so these two
+    // need the same.
+    let smtp_port = common::smtp_sink::smtp_port().to_string();
+    let push_server = format!("http://localhost:{}", common::push_proxy::push_port());
+    let mail_and_push = [
+        ("MM_EMAILSETTINGS_SMTPPORT", smtp_port.as_str()),
+        ("MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS", "true"),
+        (
+            "MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER",
+            push_server.as_str(),
+        ),
+    ];
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut go_env = vec![
+        ("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str()),
+        ("HOOK_RECORDER_NOTIFY", "1"),
+        ("HOOK_RECORDER_WEBSOCKET", "1"),
+    ];
+    go_env.extend(mail_and_push);
+    let go = start_go(&go_run, &go_env, NOTIFY_GO_OFFSET).await;
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    // The mail's links are built on `SiteURL`, which `start_go` sets to Go's own address; the Rust
+    // host is told the same one, so the links compare.
+    let site_url = go.base.replace("127.0.0.1", "localhost");
+    let rust = SecondServer::start_in(
+        NOTIFY_HOST_PORT,
+        &rs_run,
+        &[
+            ("MMRS_PLUGIN_HOST", "rust"),
+            ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+            ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+            ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+            ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+            ("HOOK_RECORDER_NOTIFY", "1"),
+            ("HOOK_RECORDER_WEBSOCKET", "1"),
+            mail_and_push[0],
+            mail_and_push[1],
+            mail_and_push[2],
+            ("MM_SERVICESETTINGS_SITEURL", site_url.as_str()),
+        ],
+    )
+    .await
+    .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+    // The add above mentions the reader too, through main Go; its mail and push are not ours.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    sink.discard(&email);
+    proxy.discard(is_push("message"));
+
+    let username = common::plain_username(tag);
+    let mut seen = (0usize, 0usize);
+    // (marker, a mail arrives, a push arrives)
+    let steps = [
+        ("plain", true, true),
+        ("!mail-rewrite", true, true),
+        ("!mail-reject !push-reject", false, false),
+        ("!push-rewrite", true, true),
+    ];
+    for (marker, mailed, pushed) in steps {
+        let message = format!("@{username} {marker} from the hook recorder's tour");
+        let mut attempt = 0;
+        loop {
+            let mut sides = Vec::new();
+            let mut minutes = Vec::new();
+            for (base, log, from) in [
+                (go.base.as_str(), go_log.as_path(), &mut seen.0),
+                (rust.base.as_str(), rust_log.as_path(), &mut seen.1),
+            ] {
+                let response = client
+                    .post(format!("{base}/api/v4/posts"))
+                    .bearer_auth(admin)
+                    .json(&serde_json::json!({ "channel_id": channel, "message": message }))
+                    .send()
+                    .await
+                    .expect("the server answers");
+                assert_eq!(response.status(), 201, "{base}: {marker}");
+                let post: Json = response.json().await.expect("a post");
+                let post_id = post["id"].as_str().expect("an id").to_owned();
+                minutes.push(post["create_at"].as_i64().unwrap_or_default() / 60_000);
+                let pairs = [(post_id.clone(), "POSTID".to_owned())];
+                let hooks = grown(log, *from, 4, &pairs).await;
+                *from += hooks.len();
+                let mail = sink
+                    .take(&email, Duration::from_secs(if mailed { 10 } else { 2 }))
+                    .await;
+                let push = proxy
+                    .take(
+                        Duration::from_secs(if pushed { 10 } else { 2 }),
+                        is_push("message"),
+                    )
+                    .await;
+                let mail = mail.map(|m| {
+                    common::smtp_sink::normalize_message(
+                        &super::email_send::mask_across_soft_breaks(&m.data_str(), &post_id, 'P'),
+                    )
+                });
+                let push = push.map(|p| {
+                    let mut body = common::push_proxy::normalize_push(p.json());
+                    body["post_id"] = Json::from("POSTID");
+                    without_badge(body)
+                });
+                let hooks: Vec<Json> = in_canonical_order(&hooks)
+                    .into_iter()
+                    .map(without_badge)
+                    .collect();
+                sides.push((hooks, mail, push));
+            }
+            // The mail prints the post's hour and minute: two posts either side of a minute
+            // boundary differ there and nowhere else.
+            if minutes[0] != minutes[1] && attempt < 2 {
+                attempt += 1;
+                continue;
+            }
+            let (go_side, rust_side) = (&sides[0], &sides[1]);
+            assert_eq!(
+                names(&go_side.0),
+                [
+                    "EmailNotificationWillBeSent",
+                    "MessageHasBeenPosted",
+                    "MessageWillBePosted",
+                    "NotificationWillBePushed"
+                ],
+                "{marker}: the hooks Go fired"
+            );
+            for (index, (g, r)) in go_side.0.iter().zip(&rust_side.0).enumerate() {
+                assert_eq!(g, r, "{marker}: hook {index} differs");
+            }
+            assert_eq!(
+                go_side.0.len(),
+                rust_side.0.len(),
+                "{marker}: the hook counts"
+            );
+            assert_eq!(go_side.1.is_some(), mailed, "{marker}: Go's mail");
+            assert_eq!(go_side.1, rust_side.1, "{marker}: the mails");
+            assert_eq!(go_side.2.is_some(), pushed, "{marker}: Go's push");
+            assert_eq!(go_side.2, rust_side.2, "{marker}: the pushes");
+            if marker == "!mail-rewrite" {
+                let mail = go_side.1.as_deref().unwrap_or_default();
+                assert!(
+                    mail.contains("Subject: rewritten by the hook recorder"),
+                    "the rewritten subject: {mail}"
+                );
+            }
+            if marker == "!push-rewrite" {
+                let push = go_side.2.as_ref().expect("a push");
+                assert_eq!(push["message"], "rewritten by the hook recorder");
+                assert_ne!(push["type"], Json::Null);
+            }
+            break;
+        }
+    }
+
+    // `/join`: the command runs as the reader, in the tour's channel.
+    let mut joined = Vec::new();
+    for ((base, log, from), (target, name)) in [
+        (go.base.as_str(), go_log.as_path(), &mut seen.0),
+        (rust.base.as_str(), rust_log.as_path(), &mut seen.1),
+    ]
+    .into_iter()
+    .zip(join_targets.iter().zip(["hookjoingo", "hookjoinrs"]))
+    {
+        let response = client
+            .post(format!("{base}/api/v4/commands/execute"))
+            .bearer_auth(&reader.token)
+            .json(&serde_json::json!({
+                "command": format!("/join mmrs-parity-{name}"),
+                "channel_id": channel,
+            }))
+            .send()
+            .await
+            .expect("the server answers");
+        assert_eq!(response.status(), 200, "{base}: /join");
+        let pairs = [
+            (target.clone(), "JOINED".to_owned()),
+            (name.to_owned(), "JOINEDNAME".to_owned()),
+        ];
+        let hooks = grown(log, *from, 4, &pairs).await;
+        *from += hooks.len();
+        joined.push(in_canonical_order(&hooks));
+    }
+    assert_eq!(
+        names(&joined[0]),
+        [
+            "ChannelMemberWillBeAdded",
+            "MessageHasBeenPosted",
+            "MessageWillBePosted",
+            "UserHasJoinedChannel"
+        ],
+        "the hooks /join fired under Go"
+    );
+    assert_eq!(joined[0], joined[1], "/join's hooks");
+    let join_hook = joined[0]
+        .iter()
+        .find(|h| h["hook"] == "UserHasJoinedChannel")
+        .expect("the join hook");
+    assert!(
+        join_hook["args"].get("C").is_none(),
+        "no actor: {join_hook}"
+    );
+
+    // The websocket hooks: a socket that sends a routed and a plugin-only message and closes, and
+    // an anonymous one that authenticates over the socket and closes.
+    let mut sockets = Vec::new();
+    for (base, log, from) in [
+        (go.base.as_str(), go_log.as_path(), &mut seen.0),
+        (rust.base.as_str(), rust_log.as_path(), &mut seen.1),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &reader.token).await;
+        probe
+            .send(serde_json::json!({
+                "seq": 1, "action": "user_typing", "data": { "channel_id": channel }
+            }))
+            .await;
+        probe
+            .send(serde_json::json!({
+                "seq": 2, "action": "custom_mmrs_ping",
+                "data": { "n": 1, "s": "x", "nested": { "a": [1, "b", null] }, "none": null }
+            }))
+            .await;
+        probe.collect_for(Duration::from_millis(300)).await;
+        probe.close().await;
+        let mut anonymous = common::SocketProbe::connect_anonymous(base).await;
+        anonymous
+            .send(serde_json::json!({
+                "seq": 1, "action": "authentication_challenge",
+                "data": { "token": reader.token }
+            }))
+            .await;
+        anonymous.collect_for(Duration::from_millis(300)).await;
+        anonymous.close().await;
+        let hooks = grown(log, *from, 7, &[]).await;
+        *from += hooks.len();
+        sockets.push(in_canonical_order(
+            &hooks
+                .into_iter()
+                .map(without_connection)
+                .collect::<Vec<_>>(),
+        ));
+    }
+    assert_eq!(
+        names(&sockets[0]),
+        [
+            "OnWebSocketConnect",
+            "OnWebSocketConnect",
+            "OnWebSocketDisconnect",
+            "OnWebSocketDisconnect",
+            "WebSocketMessageHasBeenPosted",
+            "WebSocketMessageHasBeenPosted",
+            "WebSocketMessageHasBeenPosted"
+        ],
+        "the websocket hooks Go fired"
+    );
+    for (index, (g, r)) in sockets[0].iter().zip(&sockets[1]).enumerate() {
+        assert_eq!(g, r, "websocket hook {index}");
+    }
+
+    // Channel guards: each host registers its plugin's claim on its own join target, and the
+    // claim holds while the plugin is off — a post there is refused — until it is removed.
+    let sides = [
+        (go.base.as_str(), go_log.as_path(), &join_targets[0]),
+        (rust.base.as_str(), rust_log.as_path(), &join_targets[1]),
+    ];
+    let post_as_admin = |base: &str, channel_id: &str, message: String| {
+        let (client, admin) = (client.clone(), admin.to_owned());
+        let (base, channel_id) = (base.to_owned(), channel_id.to_owned());
+        async move {
+            let response = client
+                .post(format!("{base}/api/v4/posts"))
+                .bearer_auth(&admin)
+                .json(&serde_json::json!({ "channel_id": channel_id, "message": message }))
+                .send()
+                .await
+                .expect("the server answers");
+            let status = response.status().as_u16();
+            let body: Json = response.json().await.unwrap_or(Json::Null);
+            (status, body)
+        }
+    };
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let claims = |target: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (String, bool)>(
+                "SELECT PluginId, CreatedAt > 0 FROM ChannelGuards WHERE ChannelId = $1",
+            )
+            .bind(target)
+            .fetch_all(&pool)
+            .await
+            .expect("the guards read")
+        }
+    };
+    for (script, entry) in [
+        ("!guard-script", "GuardScript"),
+        ("!unguard-script", "UnguardScript"),
+    ] {
+        let mut scripts = Vec::new();
+        for ((base, log, target), from) in sides.iter().zip([&mut seen.0, &mut seen.1]) {
+            let (status, body) = post_as_admin(base, &channel, format!("{script} {target}")).await;
+            assert_eq!(status, 201, "{base}: {script}: {body}");
+            let pairs = [((*target).clone(), "TARGET".to_owned())];
+            let hooks = grown(log, *from, 3, &pairs).await;
+            *from += hooks.len();
+            scripts.push(
+                hooks
+                    .into_iter()
+                    .find(|h| h["hook"] == entry)
+                    .unwrap_or_else(|| panic!("{base}: no {entry}")),
+            );
+        }
+        assert_eq!(scripts[0], scripts[1], "{script}");
+        for (_, _, target) in &sides {
+            let rows = claims((*target).clone()).await;
+            if script == "!guard-script" {
+                assert_eq!(rows, [(PLUGIN_ID.to_owned(), true)], "{script}: the claim");
+            } else {
+                assert!(rows.is_empty(), "{script}: the claim is gone");
+            }
+        }
+        if script == "!guard-script" {
+            // The plugin off: a guarded channel is refused, from each host's own cache.
+            // Each host is told itself: the two share the configuration document but not its
+            // change notifications.
+            for (base, _, _) in &sides {
+                toggle(client, admin, base, "disable").await;
+                wait_until_stopped(client, admin, base).await;
+            }
+            let mut refusals = Vec::new();
+            for (base, _, target) in &sides {
+                let (status, body) =
+                    post_as_admin(base, target, "into a guarded channel".to_owned()).await;
+                refusals.push((
+                    status,
+                    error_of(&body).0.map(str::to_owned),
+                    body["message"].clone(),
+                ));
+            }
+            assert_eq!(
+                refusals[0], refusals[1],
+                "a post while the guard's plugin is off"
+            );
+            assert_eq!(refusals[0].0, 503, "{:?}", refusals[0]);
+            for (base, _, _) in &sides {
+                toggle(client, admin, base, "enable").await;
+                wait_until_running(client, admin, base).await;
+            }
+        }
+    }
+    // Unguarded again: a post there goes through on both.
+    for ((base, log, target), from) in sides.iter().zip([&mut seen.0, &mut seen.1]) {
+        let (status, body) = post_as_admin(base, target, "after the guard".to_owned()).await;
+        assert_eq!(status, 201, "{base}: {body}");
+        *from += grown(log, *from, 2, &[]).await.len();
+    }
+
+    drop(rust);
+    drop(go);
+    for target in [&channel, &join_targets[0], &join_targets[1]] {
+        common::delete_channel(client, admin, target).await;
+    }
+    common::delete_plain_user(client, admin, &reader.id).await;
 }

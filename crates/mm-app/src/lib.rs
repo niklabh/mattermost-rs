@@ -23,6 +23,7 @@ pub mod broadcast_hooks;
 pub mod channel;
 pub mod channel_convert;
 pub mod channel_create;
+pub mod channel_guards;
 pub mod channel_join_request;
 pub mod channel_member;
 pub mod channel_moderation;
@@ -32,6 +33,7 @@ pub mod channel_write;
 pub mod command;
 /// The built-in slash-command registry (`GetCommand` only), `ListAutocompleteCommands` and the
 /// dispatch half of `ExecuteCommand`.
+pub mod command_join;
 pub mod command_provider;
 /// Port of `app/command_autocomplete.go` — `GetSuggestions`.
 pub mod command_suggestions;
@@ -100,6 +102,7 @@ pub mod plugin_api_config;
 pub mod plugin_api_wire;
 pub mod plugin_commands;
 pub mod plugin_driver;
+pub mod plugin_driver_pool;
 pub mod plugin_hooks;
 pub mod plugin_install;
 pub mod plugin_key_value_store;

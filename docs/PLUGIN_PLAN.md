@@ -526,7 +526,12 @@ plugin is served through `DriverForPlugin`, and `ShutdownConns` runs when its pr
 `parity::plugin_driver` runs one script plugin under both hosts and compares 171 replies. One
 connection per `Conn` instead of Go's pool is [D-1340].
 
-### Phase 5 · Hook call sites — IN PROGRESS, 30 of 35 (2026-09-23)
+### Phase 5 · Hook call sites — DONE, 34 of 35 (2026-09-25)
+
+**Closed 2026-09-25.** The notification pair is proven under both hosts, `JoinChannel`'s join hook
+fires from `/join`, guards are registered and cached, and the three websocket hooks fire. The 35th,
+`OnPluginClusterEvent`, is called only by the private cluster. What keeps D6's switch at `go` is
+Phase 6 and [D-1000]; see D-811.
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and

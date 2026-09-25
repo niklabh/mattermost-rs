@@ -501,7 +501,8 @@ async fn the_execute_refusals_and_misses_match() {
     delete_plain_user(&client(), &admin, &plain.id).await;
 }
 
-/// Anything that would run is Go's: a built-in, and a custom command of the team.
+/// Anything that would run is Go's: a built-in other than `/join`, and a custom command of the
+/// team.
 #[tokio::test]
 async fn a_command_that_would_run_is_forwarded() {
     if !stack_enabled() {
@@ -529,4 +530,125 @@ async fn a_command_that_would_run_is_forwarded() {
     }
 
     unplant("r").await;
+}
+
+/// `/join`, the one built-in this server runs (`mm_app::command_join`): each case is run by one
+/// user through Go and by another through mm-api, against the same channels, and the two answers
+/// must be byte-equal — the `goto_location` of a join, the ephemeral text of each refusal. A join
+/// must leave both users members, with a `system_join_channel` post each; a refusal, neither.
+#[tokio::test]
+async fn the_join_command_answers_as_go_does() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team = create_team(&http, &admin, "cmdjoin").await;
+    let home = create_channel(&http, &admin, &team, "cmdjoinhome").await;
+    let open = create_channel(&http, &admin, &team, "cmdjoinopen").await;
+    let private = common::create_channel_typed(&http, &admin, &team, "cmdjoinpriv", "P").await;
+    let archived = create_channel(&http, &admin, &team, "cmdjoinarch").await;
+    common::delete_channel(&http, &admin, &archived).await;
+    let users = [
+        create_plain_user(&http, &admin, &team, "cmdjoingo").await,
+        create_plain_user(&http, &admin, &team, "cmdjoinrs").await,
+    ];
+    for user in &users {
+        common::add_user_to_channel(&http, &admin, &home, &user.id).await;
+    }
+
+    let is_member = |channel: String, user: String| {
+        let (http, admin) = (http.clone(), admin.clone());
+        async move {
+            http.get(format!("{GO}/api/v4/channels/{channel}/members/{user}"))
+                .bearer_auth(&admin)
+                .send()
+                .await
+                .expect("Go answers")
+                .status()
+                == 200
+        }
+    };
+
+    // (command, the channel it joins when it succeeds)
+    let cases: [(&str, Option<&str>); 8] = [
+        ("/join MMRS-PARITY-CMDJOINOPEN", Some(&open)),
+        ("/join ~MMRS-PARITY-CMDJOINHOME", None),
+        ("/join ~mmrs-parity-cmdjoinhome", Some(&home)),
+        ("/join mmrs-parity-nosuch", None),
+        ("/join mmrs-parity-cmdjoinpriv", None),
+        ("/join mmrs-parity-cmdjoinarch", None),
+        ("/join", None),
+        ("/join  mmrs-parity-cmdjoinopen", None),
+    ];
+    for (command, joins) in cases {
+        let request = serde_json::json!({"command": command, "channel_id": home}).to_string();
+        let mut answers = Vec::new();
+        for (base, user) in [(GO, &users[0]), (RUST, &users[1])] {
+            let (status, body, served) = send(
+                base,
+                reqwest::Method::POST,
+                "/api/v4/commands/execute",
+                &user.token,
+                &[],
+                &[],
+                Some(&request),
+            )
+            .await;
+            if base == RUST {
+                assert_eq!(served.as_deref(), Some("rust"), "{command} was forwarded");
+            }
+            // `goto_location` starts with `GetSiteURLHeader`, the request's own scheme and
+            // `Host`, which is each server's own address.
+            let body = String::from_utf8_lossy(&body).replace(base, "<site>");
+            answers.push((status, body));
+        }
+        assert_eq!(answers[0], answers[1], "{command}");
+        if let Some(channel) = joins {
+            assert_eq!(answers[0].0, 200, "{command}: {}", answers[0].1);
+            for user in &users {
+                assert!(
+                    is_member(channel.to_owned(), user.id.clone()).await,
+                    "{command}: {} joined",
+                    user.id
+                );
+            }
+        }
+    }
+    // The refused ones left nobody in the private or archived channel.
+    for channel in [&private, &archived] {
+        for user in &users {
+            assert!(!is_member(channel.clone(), user.id.clone()).await);
+        }
+    }
+    // Each join into the open channel wrote one join post, from each user.
+    let posts: serde_json::Value = http
+        .get(format!("{GO}/api/v4/channels/{open}/posts"))
+        .bearer_auth(&admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("posts");
+    for user in &users {
+        let joined: Vec<&serde_json::Value> = posts["posts"]
+            .as_object()
+            .expect("a post map")
+            .values()
+            .filter(|p| p["user_id"] == user.id.as_str() && p["type"] == "system_join_channel")
+            .collect();
+        assert_eq!(joined.len(), 1, "{}'s join post", user.id);
+        assert!(
+            joined[0]["props"]["username"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("mmrsplaincmdjoin")),
+            "the join post names its user: {}",
+            joined[0]
+        );
+    }
+
+    for user in &users {
+        delete_plain_user(&http, &admin, &user.id).await;
+    }
 }

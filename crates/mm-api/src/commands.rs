@@ -1182,7 +1182,9 @@ async fn serve_execute(
             mm_app::plugin_commands::ExecuteOutcome::NotPlugin => {}
         }
     }
-    if go_may_have_plugins() {
+    // Under the Rust plugin host Go runs no plugins (docs/PLUGIN_PLAN.md, D6), and this process's
+    // were tried above.
+    if go_plugin_commands_possible(state) {
         return Ok(Execute::Forward);
     }
 
@@ -1192,9 +1194,50 @@ async fn serve_execute(
         .await?
     {
         mm_app::command_provider::CommandDispatch::NotFound(err) => Err(ApiError::from(err)),
+        mm_app::command_provider::CommandDispatch::BuiltIn if trigger == "join" => {
+            serve_join(state, session, parts, args).await
+        }
         mm_app::command_provider::CommandDispatch::Custom
         | mm_app::command_provider::CommandDispatch::BuiltIn => Ok(Execute::Forward),
     }
+}
+
+/// `tryExecuteBuiltInCommand` for `/join` (`mm_app::command_join`), then `HandleCommandResponse`
+/// with `builtIn` true. The message is what follows the first Unicode space of the command, as
+/// `ExecuteCommand` splits it. A branch `JoinChannel` hands to Go forwards the whole command;
+/// nothing is written before that decision.
+async fn serve_join(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    parts: &axum::http::request::Parts,
+    mut args: mm_model::command_args::CommandArgs,
+) -> Result<Execute, ApiError> {
+    args.user_id.clone_from(&session.0.user_id);
+    args.site_url = site_url_header(state, &parts.headers).await;
+    let message = args
+        .command
+        .char_indices()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(i, c)| args.command[i + c.len_utf8()..].to_owned())
+        .unwrap_or_default();
+    let ctx = crate::plugin_context::hook_context(parts, Some(&session.0));
+    let Some(mut response) = state.app.do_join_command(&ctx, &args, &message).await else {
+        return Ok(Execute::Forward);
+    };
+    let command = mm_model::command::Command {
+        trigger: "join".to_owned(),
+        ..mm_model::command::Command::default()
+    };
+    state
+        .app
+        .handle_command_response(&ctx, &session.0, &command, &args, &mut response, true)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Execute::Answer(encoded(
+        StatusCode::OK,
+        &response,
+        "executeCommand",
+    )?))
 }
 
 #[cfg(test)]

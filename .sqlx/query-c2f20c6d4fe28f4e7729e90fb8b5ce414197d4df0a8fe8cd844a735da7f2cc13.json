@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM ChannelGuards WHERE ChannelId = $1 AND PluginId = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c2f20c6d4fe28f4e7729e90fb8b5ce414197d4df0a8fe8cd844a735da7f2cc13"
+}

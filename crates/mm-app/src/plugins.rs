@@ -64,6 +64,8 @@ pub struct PluginHost {
     lifecycle: tokio::sync::Mutex<()>,
     /// Go's `Channels.pluginCommands`: the slash commands the plugins here registered.
     commands: crate::plugin_commands::PluginCommandRegistry,
+    /// Go's `Channels.guardCache` ([`crate::channel_guards`]); kept only while hosting.
+    guard_cache: crate::channel_guards::GuardCache,
 }
 
 impl std::fmt::Debug for PluginHost {
@@ -93,6 +95,11 @@ impl PluginHost {
     /// empty when this process does not host plugins.
     pub fn commands(&self) -> &crate::plugin_commands::PluginCommandRegistry {
         &self.commands
+    }
+
+    /// The channel-guard cache ([`crate::channel_guards`]).
+    pub fn guard_cache(&self) -> &crate::channel_guards::GuardCache {
+        &self.guard_cache
     }
 
     fn get(&self) -> Option<Arc<PluginsEnvironment>> {

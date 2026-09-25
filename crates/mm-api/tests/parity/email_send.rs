@@ -37,7 +37,7 @@ fn sink() -> &'static common::smtp_sink::Sink {
 
 /// Replace every occurrence of `secret` with `X`s of the same length, matching across `=\r\n`
 /// soft line breaks and leaving them where they are.
-fn mask_across_soft_breaks(text: &str, secret: &str, label: char) -> String {
+pub(super) fn mask_across_soft_breaks(text: &str, secret: &str, label: char) -> String {
     let bytes = text.as_bytes();
     let secret = secret.as_bytes();
     let mut out = bytes.to_vec();

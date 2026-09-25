@@ -594,6 +594,29 @@ impl Run<'_> {
         self.close_conn(&c2, "ConnClose conn2 again").await;
         self.close_conn(&c1, "ConnClose conn1").await;
 
+        // The pool: the suite runs both hosts with `MaxOpenConns` 4 and `QueryTimeout` 2, and
+        // every connection above is closed. Four are handed out, the fifth waits out the timeout,
+        // and a closed one is handed out again — with the session it had, so a `SET` made on it
+        // is still there.
+        let mut held = Vec::new();
+        for i in 6..10 {
+            held.push(self.conn(true, &format!("conn{i}")).await);
+        }
+        self.conn(true, "conn-over-the-bound").await;
+        self.exec(&held[0], "SET application_name = 'mmrs-pooled'", vec![])
+            .await;
+        self.close_conn(&held[0], "ConnClose conn6").await;
+        let again = self.conn(true, "conn10").await;
+        let r = self
+            .query(&again, "SHOW application_name", vec![], "rows-reused")
+            .await;
+        self.drain(&r, 1, "rows-reused").await;
+        self.close_conn(&again, "ConnClose conn10").await;
+        for (i, conn) in held.iter().enumerate().skip(1) {
+            self.close_conn(conn, &format!("ConnClose conn{}", i + 6))
+                .await;
+        }
+
         // Last: a value gob cannot carry.
         let c5 = self.conn(true, "conn5").await;
         let r = self

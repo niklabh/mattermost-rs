@@ -6288,6 +6288,9 @@ Two consequences:
   `LastPictureUpdate == 0`, so forwarding is doubly right.
 
 In practice the served branch is the common one: every account gets a `profile.png` at creation.
+The same fallback decides a notification mail's embedded sender avatar: with no stored image Go
+draws one and embeds it, and this server sends the mail without it (found 2026-09-25 by
+`parity::plugin_hooks`' notification tour, which now copies the sender's stored image).
 
 **What is owed:** nothing until someone wants those bytes. If it is ever attempted, it needs the
 same font file and a rasteriser that agrees with freetype pixel for pixel — measure before
@@ -9229,16 +9232,25 @@ active state (closed 2026-09-20: `mm_app::plugin_prepackaged`, `mm_plugin::envir
 measured by `parity::plugin_startup` and `environment::health_check_matches_go_step_for_step`).
 What still keeps it from being a drop-in:
 
-- The plugin API and driver: `AppPluginApi` answers 27 of the 258 API methods (the `KV*` nine,
-  the `Log*` four, server information, and the configuration and licence eleven) and the
-  not-implemented error for the rest; `AppPluginDriver` answers not-implemented throughout. That
-  is plugin plan Phase 6, ordered by what real plugins call.
-- The hook call sites: 25 of the 35 are wired (the post family and reactions, which closed
-  D-402's plugin half; the membership family; the user lifecycle family, which closed D-453
-  and D-471; both file hooks; `PreferencesHaveChanged`; the channel lifecycle; `DraftWillBeUpserted`). The
-  other 10 are [D-932]; D-542's is among them.
+**Reviewed 2026-09-25.** The driver is whole (20/20, pooled), every `channels/app` hook site a
+client reaches fires (D-932, closed), guards are registered and cached (D-933, closed), and the three
+websocket hooks fire from the socket. What still stands between this host and flipping the default,
+largest first:
 
-`MMRS_PLUGIN_HOST` stays `go` by default until both land.
+- **The plugin API**: about 175 of the 258 methods are implemented; the rest answer the typed
+  not-implemented error. Phase 6, and the one item that is weeks rather than days.
+- **`ConfigurationWillBeSaved`** ([D-1000]): a save through this host skips its plugins' hook.
+- **Hijacked connections** ([D-1060]): a plugin that serves its own websocket cannot.
+- **Branches this server forwards fire no hook** under the Rust host (Go runs none then): the
+  LDAP and magic-link logins, invitation signups, and a deactivation that owns bots
+  ([D-472]), and every built-in slash command but `/join` ([D-781]).
+- Smaller divergences, each with its entry: [D-931], [D-1020], [D-1062].
+
+Not owed, and not in the way: `OnPluginClusterEvent` (only the private cluster calls it);
+`ServeMetrics` (the metrics server needs the private metrics interface); `OnSendDailyTelemetry`,
+`RunDataRetention` and `OnCloudLimitsUpdated` (called only from private code).
+
+`MMRS_PLUGIN_HOST` stays `go` by default until the plugin API and D-1000 land.
 
 ## D-850 · Under a Go plugin host, the local plugin routes forward past their gates
 
@@ -9458,7 +9470,15 @@ plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
 
 ## D-932 · 5 of the 35 plugin hooks do not fire from the Rust host
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
+**Closed** 2026-09-25 — `EmailNotificationWillBeSent` and `NotificationWillBePushed` (already wired) are proven
+under both hosts with their refusal and rewrite branches, and `JoinChannel`'s `UserHasJoinedChannel` fires from
+the `/join` built-in, now served (`mm_app::command_join`); `parity::plugin_hooks::the_notification_join_and_guard_hooks_fire_as_go_fires_them`.
+`OnPluginClusterEvent` has no call site on any build we run — only a cluster message reaches it, and the cluster
+is private code. Left with the code that owns them: the consumed pair's one live site without a Rust caller, the
+recap job's `GetPosts` fallback (the recap worker, [D-804]); `GetPermalinkPost` and `GetPostAfterTime` have no
+caller in the public tree at all. The forwarded branches below fire nothing under the Rust host until each is
+ported, as their own entries say.
 **Narrowed** 2026-09-20 — the channel and team membership family, six more hooks.
 **Narrowed** 2026-09-21 — the user lifecycle family, four more: creation, both login hooks,
 deactivation. Then `FileWillBeDownloaded`, on all four read routes, and `FileWillBeUploaded` on
@@ -9543,7 +9563,11 @@ a `HookContext` at its sixteen callers — the membership and post ones already 
 
 ## D-933 · The channel-guard cache is a per-dispatch read, and nothing can register a guard
 
-**Status** OPEN · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+**Status** CLOSED · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+**Closed** 2026-09-25 — `mm_app::channel_guards`: Go's cache (loaded at start-up, reloaded after each write, one
+backoff retry task) while this process hosts the plugins, the table per dispatch while Go does, and the plugin
+API's `RegisterChannelGuard`/`UnregisterChannelGuard`; the parity tour registers under each host and is refused
+from each host's cache while the plugin is off.
 
 Two halves of `app/channel_guards.go` are unported, and both are invisible today:
 
@@ -10209,7 +10233,10 @@ that writes here after Go has read.
 
 ## D-1340 · The plugin driver opens a session per `Conn`, outside any pool
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (UNIT P2)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-25 (UNIT P2)
+**Closed** 2026-09-25 — `mm_app::plugin_driver_pool`: `MaxOpenConns` with the `QueryTimeout` wait, `MaxIdleConns`
+and both lifetimes; `parity::plugin_driver` exhausts a pool of four and reuses a session. It serves the plugins
+alone, where Go's is shared with the store — stated in the module.
 
 Go's `DriverImpl.Conn` takes a connection from the store's `*sql.DB` pool, so
 `SqlSettings.MaxOpenConns` bounds what plugins hold (a plugin waits up to `QueryTimeout` for one)
