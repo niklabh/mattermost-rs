@@ -10181,3 +10181,18 @@ the i18n files (go-i18n reads a map), the oEmbed `Ordered` visitor (already Go's
 invalid-UTF-8 rewrite the helpers lack), the dynamic-list response (Go uses its partial decode),
 and documents this server or Go marshalled itself (licence, token extra, Systems rows, config row,
 log lines, link-metadata rows).
+
+---
+
+## D-1330 · The audit log (mlog's audit targets) is not kept
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (plugin API, `LogAuditRec`)
+
+Go writes every `MakeAuditRecord`/`LogAuditRec` record, and a plugin's `LogAuditRec`, to the
+audit logger (`Server.Audit`, app/audit.go), whose targets `ExperimentalAuditSettings.File*`,
+`AdvancedLoggingJSON` and `MM_EXPERIMENTALAUDITSETTINGS_ADDITIONAL` configure. With none set —
+every stack here — nothing is written anywhere, which is what this server does in every case: the
+REST handlers drop their records and `mm_app::plugin_api::server` logs a plugin's at debug. The
+`Audits` table rows (`c.LogAudit`) are a different thing and are written. **What is owed:** the
+file target (an mlog JSON line per record, `plugin_id` added for a plugin's) behind those
+settings, and a test with `FileEnabled` on comparing the two servers' files.

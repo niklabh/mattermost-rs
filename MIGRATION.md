@@ -13,7 +13,7 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 71/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 204/258 (2026-09-25), Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
@@ -14881,3 +14881,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `c.AppContext.Path()` = `r.URL.Path` from `url.ParseRequestURI`; `net/http`'s own 400 for a target it cannot parse | `mm_api::audit_log::go_request_path`, `mux_guard::decide` | DONE | 3 unit, `audit_rows::an_encoded_path_is_recorded_decoded`, `…a_target_go_cannot_parse_is_its_400_and_writes_no_row`; `scripts/mutations/hook-updates-d1220.plan` — 10 run, 8 caught (after a fixture fix), 2 controls survived | `/users/m%65/patch` is served and recorded as `/users/me/patch`; an invalid escape now goes to Go on every route (it was our 401 on a non-id parameter). |
 | `updateIncomingHook`'s `ValidateIncomingWebhookUserChannelAccess` on a move (webhook.go:176); `updateOutgoingHook`'s team fill and mismatch 400 (webhook.go:425) | `mm_api::webhooks`, `App::validate_incoming_webhook_user_channel_access` | DONE, closes [D-1220], [D-1221] | `webhook_writes::moving_an_incoming_hook_checks_its_owner_can_read_the_new_channel`, `…an_outgoing_update_naming_another_team_is_refused` | The move check is the **old owner's**, not the caller's, and only when the channel changes; `read_channel_content` needs channel membership even on an open channel. |
+
+## Plugin API: commands, plugins, uploads, icons, typing, toasts, push and the cluster (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `PluginAPI` `CreateCommand` … `LogAuditRecWithLevel` — the twenty-eight in docs/PLUGIN_PLAN.md Phase 6 (app/plugin_api.go), `App.SetTeamIconFromFile`, `App.SendToastMessage`, `App.SetProfileImageFromFile` | `mm_app::plugin_api::server`, `App::set_team_icon_from_file`, `mm_app::toast`, `App::set_profile_image_from_file`, `App::create_command_ungated` | DONE (204 of 258) | `parity::plugin_hooks::the_plugin_api_server_methods_answer_as_go_answers` (61 calls, hooks and frames under both hosts; `LogAuditRecWithLevel` is not called), 3 unit | Team-icon and profile bytes match Go's encoder; `RequestTrialLicense` past its refusals is not-implemented; the audit record reaches no audit log ([D-1330]). |

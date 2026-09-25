@@ -11147,3 +11147,483 @@ fn assert_auth_answers_are_gos(calls: &[Json], hooks: &[Json], frames: &[Json], 
         );
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: commands, plugins, upload sessions, team icons, the profile image,
+// typing, toasts, push, channel restore, the cluster and the audit log (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the server tranche; see `second_server_ports`.
+const SERVER_HOST_PORT: u16 = 8165;
+/// Its Go server: **below 100**, because Go's port + 100 is the next stack's Go server.
+const SERVER_GO_OFFSET: u16 = 93;
+/// Each side's tag: in its users' names, its team, and every name its script makes.
+const SERVER_SIDES: [&str; 2] = ["psvsidego", "psvsiders"];
+
+/// The plain users the server tour makes, for the cleanup.
+static SERVER_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the plugin API's command, plugin, upload-session, team-icon,
+/// profile-image, typing, toast, push, channel-restore, cluster and audit methods
+/// (`mm_app::plugin_api::server`).
+///
+/// A `!server-script` post, made by each side's own user in its own channel, runs
+/// `examples/recorder/server.rs` inside `MessageWillBePosted`. Every answer is compared in
+/// order, every hook the script's writes fired, and every websocket frame the own user's socket
+/// received — the team icon's and the profile image's bytes among the answers, so the two image
+/// pipelines are compared byte for byte.
+///
+/// # What differs between the sides, and how it is taken out
+///
+/// Each side has its own team, channel and three users (own, other, and an outsider removed from
+/// the team for the graceful batch to bring back), made through main Go before either host
+/// starts. The side's ids, tag and run directory (in a plugin status's path) are scrubbed, and
+/// the ids the script learned first (the made channel, the command); what is left is masked as
+/// in the channels tranche.
+#[tokio::test]
+async fn the_plugin_api_server_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    server_purge_rows().await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_server_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *SERVER_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in &users {
+        common::delete_plain_user(&client, &admin, id).await;
+    }
+    server_purge_rows().await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// What the tour leaves that the fixture purge does not reach: each side team with its
+/// channels, members, posts and commands, and the upload sessions the script made.
+async fn server_purge_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let teams: Vec<String> = SERVER_SIDES
+        .iter()
+        .map(|side| format!("mmrs-parity-hookserver{side}"))
+        .collect();
+    for statement in [
+        "DELETE FROM commands WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM sidebarchannels WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM threads WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM posts WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM publicchannels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM channels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM sidebarcategories WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teams WHERE name = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&teams)
+            .execute(&pool)
+            .await
+            .expect("the side teams go");
+    }
+    sqlx::query("DELETE FROM uploadsessions WHERE id LIKE 'srvupload%'")
+        .execute(&pool)
+        .await
+        .expect("the tour's upload sessions go");
+}
+
+/// One side of the server tour.
+struct ServerSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    other: common::PlainUser,
+    outsider: common::PlainUser,
+    team: String,
+    channel: String,
+}
+
+impl ServerSide {
+    /// What the host passes down to the recorder for this side.
+    fn env(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("HOOK_RECORDER_SERVER_OWN", self.own.id.clone()),
+            ("HOOK_RECORDER_SERVER_OTHER", self.other.id.clone()),
+            ("HOOK_RECORDER_SERVER_OUTSIDER", self.outsider.id.clone()),
+            ("HOOK_RECORDER_SERVER_TEAM", self.team.clone()),
+            ("HOOK_RECORDER_SERVER_SIDE", self.tag.to_owned()),
+        ]
+    }
+
+    /// This side's scrub pairs: its run directory, what the script's answers taught it, then
+    /// the fixture.
+    fn pairs(&self, run: &Path, calls: &[Json]) -> Vec<(String, String)> {
+        let mut pairs = vec![(run.to_string_lossy().into_owned(), "<run>".to_owned())];
+        for (name, n, pointer, token) in [
+            ("CreateChannel", 0, "/returns/A/Id", "<made>"),
+            ("CreateCommand", 0, "/returns/A/Id", "<command>"),
+        ] {
+            if let Some(value) = learned(calls, name, n, pointer) {
+                pairs.push((value, token.to_owned()));
+            }
+        }
+        pairs.extend([
+            (self.own.id.clone(), "<own>".to_owned()),
+            (self.other.id.clone(), "<other>".to_owned()),
+            (self.outsider.id.clone(), "<outsider>".to_owned()),
+            (self.team.clone(), "<side-team>".to_owned()),
+            (self.channel.clone(), "<own-channel>".to_owned()),
+            (self.own.token.clone(), "<token>".to_owned()),
+            (self.tag.to_owned(), "<side>".to_owned()),
+        ]);
+        pairs
+    }
+}
+
+async fn run_the_server_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-server");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(client, admin, Some(true)).await;
+
+    // Every fixture is made through **main** Go, which hosts no plugins.
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+
+    let mut sides = Vec::new();
+    for tag in SERVER_SIDES {
+        let team = common::create_team(client, admin, &format!("hookserver{tag}")).await;
+        let own = common::create_plain_user(client, admin, &team, &format!("svown{tag}")).await;
+        let other = common::create_plain_user(client, admin, &team, &format!("svoth{tag}")).await;
+        let outsider =
+            common::create_plain_user(client, admin, &team, &format!("svout{tag}")).await;
+        SERVER_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend([own.id.clone(), other.id.clone(), outsider.id.clone()]);
+        let channel = common::create_channel(client, admin, &team, &format!("srv{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        common::add_user_to_channel(client, admin, &channel, &other.id).await;
+        common::remove_user_from_team(client, admin, &team, &outsider.id).await;
+        // The admin made the team and the channel; leaving the team takes it out of both.
+        common::remove_user_from_team(client, admin, &team, &admin_id).await;
+        sides.push(ServerSide {
+            tag,
+            own,
+            other,
+            outsider,
+            team,
+            channel,
+        });
+    }
+
+    let go_env = sides[0].env();
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    env.extend(go_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let go = start_go(&go_run, &env, SERVER_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_env = sides[1].env();
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    env.extend(rust_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let rust = SecondServer::start_in(SERVER_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let shared_ids = vec![admin_id.clone(), CORE_MISSING.to_owned()];
+    let mut recorded = Vec::new();
+    for (side, base, log, run, host) in [
+        (
+            &sides[0],
+            go.base.as_str(),
+            go_log.as_path(),
+            go_run.as_path(),
+            "Go",
+        ),
+        (
+            &sides[1],
+            rust.base.as_str(),
+            rust_log.as_path(),
+            rs_run.as_path(),
+            "Rust",
+        ),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "channel_id": side.channel,
+            "message": "!server-script",
+        }))
+        .expect("the post");
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(&side.own.token),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(
+            status,
+            201,
+            "{host}: the trigger: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        if host == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the trigger was forwarded"
+            );
+        }
+        script_transcript_settles(log, "ServerScript", host).await;
+        core_frames_settle(&mut probe).await;
+
+        let calls = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+            .find(|e| e["hook"] == "ServerScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .unwrap_or_default();
+        let pairs = side.pairs(run, &calls);
+        let mut entries = transcript_of(log, &pairs);
+        for entry in entries.iter_mut() {
+            mask_core(entry, &shared_ids);
+            mask_password(entry);
+        }
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, &shared_ids))
+            .collect();
+        frames.iter_mut().for_each(mask_member_clocks);
+        frames.iter_mut().for_each(mask_password_update);
+        frames.iter_mut().for_each(server_mask_image_clocks);
+        frames.sort_by_key(Json::to_string);
+        recorded.push((entries, frames));
+    }
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+
+    // The answers, in order.
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "ServerScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {:?}",
+        go_calls
+            .iter()
+            .filter(|c| c.get("error").is_some())
+            .collect::<Vec<_>>()
+    );
+    let differing: Vec<String> = go_calls
+        .iter()
+        .zip(&rust_calls)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("call {index} ({}):\n  go:   {g}\n  rust: {r}", g["call"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    // The hooks the script's writes fired, in canonical order.
+    let hooks = |entries: &[Json]| -> Vec<Json> {
+        let rest: Vec<Json> = entries
+            .iter()
+            .filter(|e| e["hook"] != "ServerScript")
+            .cloned()
+            .collect();
+        in_canonical_order(&rest)
+    };
+    let (go_hooks, rust_hooks) = (hooks(&go_side.0), hooks(&rust_side.0));
+    assert_eq!(names(&go_hooks), names(&rust_hooks), "the hooks that fired");
+    let differing: Vec<String> = go_hooks
+        .iter()
+        .zip(&rust_hooks)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("hook {index} ({}):\n  go:   {g}\n  rust: {r}", g["hook"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+
+    // Every frame the own user's socket received, in canonical order.
+    let event_names = |frames: &[Json]| -> Vec<String> {
+        frames
+            .iter()
+            .filter_map(|f| f["event"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        event_names(&go_side.1),
+        event_names(&rust_side.1),
+        "the events the own user received:\n  go:   {:?}\n  rust: {:?}",
+        go_side.1,
+        rust_side.1
+    );
+    let differing: Vec<String> = go_side
+        .1
+        .iter()
+        .zip(&rust_side.1)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("frame {index} ({}):\n  go:   {g}\n  rust: {r}", g["event"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+
+    assert_server_answers_are_gos(&go_calls, &go_side.1);
+
+    drop(rust);
+    drop(go);
+    for side in &sides {
+        common::delete_channel(client, admin, &side.channel).await;
+    }
+}
+
+/// A frame's `last_picture_update` and `last_team_icon_update`, stamped by each side's own write:
+/// `<set>` when set, so a `0` from the removal still reads as one.
+fn server_mask_image_clocks(value: &mut Json) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(server_mask_image_clocks),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if matches!(
+                    key.as_str(),
+                    "last_picture_update" | "last_team_icon_update"
+                ) && entry.as_i64().is_some_and(|n| n != 0)
+                {
+                    *entry = Json::String("<set>".to_owned());
+                    continue;
+                }
+                server_mask_image_clocks(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// What parity alone would not pin, because both hosts could agree on a wrong answer: read off
+/// Go's scrubbed answers.
+fn assert_server_answers_are_gos(calls: &[Json], frames: &[Json]) {
+    let answer = |name: &str, n: usize| -> Json {
+        calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    let error_id = |name: &str, n: usize, key: &str| -> Json { answer(name, n)[key]["Id"].clone() };
+
+    assert_eq!(
+        error_id("GetChannelOfType", 1, "B"),
+        "app.channel.get.existing.app_error",
+        "a channel of another type is missing"
+    );
+    assert_eq!(
+        error_id("RestoreChannel", 1, "A"),
+        "api.channel.restore_channel.restored.app_error",
+        "the second restore refuses"
+    );
+    let batch = answer("CreateTeamMembersGracefully", 0)["A"].clone();
+    assert_eq!(
+        batch.as_array().map(Vec::len),
+        Some(3),
+        "one entry per user: {batch}"
+    );
+    assert!(
+        batch[2]["Error"]["Id"].is_string(),
+        "the missing user is an entry's error: {batch}"
+    );
+    assert!(
+        answer("GetTeamIcon", 1)["A"]["$bytes"]
+            .as_str()
+            .is_some_and(|b| b.len() > 100),
+        "the icon is read back after it is set: {}",
+        answer("GetTeamIcon", 1)
+    );
+    assert_eq!(
+        answer("GetTeamIcon", 1)["A"],
+        answer("GetTeamIcon", 2)["A"],
+        "the removal leaves the file"
+    );
+    assert_eq!(
+        error_id("SetTeamIcon", 1, "A"),
+        "api.team.set_team_icon.decode.app_error"
+    );
+    assert_eq!(
+        error_id("SetProfileImage", 2, "A"),
+        "api.user.upload_profile_user.decode.app_error"
+    );
+    assert_eq!(
+        error_id("GetLDAPUserAttributes", 0, "B"),
+        "ent.ldap.disabled.app_error"
+    );
+    assert_eq!(
+        error_id("RequestTrialLicense", 2, "A"),
+        "app.user.missing_account.const"
+    );
+    assert_eq!(
+        answer("GetCommand", 1)["B"]["value"]["Err"],
+        format!("resource \"Command\" not found, id: {CORE_MISSING}"),
+        "the store's own error: {}",
+        answer("GetCommand", 1)
+    );
+    assert_eq!(
+        answer("UpdateCommand", 0)["B"]["value"]["Id"],
+        "model.command.is_valid.plugin_id.app_error",
+        "the plugin's creator is kept, and a command cannot have both"
+    );
+    assert_eq!(
+        answer("UpdateCommand", 1)["A"]["TeamId"],
+        "<side-team>",
+        "a command sent without a team keeps its own"
+    );
+    assert!(
+        answer("DeleteCommand", 1)["A"].is_null(),
+        "a missing command deletes without error"
+    );
+    assert!(
+        frames.iter().any(|f| f["event"] == "show_toast"),
+        "the toast reached its user: {frames:?}"
+    );
+}

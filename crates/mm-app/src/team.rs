@@ -2088,7 +2088,7 @@ impl App {
     ///
     /// Addressed to the **team** and nothing else, so the hub delivers it to every member of the
     /// team via `Session.TeamMembers`.
-    async fn send_team_event(&self, team: &Team, event: &str) -> AppResult<()> {
+    pub(crate) async fn send_team_event(&self, team: &Team, event: &str) -> AppResult<()> {
         let mut sanitized = team.clone();
         sanitized.sanitize();
 

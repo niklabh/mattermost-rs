@@ -727,6 +727,21 @@ name. The tranche runs its script twice, unlicensed and licensed. `RevokeSession
 session answers not-implemented ([D-283]); `DeleteGroupConstrainedMemberships` sweeps the whole
 installation and is compared only where it refuses ([D-1070]).
 
+**Then 204 of 258:** the command, plugin, upload-session, team-icon, profile-image, typing,
+toast, push, channel and cluster twenty-eight (`plugin_api/server.rs`): `CreateCommand`,
+`GetCommand`, `UpdateCommand`, `DeleteCommand`, `GetPlugins`, `GetPluginStatus`, `EnablePlugin`,
+`DisablePlugin`, `RemovePlugin`, `CreateUploadSession`, `GetUploadSession`, `GetTeamIcon`,
+`SetTeamIcon`, `RemoveTeamIcon`, `SetProfileImage`, `PublishUserTyping`, `SendToastMessage`,
+`SendPushNotification`, `AddUserToChannel`, `GetChannelOfType`, `RestoreChannel`,
+`CreateTeamMembersGracefully`, `PublishPluginClusterEvent`, `RegisterCollectionAndTopic`,
+`GetLDAPUserAttributes`, `RequestTrialLicense` (its refusals), `LogAuditRec` and
+`LogAuditRecWithLevel`. The command reads answer the store's own error text; `UpdateCommand`
+keeps the plugin's creator, so a command sent with one fails `IsValid`; `SetTeamIcon` is
+`App::set_team_icon_from_file`, new here and byte-identical to Go's encoder; the audit record
+goes to no audit log ([D-1330]). The tranche's script runs under both hosts from the same
+planted rows and compares every answer, hook and frame. `RequestTrialLicense` past its refusals
+(the licence server) answers not-implemented.
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,
