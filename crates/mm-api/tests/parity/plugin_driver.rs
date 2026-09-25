@@ -31,10 +31,10 @@ use super::plugin_hooks::{repo, start_go};
 use common::{GO, SecondServer, client, go_minted_token, stack_enabled};
 
 /// The Rust host; see `second_server_ports`.
-const HOST_PORT: u16 = 8123;
+pub(super) const HOST_PORT: u16 = 8123;
 /// Its Go server sits at Go's port plus this, :8124 on stack 0. Every port a suite starts must
 /// stay under Go's port + 100, which is where the next stack's servers begin.
-const GO_OFFSET: u16 = 59;
+pub(super) const GO_OFFSET: u16 = 59;
 const PLUGIN_ID: &str = "mmrs.driverscript";
 /// The pool both hosts are started with, which the script's last steps exhaust: four
 /// connections, and two seconds to wait for a fifth.

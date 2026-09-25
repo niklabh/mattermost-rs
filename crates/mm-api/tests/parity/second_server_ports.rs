@@ -69,6 +69,11 @@ fn no_two_second_servers_share_a_port() {
         // The licensed pair's constants, whose starts pass the name rather than a literal.
         for line in text.lines() {
             let line = line.trim_start();
+            // A shared pair is declared `pub(super)` and read by name elsewhere.
+            let line = ["pub(super) ", "pub(crate) ", "pub "]
+                .iter()
+                .find_map(|vis| line.strip_prefix(vis))
+                .unwrap_or(line);
             if line.starts_with("const ") && line.contains("_PORT: u16 =") {
                 if let Some((_, value)) = line.split_once('=') {
                     if let Some(port) = leading_port(value) {
@@ -103,13 +108,13 @@ fn no_two_second_servers_share_a_port() {
     // offset of 100 or more is the next stack's Go server (stack k's Go is 8065 + 100k), so a
     // tranche's Go offset stays below 100. `parity::ratelimit` starts its Go servers at + 75, + 48 and + 49 (+ 82 and + 83 are
     // `parity::plugin_hooks`'s download and upload tranches). `parity::plugin_driver` starts its
-    // Go server at + 59, and `parity::plugin_hooks`' notification tranche at + 62.
+    // Go server at + 59, and `parity::plugin_hooks`' notification tranche shares its pair.
     // The `EnableTesting` oracle (`MMRS_EDITLIMIT_VARIANT=testing`) is at + 70: until 2026-09-25
     // `plugin_hooks`' onboarding host started on it and killed the oracle, which is why
     // `parity::manualtest` so often found no oracle to ask.
     let reserved: Vec<u16> = [
-        8065, 8066, 8113, 8114, 8115, 8124, 8126, 8127, 8135, 8138, 8139, 8140, 8152, 8153, 8154,
-        8155, 8156, 8157, 8159, 8162, 8163,
+        8065, 8066, 8113, 8114, 8115, 8124, 8126, 8135, 8138, 8139, 8140, 8152, 8153, 8154, 8155,
+        8156, 8157, 8159, 8162, 8163,
     ]
     .into_iter()
     .chain(8095..=8104)
@@ -137,6 +142,11 @@ fn no_two_second_servers_share_a_port() {
         let text = std::fs::read_to_string(file).unwrap();
         for line in text.lines() {
             let line = line.trim_start();
+            // A shared pair is declared `pub(super)` and read by name elsewhere.
+            let line = ["pub(super) ", "pub(crate) ", "pub "]
+                .iter()
+                .find_map(|vis| line.strip_prefix(vis))
+                .unwrap_or(line);
             if line.starts_with("const ") && line.contains("_OFFSET: u16 =") {
                 if let Some(offset) = line.split_once('=').and_then(|(_, v)| leading_port(v)) {
                     offsets.push((offset, file.display().to_string()));

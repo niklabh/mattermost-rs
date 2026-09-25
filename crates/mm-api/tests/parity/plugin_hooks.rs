@@ -84,10 +84,11 @@ const SUPPORT_HOST_PORT: u16 = 8137;
 /// Its Go server — licensed too: the packet is refused without a licence.
 const SUPPORT_GO_OFFSET: u16 = 87;
 /// The Rust host of the notification tranche, `EmailNotificationWillBeSent` and
-/// `NotificationWillBePushed`.
-const NOTIFY_HOST_PORT: u16 = 8125;
-/// Its Go server.
-const NOTIFY_GO_OFFSET: u16 = 62;
+/// `NotificationWillBePushed`, and its Go server's offset: `parity::plugin_driver`'s pair, reused
+/// — every port below the next stack's is taken, and the two never run at once, both holding
+/// `common::PLUGIN_STATES` for their whole run.
+const NOTIFY_HOST_PORT: u16 = super::plugin_driver::HOST_PORT;
+const NOTIFY_GO_OFFSET: u16 = super::plugin_driver::GO_OFFSET;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
