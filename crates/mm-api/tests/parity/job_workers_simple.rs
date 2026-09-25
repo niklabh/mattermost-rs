@@ -112,6 +112,14 @@ async fn wait_done(pool: &PgPool, job_id: &str) -> Job {
 async fn rust_runs(pool: &PgPool, job_id: &str, job_type: &str) -> Job {
     plant_job(pool, job_id, job_type).await;
     let app = App::new(SqlStore::from_pool(pool.clone()));
+    // The stack's translations: a test binary is not where `FindDirRelBinary` looks, and without
+    // them every notice would be its message id.
+    mm_app::i18n::init_from_dir(&common::stack_run_dir().join("i18n"))
+        .await
+        .expect("the stack's i18n directory loads");
+    // The stored configuration, as the running server holds it — `App::new` alone is the
+    // defaults, under which `EnableUserAccessTokens` is off.
+    app.refresh_config().await.expect("the stored config loads");
     let workers = registered_workers();
     let slot = workers
         .get(job_type)
@@ -592,4 +600,333 @@ async fn expiry_notify_pushes_like_go() {
     assert_eq!(rust, go, "the job, the push and the flag differ");
 
     common::delete_plain_user(&http, &admin, &user.id).await;
+}
+
+// -------------------------------------------------------------------------------------------
+// cleanup_expired_access_tokens, notify_expiring_access_tokens
+// -------------------------------------------------------------------------------------------
+
+async fn set_access_tokens(http: &reqwest::Client, admin: &str, on: bool) {
+    let response = http
+        .put(format!("{RUST}/api/v4/config/patch"))
+        .header("Authorization", format!("Bearer {admin}"))
+        .json(&serde_json::json!({ "ServiceSettings": { "EnableUserAccessTokens": on } }))
+        .send()
+        .await
+        .expect("mm-api answers");
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "EnableUserAccessTokens={on}"
+    );
+}
+
+async fn access_tokens_enabled(http: &reqwest::Client, admin: &str) -> bool {
+    let config: serde_json::Value = http
+        .get(format!("{}/api/v4/config", common::GO))
+        .header("Authorization", format!("Bearer {admin}"))
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("a config");
+    config["ServiceSettings"]["EnableUserAccessTokens"] == true
+}
+
+/// A token row, planted directly: `(letter, description, active, expires_at, last_notified_at)`.
+#[allow(clippy::too_many_arguments)]
+async fn plant_token(
+    pool: &PgPool,
+    user_id: &str,
+    nonce: &str,
+    letter: &str,
+    description: &str,
+    active: bool,
+    expires_at: i64,
+    last_notified_at: Option<i64>,
+) -> String {
+    let token_id = id(&format!("{letter}{nonce}"));
+    sqlx::query(
+        "INSERT INTO useraccesstokens (id, token, userid, description, isactive, expiresat,
+                                       lastnotifiedat)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(&token_id)
+    .bind(id(&format!("s{letter}{nonce}")))
+    .bind(user_id)
+    .bind(description)
+    .bind(active)
+    .bind(expires_at)
+    .bind(last_notified_at)
+    .execute(pool)
+    .await
+    .expect("a token");
+    token_id
+}
+
+/// The system bot's posts in its DM with `user_id`, oldest first.
+async fn system_bot_dms(pool: &PgPool, user_id: &str) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT p.message
+           FROM posts p
+           JOIN channels c ON c.id = p.channelid AND c.type = 'D'
+           JOIN users b ON b.id = p.userid AND b.username = 'system-bot'
+          WHERE c.name IN (b.id || '__' || $1, $1 || '__' || b.id)
+          ORDER BY p.createat, p.id",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .expect("the DMs read")
+}
+
+/// Hold `EnableUserAccessTokens` on for `body`, restoring it after — on both servers' shared
+/// document, under the lock every reader of that document takes.
+async fn with_access_tokens<F, T>(http: &reqwest::Client, admin: &str, body: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    let was = access_tokens_enabled(http, admin).await;
+    if !was {
+        set_access_tokens(http, admin, true).await;
+    }
+    let result = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(body)).await;
+    if !was {
+        set_access_tokens(http, admin, false).await;
+    }
+    match result {
+        Ok(value) => value,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+/// `cleanup_expired_access_tokens` deletes the **active** tokens whose expiry has passed — not an
+/// inactive one, not one expiring later, not one that never expires — together with the sessions
+/// they minted, and tells each owner in a DM from the system bot, in the owner's locale.
+#[tokio::test]
+async fn cleanup_expired_access_tokens_runs_like_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let _jobs = JOBS.lock().await;
+    let _document = common::CONFIG_DOCUMENT.write().await;
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let pool = pool().await;
+    let (team, _) = common::a_team_and_channel_the_user_is_in(&http, &admin).await;
+
+    let sides = with_access_tokens(&http, &admin, async {
+        let mut sides = Vec::new();
+        for side in ["go", "rs"] {
+            let user =
+                common::create_plain_user(&http, &admin, &team, &format!("jscl{side}")).await;
+            let nonce = format!("{side}{}", now() % 100_000_000);
+            let at = now();
+            let hour = 60 * 60 * 1000;
+            plant_token(
+                &pool,
+                &user.id,
+                &nonce,
+                "a",
+                &format!("mmrs expired-{side}"),
+                true,
+                at - hour,
+                None,
+            )
+            .await;
+            plant_token(
+                &pool,
+                &user.id,
+                &nonce,
+                "b",
+                "mmrs inactive",
+                false,
+                at - hour,
+                None,
+            )
+            .await;
+            plant_token(
+                &pool,
+                &user.id,
+                &nonce,
+                "c",
+                "mmrs later",
+                true,
+                at + 10 * 24 * hour,
+                None,
+            )
+            .await;
+            plant_token(&pool, &user.id, &nonce, "d", "mmrs never", true, 0, None).await;
+            // A session minted by the expired token, joined on its secret.
+            sqlx::query(
+                "INSERT INTO sessions (id, token, createat, expiresat, lastactivityat, userid,
+                                       deviceid, roles, isoauth, props, expirednotify)
+                 VALUES ($1, $2, $3, 0, $3, $4, '', 'system_user', false, '{}', false)",
+            )
+            .bind(id(&format!("ts{nonce}")))
+            .bind(id(&format!("sa{nonce}")))
+            .bind(at)
+            .bind(&user.id)
+            .execute(&pool)
+            .await
+            .expect("the token's session");
+
+            let job_id = id(&format!("cl{side}"));
+            let job = if side == "go" {
+                plant_job(&pool, &job_id, "cleanup_expired_access_tokens").await;
+                wait_done(&pool, &job_id).await
+            } else {
+                rust_runs(&pool, &job_id, "cleanup_expired_access_tokens").await
+            };
+
+            let remaining: Vec<String> = sqlx::query_scalar(
+                "SELECT description FROM useraccesstokens WHERE userid = $1 ORDER BY description",
+            )
+            .bind(&user.id)
+            .fetch_all(&pool)
+            .await
+            .expect("the tokens read");
+            let session_left: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM sessions WHERE id = $1")
+                    .bind(id(&format!("ts{nonce}")))
+                    .fetch_one(&pool)
+                    .await
+                    .expect("counts");
+            let dms: Vec<String> = system_bot_dms(&pool, &user.id)
+                .await
+                .into_iter()
+                .map(|m| m.replace(&format!("expired-{side}"), "expired-<side>"))
+                .collect();
+            sides.push((outcome(&job), remaining, session_left, dms));
+            common::delete_plain_user(&http, &admin, &user.id).await;
+        }
+        sides
+    })
+    .await;
+    let mut sides = sides;
+    let rust = sides.pop().expect("two sides");
+    let go = sides.pop().expect("two sides");
+    assert_eq!(go.0["status"], "success", "Go: {go:?}");
+    assert_eq!(
+        go.1,
+        ["mmrs inactive", "mmrs later", "mmrs never"],
+        "Go: {go:?}"
+    );
+    assert_eq!(go.2, 0, "Go deleted the token's session");
+    assert_eq!(go.3.len(), 1, "Go told the owner once: {go:?}");
+    assert_eq!(
+        rust, go,
+        "the job, the tokens, the session and the DM differ"
+    );
+}
+
+/// `notify_expiring_access_tokens` warns each token that has entered a 7/3/1-day bucket it was
+/// not yet warned at — the 7-day and 3-day messages naming the days, an unnamed token by the
+/// translated placeholder — skips one already warned at its bucket and one further out than a
+/// week, and stamps `LastNotifiedAt` on exactly the warned ones.
+#[tokio::test]
+async fn notify_expiring_access_tokens_runs_like_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let _jobs = JOBS.lock().await;
+    let _document = common::CONFIG_DOCUMENT.write().await;
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let pool = pool().await;
+    let (team, _) = common::a_team_and_channel_the_user_is_in(&http, &admin).await;
+
+    let sides = with_access_tokens(&http, &admin, async {
+        let mut sides = Vec::new();
+        for side in ["go", "rs"] {
+            let user =
+                common::create_plain_user(&http, &admin, &team, &format!("jsne{side}")).await;
+            let nonce = format!("{side}{}", now() % 100_000_000);
+            let at = now();
+            let hour = 60 * 60 * 1000;
+            let day = 24 * hour;
+            // (letter, description, expires in, last warned)
+            let planted = [
+                ("e", "mmrs seven", 5 * day, None),
+                ("f", "mmrs three", 2 * day, Some(at - 2 * day)),
+                ("g", "mmrs final", 12 * hour, None),
+                ("h", "mmrs warned", 12 * hour, Some(at - hour)),
+                ("i", "", 6 * day, None),
+                ("j", "mmrs far", 10 * day, None),
+            ];
+            for (letter, description, expires_in, warned) in planted {
+                plant_token(
+                    &pool,
+                    &user.id,
+                    &nonce,
+                    letter,
+                    description,
+                    true,
+                    at + expires_in,
+                    warned,
+                )
+                .await;
+            }
+            // A deactivated owner is never warned: `Users.DeleteAt = 0` is in the query.
+            let ghost =
+                common::create_plain_user(&http, &admin, &team, &format!("jsng{side}")).await;
+            plant_token(
+                &pool,
+                &ghost.id,
+                &nonce,
+                "k",
+                "mmrs ghost",
+                true,
+                at + 2 * day,
+                None,
+            )
+            .await;
+            sqlx::query("UPDATE users SET deleteat = $2 WHERE id = $1")
+                .bind(&ghost.id)
+                .bind(at)
+                .execute(&pool)
+                .await
+                .expect("the owner is deactivated");
+
+            let job_id = id(&format!("ne{side}"));
+            let job = if side == "go" {
+                plant_job(&pool, &job_id, "notify_expiring_access_tokens").await;
+                wait_done(&pool, &job_id).await
+            } else {
+                rust_runs(&pool, &job_id, "notify_expiring_access_tokens").await
+            };
+
+            let stamped: Vec<String> = sqlx::query_scalar(
+                "SELECT description FROM useraccesstokens
+                  WHERE userid = $1 AND lastnotifiedat >= $2
+                  ORDER BY description",
+            )
+            .bind(&user.id)
+            .bind(at)
+            .fetch_all(&pool)
+            .await
+            .expect("the tokens read");
+            let mut dms = system_bot_dms(&pool, &user.id).await;
+            dms.sort();
+            let ghost_told = system_bot_dms(&pool, &ghost.id).await.len();
+            sides.push((outcome(&job), stamped, dms, ghost_told));
+            common::delete_plain_user(&http, &admin, &user.id).await;
+            common::delete_plain_user(&http, &admin, &ghost.id).await;
+        }
+        sides
+    })
+    .await;
+    let mut sides = sides;
+    let rust = sides.pop().expect("two sides");
+    let go = sides.pop().expect("two sides");
+    assert_eq!(go.0["status"], "success", "Go: {go:?}");
+    assert_eq!(
+        go.1,
+        ["", "mmrs final", "mmrs seven", "mmrs three"],
+        "Go stamped the four it warned: {go:?}"
+    );
+    assert_eq!(go.2.len(), 4, "Go sent four warnings: {go:?}");
+    assert_eq!(go.3, 0, "Go did not warn the deactivated owner");
+    assert_eq!(rust, go, "the job, the stamps and the warnings differ");
 }

@@ -113,6 +113,46 @@ pub fn expiry_notify_worker() -> SimpleWorker {
     )
 }
 
+/// Port of `jobs/cleanup_expired_access_tokens/worker.go`:
+/// [`crate::App::cleanup_expired_access_tokens`] with the cut-off at the time the job runs and
+/// Go's 1000 × 1000 bounds. Enabled by `ServiceSettings.EnableUserAccessTokens`.
+pub fn cleanup_expired_access_tokens_worker() -> SimpleWorker {
+    SimpleWorker::new(
+        "CleanupExpiredAccessTokens",
+        job::JOB_TYPE_CLEANUP_EXPIRED_ACCESS_TOKENS,
+        |config| config.enable_user_access_tokens,
+        |app, _job| {
+            Box::pin(async move {
+                app.cleanup_expired_access_tokens(
+                    mm_model::utils::get_millis(),
+                    crate::access_token_expiry::CLEANUP_BATCH_LIMIT,
+                    crate::access_token_expiry::CLEANUP_MAX_BATCHES,
+                )
+                .await
+                .map_err(WorkerError::from)
+            })
+        },
+    )
+}
+
+/// Port of `jobs/notify_expiring_access_tokens/worker.go`:
+/// [`crate::App::notify_expiring_access_tokens`]. Enabled by
+/// `ServiceSettings.EnableUserAccessTokens`.
+pub fn notify_expiring_access_tokens_worker() -> SimpleWorker {
+    SimpleWorker::new(
+        "NotifyExpiringAccessTokens",
+        job::JOB_TYPE_NOTIFY_EXPIRING_ACCESS_TOKENS,
+        |config| config.enable_user_access_tokens,
+        |app, _job| {
+            Box::pin(async move {
+                app.notify_expiring_access_tokens()
+                    .await
+                    .map_err(|err| -> WorkerError { err })
+            })
+        },
+    )
+}
+
 // ---------------------------------------------------------------------------
 // The schedulers that queue these workers' jobs (registered, not started — D-802)
 // ---------------------------------------------------------------------------
@@ -154,6 +194,26 @@ pub fn expiry_notify_scheduler() -> PeriodicScheduler {
         job::JOB_TYPE_EXPIRY_NOTIFY,
         Duration::from_secs(10 * 60),
         |config| config.extend_session_length_with_activity,
+    )
+}
+
+/// Port of `jobs/cleanup_expired_access_tokens/scheduler.go`: hourly, while
+/// `ServiceSettings.EnableUserAccessTokens`.
+pub fn cleanup_expired_access_tokens_scheduler() -> PeriodicScheduler {
+    PeriodicScheduler::new(
+        job::JOB_TYPE_CLEANUP_EXPIRED_ACCESS_TOKENS,
+        Duration::from_secs(60 * 60),
+        |config| config.enable_user_access_tokens,
+    )
+}
+
+/// Port of `jobs/notify_expiring_access_tokens/scheduler.go`: hourly, while
+/// `ServiceSettings.EnableUserAccessTokens`.
+pub fn notify_expiring_access_tokens_scheduler() -> PeriodicScheduler {
+    PeriodicScheduler::new(
+        job::JOB_TYPE_NOTIFY_EXPIRING_ACCESS_TOKENS,
+        Duration::from_secs(60 * 60),
+        |config| config.enable_user_access_tokens,
     )
 }
 

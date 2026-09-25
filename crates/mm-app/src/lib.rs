@@ -4,6 +4,7 @@
 //! which is what keeps the API layer free of SQL and the store layer free of request semantics.
 
 pub mod access_control_policy;
+pub mod access_token_expiry;
 pub mod agents;
 pub mod analytics;
 pub mod audit;

@@ -143,6 +143,43 @@ pub trait UserAccessTokenStore {
         &self,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserAccessTokenStore.GetExpiredBefore` (user_access_token_store.go:245):
+    /// active tokens with `0 < ExpiresAt <= cutoff`, oldest expiry first, at most `limit`. The
+    /// secret is not selected (`token` comes back empty). `limit <= 0` is an empty list without a
+    /// query.
+    fn get_expired_before(
+        &self,
+        cutoff: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<UserAccessToken>, StoreError>> + Send;
+
+    /// Port of `SqlUserAccessTokenStore.DeleteByIds` (user_access_token_store.go:419): the
+    /// sessions minted by these tokens, then the tokens, in one transaction; answers the tokens
+    /// deleted. An empty list is 0 without a transaction.
+    fn delete_by_ids(
+        &self,
+        token_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlUserAccessTokenStore.GetExpiringTokens` (user_access_token_store.go:297):
+    /// active tokens of live, non-bot users, not yet expired, that have entered one of the
+    /// `threshold_days` buckets without a warning at it — `ExpiresAt <= now + T` and
+    /// (`LastNotifiedAt` NULL or `< ExpiresAt - T`) for **some** T. Nearest expiry first, at
+    /// most `limit`; `limit <= 0` or no thresholds is an empty list without a query.
+    fn get_expiring_tokens(
+        &self,
+        now: i64,
+        threshold_days: &[i64],
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<UserAccessToken>, StoreError>> + Send;
+
+    /// Port of `SqlUserAccessTokenStore.UpdateLastNotifiedAt` (user_access_token_store.go:350).
+    fn update_last_notified_at(
+        &self,
+        token_id: &str,
+        notified_at: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -188,6 +225,151 @@ impl From<TokenRow> for UserAccessToken {
 }
 
 impl UserAccessTokenStore for SqlUserAccessTokenStore {
+    #[tracing::instrument(skip(self), fields(found))]
+    async fn get_expired_before(
+        &self,
+        cutoff: i64,
+        limit: i64,
+    ) -> Result<Vec<UserAccessToken>, StoreError> {
+        if limit <= 0 {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query_as!(
+            TokenRow,
+            r#"
+            SELECT id                          AS "id!",
+                   ''                          AS "token!",
+                   COALESCE(userid, '')        AS "userid!",
+                   COALESCE(description, '')   AS "description!",
+                   COALESCE(isactive, false)   AS "isactive!",
+                   expiresat                   AS "expiresat!",
+                   NULL::bigint                AS "lastnotifiedat"
+              FROM useraccesstokens
+             WHERE expiresat > 0
+               AND expiresat <= $1
+               AND isactive = true
+             ORDER BY expiresat ASC
+             LIMIT $2
+            "#,
+            cutoff,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find expired UserAccessTokens".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+        Ok(rows.into_iter().map(UserAccessToken::from).collect())
+    }
+
+    #[tracing::instrument(skip_all, fields(ids = token_ids.len()))]
+    async fn delete_by_ids(&self, token_ids: &[String]) -> Result<i64, StoreError> {
+        if token_ids.is_empty() {
+            return Ok(0);
+        }
+        let db = |context: &str| {
+            let context = context.to_owned();
+            move |source| StoreError::Db { context, source }
+        };
+        let mut tx = self.pool.begin().await.map_err(db("begin_transaction"))?;
+        // The sessions first, through the tokens' secrets: reversed, the sub-select would find
+        // nothing and the sessions would outlive their tokens.
+        sqlx::query!(
+            "DELETE FROM sessions
+              WHERE token IN (SELECT token FROM useraccesstokens WHERE id = ANY($1))",
+            token_ids
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(db("failed to delete Sessions for UserAccessTokens"))?;
+        let deleted = sqlx::query!("DELETE FROM useraccesstokens WHERE id = ANY($1)", token_ids)
+            .execute(&mut *tx)
+            .await
+            .map_err(db("failed to delete UserAccessTokens"))?
+            .rows_affected();
+        tx.commit().await.map_err(db("commit_transaction"))?;
+        Ok(i64::try_from(deleted).unwrap_or(i64::MAX))
+    }
+
+    #[tracing::instrument(skip(self), fields(found))]
+    async fn get_expiring_tokens(
+        &self,
+        now: i64,
+        threshold_days: &[i64],
+        limit: i64,
+    ) -> Result<Vec<UserAccessToken>, StoreError> {
+        if limit <= 0 || threshold_days.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Go ORs one `And{…}` per threshold; `EXISTS … unnest` is that OR over an array, so the
+        // statement is one text whatever the thresholds are.
+        let bucket_millis: Vec<i64> = threshold_days
+            .iter()
+            .map(|days| days.saturating_mul(mm_model::license::DAY_IN_MILLISECONDS))
+            .collect();
+        let rows = sqlx::query_as!(
+            TokenRow,
+            r#"
+            SELECT t.id                          AS "id!",
+                   ''                            AS "token!",
+                   COALESCE(t.userid, '')        AS "userid!",
+                   COALESCE(t.description, '')   AS "description!",
+                   COALESCE(t.isactive, false)   AS "isactive!",
+                   t.expiresat                   AS "expiresat!",
+                   t.lastnotifiedat
+              FROM useraccesstokens t
+             INNER JOIN users ON users.id = t.userid
+              LEFT JOIN bots ON bots.userid = t.userid
+             WHERE t.isactive = true
+               AND t.expiresat > $1
+               AND users.deleteat = 0
+               AND bots.userid IS NULL
+               AND EXISTS (
+                     SELECT 1 FROM unnest($2::bigint[]) AS bucket(millis)
+                      WHERE t.expiresat <= $1 + bucket.millis
+                        AND (t.lastnotifiedat IS NULL
+                             OR t.lastnotifiedat < t.expiresat - bucket.millis))
+             ORDER BY t.expiresat ASC
+             LIMIT $3
+            "#,
+            now,
+            &bucket_millis,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find expiring UserAccessTokens".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+        Ok(rows.into_iter().map(UserAccessToken::from).collect())
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn update_last_notified_at(
+        &self,
+        token_id: &str,
+        notified_at: i64,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE useraccesstokens SET lastnotifiedat = $1 WHERE id = $2",
+            notified_at,
+            token_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to update LastNotifiedAt for UserAccessToken with id={token_id}"
+            ),
+            source,
+        })?;
+        Ok(())
+    }
+
     #[tracing::instrument(skip_all, fields(token_id = %token_id))]
     async fn get(&self, token_id: &str) -> Result<UserAccessToken, StoreError> {
         let row = sqlx::query_as!(
