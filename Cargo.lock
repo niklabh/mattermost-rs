@@ -1828,6 +1828,7 @@ dependencies = [
  "chrono-tz",
  "flate2",
  "gobwire",
+ "gofont",
  "gogoldmark",
  "gohtml2text",
  "goimage",

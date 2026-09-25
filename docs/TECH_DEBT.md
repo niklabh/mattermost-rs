@@ -6266,7 +6266,12 @@ pinned rather than assumed.
 
 ## D-204 · The generated initials avatar is not reproducible, so three routes forward
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, profile image)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, profile image)
+**Closed** 2026-09-25 — `crates/gofont` is a byte-exact port of freetype-go (unhinted), `x/image/font`
+and the two `image/draw` paths, and `mm_app::profile_image` draws Go's avatar over it; all three
+routes, the bot branch, the `LastPictureUpdate == 0` write-back and the username-change redraw are
+served. Oracle: `fixtures/behaviour_avatar.json` (161 glyph cases, 51 avatars, byte-identical PNGs);
+`parity::image_writes`.
 
 `users.GetDefaultProfileImage` rasterises a user's initials with `golang/freetype` over
 `fonts/nunito-bold.ttf`. Every pixel of the result depends on that rasteriser's hinting and
@@ -7620,7 +7625,9 @@ divergence at the one call site that would show it, before a route echoes a file
 
 ## D-411 · the default-avatar writes are Go's; the profile and brand writes only for unported formats
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+**Closed** 2026-09-25 — item 2, the last thing owed, is served with D-204 (the generated avatar,
+the embedded bot image, `ResetLastPictureUpdate` and the `user_updated` event).
 **Narrowed** 2026-09-20 (second time) — items 1 and 3 are served for every format:
 `SetProfileImage` (including `UpdateLastPictureUpdate`, the identical-bytes early return and
 `invalidateUserCacheAndPublish`) and `SaveBrandImage` (including the archive `MoveFile`), byte for
@@ -9945,21 +9952,20 @@ or routing every `SetActiveChannel` through one of them.
 
 ---
 
-## D-1072 · A post's notification e-mail is never batched, and has no avatar for a sender without a picture
+## D-1072 · A post's notification e-mail is never batched
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (the post notification e-mail)
 
-Two arms of `sendNotificationEmail` are not ported (`mm_app::notification_email`):
+One arm of `sendNotificationEmail` is not ported (`mm_app::notification_email`); the second listed here is paid:
 
 - **Batching.** With `EmailSettings.EnableEmailBatching` on (off by default) Go queues the mail
   in `EmailBatchingJob` — a per-server buffer flushed on a timer into one digest per recipient
   (`app/email/email_batching.go`). This server sends the single notification instead and logs.
   It needs the batching job and its digest template, and it holds state only the process that
   queued it can flush — the two servers would each batch half a user's mail.
-- **The generated avatar.** `GetProfileImage` on a sender with no stored picture makes Go draw
-  the initials avatar and **write it**; this server's `get_profile_image` refuses that case, so
-  the mail goes without the embedded photo. It needs the initials renderer (the `gofont` port) in
-  `mm-app`. Once Go has written the file, both servers embed the same bytes.
+- ~~The generated avatar.~~ Paid 2026-09-25 with D-204: a sender with no stored picture gets the
+  drawn avatar embedded, and written back when `LastPictureUpdate == 0`
+  (`parity::email_send::a_mention_from_a_sender_without_a_picture_embeds_the_drawn_avatar`).
 
 ---
 

@@ -21,6 +21,7 @@ flate2.workspace = true
 mm-markdown.workspace = true
 # Byte-exact ports of Go's image codecs and the imaging libraries (BSD-3-Clause AND MIT).
 goimage.workspace = true
+gofont.workspace = true
 # Byte-exact ports of net/mail, net/smtp, mime and go-mail's writer (MIT AND BSD-3-Clause), and
 # of jaytaylor/html2text — what `mail.rs` (platform/shared/mail) drives.
 gomail = { path = "../gomail" }

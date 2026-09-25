@@ -456,6 +456,15 @@ pub trait UserStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlUserStore.ResetLastPictureUpdate` (user_store.go:390): `LastPictureUpdate` set
+    /// to **minus** the current millis and `UpdateAt` to the same instant. The sign is the whole
+    /// point — a negative value marks a generated avatar, which the next username change may
+    /// regenerate, where a positive one marks an upload that must be kept.
+    fn reset_last_picture_update(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlUserStore.UpdatePassword` (user_store.go:410).
     ///
     /// **Six columns, not one.** The statement is
@@ -3518,6 +3527,25 @@ impl UserStore for SqlUserStore {
         let cur_time = mm_model::utils::get_millis();
         let result = sqlx::query!(
             "UPDATE users SET lastpictureupdate = $1, updateat = $1 WHERE id = $2",
+            cur_time,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(updated))]
+    async fn reset_last_picture_update(&self, user_id: &str) -> Result<(), StoreError> {
+        let cur_time = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            "UPDATE users SET lastpictureupdate = $1, updateat = $2 WHERE id = $3",
+            -cur_time,
             cur_time,
             user_id,
         )

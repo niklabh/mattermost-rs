@@ -448,8 +448,8 @@ impl App {
             {
                 continue;
             }
-            let image = match self.get_profile_image(&notification.sender.id).await {
-                Ok(image) => Some(image),
+            let image = match self.get_profile_image(notification.sender).await {
+                Ok((image, _)) => Some(image),
                 Err(err) => {
                     tracing::warn!(user_id = %notification.sender.id, error = ?err, "Unable to get the sender user profile image.");
                     None

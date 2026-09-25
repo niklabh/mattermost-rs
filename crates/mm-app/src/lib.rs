@@ -118,6 +118,7 @@ pub mod post_search;
 pub mod post_unread;
 pub mod post_write;
 pub mod preference;
+pub mod profile_image;
 // Appended 2026-09-15: the notice cache and `GetProductNotices`.
 pub mod product_notices;
 pub mod properties;

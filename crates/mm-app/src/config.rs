@@ -509,6 +509,9 @@ pub struct Config {
     /// would fail Go's own validation, which is why the branch it gates is close to
     /// unreachable and is ported for fidelity rather than for coverage.
     pub file_driver_name: String,
+    /// `FileSettings.InitialFont` (config.go:1933, `new("nunito-bold.ttf")`): the TTF under the
+    /// `fonts` directory the generated initials avatar is drawn in.
+    pub initial_font: String,
 
     /// `FileSettings.Directory` (config.go:1815). Go default **`"./data/"`**
     /// (`FileSettingsDefaultDirectory`, config.go:155), and `SetDefaults` replaces an **empty**
@@ -1586,6 +1589,7 @@ impl Default for Config {
             // `Config.SetDefaults` on a nil section (config.go:4345).
             feature_flags: default_feature_flags(),
             file_driver_name: "local".to_owned(),
+            initial_font: "nunito-bold.ttf".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
             // config.go:1888 — 100 MiB.
@@ -2085,6 +2089,7 @@ impl Config {
             // override of `""` is a deliberate empty driver and must survive as one.
             file_driver_name: lookup("MM_FILESETTINGS_DRIVERNAME")
                 .unwrap_or(default.file_driver_name),
+            initial_font: lookup("MM_FILESETTINGS_INITIALFONT").unwrap_or(default.initial_font),
             file_directory: lookup("MM_FILESETTINGS_DIRECTORY").unwrap_or(default.file_directory),
             file_max_file_size: lookup_int(
                 lookup,
@@ -2811,6 +2816,7 @@ impl Config {
             file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),
+            initial_font: file_settings.initial_font.unwrap_or(default.initial_font),
             // `SetDefaults` replaces an empty directory with the default as well as a nil one
             // (config.go:1903), which `unwrap_or` alone would not: a document holding `""` must
             // read `./data/`, not `""`.
@@ -3635,6 +3641,8 @@ struct ConnectedWorkspacesSettingsDocument {
 struct FileSettingsDocument {
     #[serde(rename = "DriverName")]
     driver_name: Option<String>,
+    #[serde(rename = "InitialFont")]
+    initial_font: Option<String>,
     #[serde(rename = "MaxFileSize")]
     max_file_size: Option<i64>,
     #[serde(rename = "EnableFileAttachments")]

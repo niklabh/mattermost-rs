@@ -792,7 +792,7 @@ async fn a_profile_upload_neither_server_decodes_writes_nothing() {
 /// the permission, and the hand-over. The success runs on a throwaway user so the generated
 /// avatar this leaves behind belongs to a row that is deleted on the way out.
 #[tokio::test]
-async fn the_default_profile_image_reset_refuses_and_then_forwards() {
+async fn the_default_profile_image_reset_refuses_and_then_writes_gos_avatar() {
     if !stack_enabled() {
         return;
     }
@@ -824,10 +824,10 @@ async fn the_default_profile_image_reset_refuses_and_then_forwards() {
     .await;
     assert_eq!(refused["status_code"], 403);
 
-    // The success. `SetDefaultProfileImage` generates the initials avatar through freetype and
-    // writes it, so it is Go's — but this port must still hand it over rather than answer, and
-    // the answer must be the ordinary `ReturnStatusOK` 200 rather than the 201 the brand route
-    // gives.
+    // The success, served here since D-204: the generated avatar written over
+    // `users/<id>/profile.png`, `LastPictureUpdate` set negative, and the ordinary
+    // `ReturnStatusOK` 200 rather than the 201 the brand route gives. The file must be byte for
+    // byte what Go generates for the same user.
     let (status, body, served_by) = send(
         &client,
         reqwest::Method::DELETE,
@@ -840,14 +840,50 @@ async fn the_default_profile_image_reset_refuses_and_then_forwards() {
     .await;
     assert_eq!(
         served_by.as_deref(),
-        Some("go"),
-        "the generated avatar is Go's: {}",
+        Some("rust"),
+        "the reset is served here: {}",
         String::from_utf8_lossy(&body)
     );
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&body).expect("JSON"),
         serde_json::json!({ "status": "OK" }),
+    );
+    let written = std::fs::read(format!(
+        "{}/users/{}/profile.png",
+        common::stack_data_dir(),
+        plain.id
+    ))
+    .expect("the avatar was written");
+    let (go_status, go_default, _) = send(
+        &client,
+        reqwest::Method::GET,
+        GO,
+        &format!("/api/v4/users/{}/image/default", plain.id),
+        &admin,
+        None,
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(go_status, 200);
+    assert_eq!(
+        written, go_default,
+        "the written avatar is Go's, byte for byte"
+    );
+    let (_, user, _) = send(
+        &client,
+        reqwest::Method::GET,
+        GO,
+        &format!("/api/v4/users/{}", plain.id),
+        &admin,
+        None,
+        Vec::new(),
+    )
+    .await;
+    let user: serde_json::Value = serde_json::from_slice(&user).expect("a user");
+    assert!(
+        user["last_picture_update"].as_i64().is_some_and(|v| v < 0),
+        "ResetLastPictureUpdate stores minus the time: {user}"
     );
 
     delete_plain_user(&client, &admin, &plain.id).await;
@@ -857,14 +893,14 @@ async fn the_default_profile_image_reset_refuses_and_then_forwards() {
 // getDefaultProfileImage — GET /api/v4/users/{user_id}/image/default
 // ---------------------------------------------------------------------------------------------
 
-/// The generated avatar: two refusals from here, the image itself from Go.
+/// The generated avatar: two refusals, then the image — all from here, and the image Go's bytes.
 ///
 /// The 403 `view_members` branch is **unreachable on this stack** —
 /// `GetViewUsersRestrictions` is `None` for an admin with no restricting scheme, so
 /// `UserCanSeeOtherUser` is `true` for every pair and the port never reaches the refusal. It is
 /// named as a parity risk rather than asserted.
 #[tokio::test]
-async fn the_default_profile_image_read_refuses_and_then_forwards() {
+async fn the_default_profile_image_read_refuses_and_then_draws_gos_avatar() {
     if !stack_enabled() {
         return;
     }
@@ -897,9 +933,9 @@ async fn the_default_profile_image_read_refuses_and_then_forwards() {
     assert_eq!(missing["id"], "app.user.missing_account.const");
     assert_eq!(missing["status_code"], 404);
 
-    // The image. Forwarded, so the two servers return the same bytes because they are the same
-    // bytes — what is under test is that the forward carries the headers through unchanged, and
-    // that registering `/image/default` did not shadow `/image`.
+    // The image, served here since D-204 and byte for byte Go's — the freetype port, the colour
+    // and the PNG encoder at once — with Go's headers; and registering `/image/default` did not
+    // shadow `/image`.
     let path = format!("/api/v4/users/{me}/image/default");
     let go = client
         .get(format!("{GO}{path}"))
@@ -918,8 +954,8 @@ async fn the_default_profile_image_read_refuses_and_then_forwards() {
         rs.headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "freetype is Go's"
+        Some("rust"),
+        "the generated avatar is served here"
     );
     assert_eq!(rs.status().as_u16(), 200);
     assert_eq!(go.status().as_u16(), 200);
@@ -927,7 +963,7 @@ async fn the_default_profile_image_read_refuses_and_then_forwards() {
         assert_eq!(
             rs.headers().get(header),
             go.headers().get(header),
-            "{header} must survive the forward"
+            "{header} is Go's"
         );
     }
     assert_eq!(
@@ -938,10 +974,7 @@ async fn the_default_profile_image_read_refuses_and_then_forwards() {
     );
     let go_bytes = go.bytes().await.expect("bytes").to_vec();
     let rs_bytes = rs.bytes().await.expect("bytes").to_vec();
-    assert_eq!(
-        rs_bytes, go_bytes,
-        "the forwarded PNG is byte for byte Go's"
-    );
+    assert_eq!(rs_bytes, go_bytes, "the PNG is byte for byte Go's");
     assert!(
         rs_bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
         "and it is a PNG"
@@ -963,6 +996,186 @@ async fn the_default_profile_image_read_refuses_and_then_forwards() {
         Some(b"rust".as_slice()),
         "`/image/default` must not shadow `/image`"
     );
+}
+
+/// Two more branches of the generated avatar, both served here since D-204:
+///
+/// - a **bot**'s default image is the embedded PNG, whatever its name;
+/// - a user whose `profile.png` does not read gets the generated avatar from `GET …/image` — with
+///   `max-age=300` and **no** etag — and, `LastPictureUpdate` being 0, the file written back.
+///
+/// The missing picture is made by deleting the file and zeroing the column, once per server so
+/// each writes its own; Go's user cache is purged after the SQL write.
+#[tokio::test]
+async fn a_bots_default_and_a_missing_picture_are_drawn_like_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = common::fixture_pool().await else {
+        return;
+    };
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let (team_id, _) = a_team_and_channel_the_user_is_in(&client, &admin).await;
+
+    // The bot.
+    let bot = common::plant_bot("imgdefbot", logged_in_user_id(), 0)
+        .await
+        .expect("a bot");
+    let path = format!("/api/v4/users/{bot}/image/default");
+    let (go_status, go_bot, _) = send(
+        &client,
+        reqwest::Method::GET,
+        GO,
+        &path,
+        &admin,
+        None,
+        Vec::new(),
+    )
+    .await;
+    let (rs_status, rs_bot, served) = send(
+        &client,
+        reqwest::Method::GET,
+        RUST,
+        &path,
+        &admin,
+        None,
+        Vec::new(),
+    )
+    .await;
+    assert_eq!((go_status, rs_status), (200, 200));
+    assert_eq!(served.as_deref(), Some("rust"));
+    assert_eq!(rs_bot, go_bot, "the bot's embedded image is Go's");
+    common::unplant_bot(&bot).await;
+
+    // The missing picture, once per server.
+    let mut answers = Vec::new();
+    for (base, tag) in [(GO, "imgmissgo"), (RUST, "imgmissrs")] {
+        let user = create_plain_user(&client, &admin, &team_id, tag).await;
+        let file = format!("{}/users/{}/profile.png", common::stack_data_dir(), user.id);
+        let _ = std::fs::remove_file(&file);
+        sqlx::query("UPDATE users SET lastpictureupdate = 0 WHERE id = $1")
+            .bind(&user.id)
+            .execute(&pool)
+            .await
+            .expect("the picture is forgotten");
+        common::invalidate_go_caches(&client, &admin).await;
+
+        let response = client
+            .get(format!("{base}/api/v4/users/{}/image", user.id))
+            .header("Authorization", format!("Bearer {admin}"))
+            .send()
+            .await
+            .expect("answers");
+        let status = response.status().as_u16();
+        let served = response
+            .headers()
+            .get("x-mmrs-served-by")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let cache = response
+            .headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let etag = response.headers().get("etag").is_some();
+        let body = response.bytes().await.expect("bytes").to_vec();
+        let (_, go_default, _) = send(
+            &client,
+            reqwest::Method::GET,
+            GO,
+            &format!("/api/v4/users/{}/image/default", user.id),
+            &admin,
+            None,
+            Vec::new(),
+        )
+        .await;
+        let written = std::fs::read(&file).ok();
+        answers.push((
+            status,
+            served == Some("rust".to_owned()),
+            cache,
+            etag,
+            body == go_default,
+            written.as_deref() == Some(go_default.as_slice()),
+        ));
+        delete_plain_user(&client, &admin, &user.id).await;
+    }
+    let rust = answers.pop().expect("two answers");
+    let go = answers.pop().expect("two answers");
+    assert_eq!(go.0, 200);
+    assert_eq!(go.2.as_deref(), Some("max-age=300, private"), "Go: {go:?}");
+    assert!(!go.3, "Go sends no etag for a failed read");
+    assert!(go.4 && go.5, "Go drew the avatar and wrote it back: {go:?}");
+    assert!(rust.1, "the missing picture is served here");
+    assert_eq!(
+        (rust.0, &rust.2, rust.3, rust.4, rust.5),
+        (go.0, &go.2, go.3, go.4, go.5),
+        "the answer and the write-back differ"
+    );
+}
+
+/// A username change on an account still showing a generated picture (`LastPictureUpdate <= 0`)
+/// regenerates it: `UpdateUser` → `UpdateDefaultProfileImage`. The new file must be Go's
+/// avatar for the **new** name, on both servers.
+#[tokio::test]
+async fn a_username_change_redraws_the_generated_avatar_like_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let (team_id, _) = a_team_and_channel_the_user_is_in(&client, &admin).await;
+
+    let mut answers = Vec::new();
+    for (base, tag) in [(GO, "imgrengo"), (RUST, "imgrenrs")] {
+        let user = create_plain_user(&client, &admin, &team_id, tag).await;
+        let renamed = format!("q{tag}");
+        let response = client
+            .put(format!("{base}/api/v4/users/{}/patch", user.id))
+            .header("Authorization", format!("Bearer {admin}"))
+            .json(&serde_json::json!({ "username": renamed }))
+            .send()
+            .await
+            .expect("answers");
+        let status = response.status().as_u16();
+        let served_here = response
+            .headers()
+            .get("x-mmrs-served-by")
+            .is_some_and(|v| v.as_bytes() == b"rust");
+        let body: serde_json::Value = response.json().await.expect("a user");
+        let written = std::fs::read(format!(
+            "{}/users/{}/profile.png",
+            common::stack_data_dir(),
+            user.id
+        ))
+        .expect("the avatar file");
+        let (_, go_default, _) = send(
+            &client,
+            reqwest::Method::GET,
+            GO,
+            &format!("/api/v4/users/{}/image/default", user.id),
+            &admin,
+            None,
+            Vec::new(),
+        )
+        .await;
+        answers.push((
+            status,
+            served_here,
+            written == go_default,
+            body["last_picture_update"].as_i64().is_some_and(|v| v < 0),
+        ));
+        delete_plain_user(&client, &admin, &user.id).await;
+    }
+    let rust = answers.pop().expect("two answers");
+    let go = answers.pop().expect("two answers");
+    assert_eq!(
+        go,
+        (200, false, true, true),
+        "Go redrew the avatar for the new name"
+    );
+    assert_eq!(rust, (200, true, true, true), "and so does this server");
 }
 
 // ---------------------------------------------------------------------------------------------
