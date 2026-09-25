@@ -11160,7 +11160,7 @@ fn assert_auth_answers_are_gos(calls: &[Json], hooks: &[Json], frames: &[Json], 
 // ---------------------------------------------------------------------------------------------
 
 /// The Rust host of the server tranche; see `second_server_ports`.
-const SERVER_HOST_PORT: u16 = 8165;
+const SERVER_HOST_PORT: u16 = 8148;
 /// Its Go server: **below 100**, because Go's port + 100 is the next stack's Go server.
 const SERVER_GO_OFFSET: u16 = 93;
 /// Each side's tag: in its users' names, its team, and every name its script makes.
@@ -11694,7 +11694,7 @@ fn assert_server_answers_are_gos(calls: &[Json], frames: &[Json]) {
 // ---------------------------------------------------------------------------------------------
 
 /// The Rust host of the property tranche; see `second_server_ports`.
-const PROPS_HOST_PORT: u16 = 8170;
+const PROPS_HOST_PORT: u16 = 8150;
 /// Its Go server: **below 100**, because Go's port + 100 is the next stack's Go server.
 const PROPS_GO_OFFSET: u16 = 95;
 /// Each side's tag: in its user's name, its team, and its property group's name.
