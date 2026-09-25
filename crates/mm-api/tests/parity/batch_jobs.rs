@@ -426,6 +426,11 @@ fn dm_limit_values(extra_invalid: usize) -> Vec<String> {
     values
 }
 
+/// Held by both tests that run `delete_dms_preferences_migration`. Its delete is not scoped to a
+/// user, so either test's run deletes the other's planted rows; a Rust run that then finds none
+/// is done after one batch and never writes Go's `null` over the planted `{}`.
+static DM_LIMITS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The out-of-range preferences go, in batches of 100 until a batch deletes none, and the valid
 /// ones — `007` included — stay. `Data` is `null` between batches (the migration's next data is
 /// Go's nil map) and at the end.
@@ -437,6 +442,7 @@ async fn the_dm_limit_migration_deletes_what_go_deletes_and_reports_alike() {
     let Some(pool) = fixture_pool().await else {
         return;
     };
+    let _dm_limits = DM_LIMITS.lock().await;
     let app = rust_app().await;
     let mut sides = Vec::new();
     let mut jobs = Vec::new();
@@ -494,6 +500,7 @@ async fn a_cancel_request_mid_run_ends_in_success_at_the_progress_it_had() {
     let Some(pool) = fixture_pool().await else {
         return;
     };
+    let _dm_limits = DM_LIMITS.lock().await;
     let http = client();
     let admin = go_minted_token(&http).await;
     let app = rust_app().await;
@@ -589,6 +596,35 @@ struct Delivery {
     chunk_left: bool,
 }
 
+/// The data directory holding `path`. Every Go server on the stack runs job workers against the
+/// one `Jobs` table, so a planted export may be claimed by a secondary oracle (the link-preview
+/// server, say) and written under *its* run directory — which lives in whichever checkout started
+/// the stack. So look in the stack's own directory first, then in every Go run directory of this
+/// checkout and of the main one.
+fn data_dir_holding(path: &str) -> Option<std::path::PathBuf> {
+    let own = std::path::PathBuf::from(common::stack_data_dir());
+    if own.join(path).exists() {
+        return Some(own);
+    }
+    let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut roots = vec![here.clone()];
+    // A linked worktree's `.git` is a file naming `<main>/.git/worktrees/<name>`.
+    if let Ok(pointer) = std::fs::read_to_string(here.join(".git")) {
+        if let Some(gitdir) = pointer.trim().strip_prefix("gitdir: ") {
+            if let Some(main) = std::path::Path::new(gitdir).ancestors().nth(3) {
+                roots.push(main.to_path_buf());
+            }
+        }
+    }
+    roots.iter().find_map(|root| {
+        std::fs::read_dir(root.join("reference/.build"))
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().join("data"))
+            .find(|data| data.join(path).exists())
+    })
+}
+
 async fn delivery(pool: &sqlx::PgPool, job_id: &str) -> Delivery {
     let path = format!("admin_reports/batch_report_{job_id}.csv");
     let (name, extension, size, creator, post_id, mime): (
@@ -613,9 +649,10 @@ async fn delivery(pool: &sqlx::PgPool, job_id: &str) -> Delivery {
             .await
             .expect("the delivering post");
     let file_ids: Vec<String> = serde_json::from_str(&file_ids).unwrap_or_default();
-    let dir = std::path::PathBuf::from(common::stack_data_dir());
+    let dir = data_dir_holding(&path)
+        .unwrap_or_else(|| panic!("the compiled report {path} is in no Go data directory"));
     let csv = std::fs::read_to_string(dir.join(&path))
-        .unwrap_or_else(|e| panic!("the compiled report {path} is not on disk: {e}"));
+        .unwrap_or_else(|e| panic!("the compiled report {path} does not read: {e}"));
     let chunk_left = dir
         .join(format!("admin_reports/batch_report_{job_id}__0.csv"))
         .exists();
@@ -658,9 +695,10 @@ async fn drop_deliveries(pool: &sqlx::PgPool, job_ids: &[String]) {
         .execute(pool)
         .await
         .expect("the post delete runs");
-    let dir = std::path::PathBuf::from(common::stack_data_dir());
     for path in &paths {
-        let _ = std::fs::remove_file(dir.join(path));
+        if let Some(dir) = data_dir_holding(path) {
+            let _ = std::fs::remove_file(dir.join(path));
+        }
     }
 }
 
