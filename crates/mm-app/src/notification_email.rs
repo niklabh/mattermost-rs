@@ -17,9 +17,10 @@
 //! # What is not here
 //!
 //! Email **batching** (`EnableEmailBatching`, off by default): a batched recipient is sent the
-//! single mail instead, and the divergence is [D-1072]. A sender with **no stored picture**: Go
-//! generates the initials avatar and writes it; this server sends the mail without the photo
-//! ([D-1072] too).
+//! single mail instead, and the divergence is [D-1072].
+//!
+//! A sender with **no stored picture** gets the generated initials avatar embedded, and written
+//! back when `LastPictureUpdate == 0` — `App::get_profile_image`, as in Go (served since D-204).
 
 use std::collections::BTreeMap;
 
