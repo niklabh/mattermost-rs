@@ -6447,8 +6447,11 @@ impl CommandSide {
     }
 }
 
-/// The commands the Rust host must hand on to Go: no plugin answers them.
-const COMMAND_FORWARDED: [&str; 2] = ["/hookrec nothing", "/nosuchhookrec at all"];
+/// The commands the Rust host must hand on to Go. None since 2026-09-25: a trigger no plugin
+/// answers used to forward (`/hookrec nothing`, `/nosuchhookrec at all`) because this process
+/// could not see Go's plugin directory; under the Rust host Go runs no plugins, so the rest of
+/// `ExecuteCommand` — custom, built-in, the 404 — is answered here.
+const COMMAND_FORWARDED: [&str; 0] = [];
 
 /// Every `TriggerId` in an `ExecuteCommand` entry, decoded: `<client id>:<user id>:<millis>:
 /// <signature>`. Read before anything is masked.
@@ -6975,7 +6978,7 @@ async fn run_the_command_tour(client: &reqwest::Client, admin: &str) {
     drop(go);
 
     // A plugin disabled through the Rust host takes its commands with it: the trigger is then
-    // nobody's, and Go answers it.
+    // nobody's, and — Go running no plugins under this host — the 404 is answered here.
     let (status, body, _) = request_raw(
         client,
         &rust.base,
@@ -7011,7 +7014,7 @@ async fn run_the_command_tour(client: &reqwest::Client, admin: &str) {
         (
             404,
             Some("api.command.execute_command.not_found.app_error"),
-            false
+            true
         ),
         "a disabled plugin's command is nobody's: {answer}"
     );
