@@ -759,6 +759,12 @@ is answered whole, `json.RawMessage` bytes included. `UpdatePropertyFields` with
 field answers not-implemented. The server tour now also calls `LogAuditRecWithLevel` and lists
 two plugins, active then inactive.
 
+**Then 240 of 258:** the eight access-control methods (`plugin_api/access_control.rs`), as Go's
+public build answers them: the resource type's format and owner, the action, the ids and the
+acting user in Go's order, then a nil engine's 501 — and for `EvaluateAccessControl` the raw
+store read `resolvePluginPolicyExistence` falls back on (`no_policy`, or 503 when a policy of the
+requested type exists). The engine itself is private (enterprise) code.
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

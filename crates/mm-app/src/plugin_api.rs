@@ -165,6 +165,7 @@ use crate::plugin_hooks::{
 use crate::post::PrepareError;
 use crate::reaction::ReactionWrite;
 
+mod access_control;
 mod auth;
 mod channels;
 mod files;
@@ -569,6 +570,73 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         self.server_log_audit_rec(args.a.as_deref(), &args.b.name);
         Ok(api::Z_LogAuditRecWithLevelReturns {})
     }
+    // -- access control ---------------------------------------------------------------------
+
+    /// `PluginAPI.EvaluateAccessControl`; see [`AppPluginApi::access_evaluate`].
+    async fn evaluate_access_control(
+        &self,
+        args: api::Z_EvaluateAccessControlArgs,
+    ) -> Result<api::Z_EvaluateAccessControlReturns, NotImplemented> {
+        self.access_evaluate(args).await
+    }
+
+    /// `PluginAPI.SaveAccessControlPolicy`; see [`AppPluginApi::access_save_policy`].
+    async fn save_access_control_policy(
+        &self,
+        _args: api::Z_SaveAccessControlPolicyArgs,
+    ) -> Result<api::Z_SaveAccessControlPolicyReturns, NotImplemented> {
+        self.access_save_policy().await
+    }
+
+    /// `PluginAPI.GetAccessControlPolicy`; see [`AppPluginApi::access_get_policy`].
+    async fn get_access_control_policy(
+        &self,
+        _args: api::Z_GetAccessControlPolicyArgs,
+    ) -> Result<api::Z_GetAccessControlPolicyReturns, NotImplemented> {
+        self.access_get_policy().await
+    }
+
+    /// `PluginAPI.DeleteAccessControlPolicy`; see [`AppPluginApi::access_delete_policy`].
+    async fn delete_access_control_policy(
+        &self,
+        _args: api::Z_DeleteAccessControlPolicyArgs,
+    ) -> Result<api::Z_DeleteAccessControlPolicyReturns, NotImplemented> {
+        self.access_delete_policy().await
+    }
+
+    /// `PluginAPI.CheckAccessControlExpression`; see [`AppPluginApi::access_check_expression`].
+    async fn check_access_control_expression(
+        &self,
+        args: api::Z_CheckAccessControlExpressionArgs,
+    ) -> Result<api::Z_CheckAccessControlExpressionReturns, NotImplemented> {
+        self.access_check_expression(args).await
+    }
+
+    /// `PluginAPI.QueryUsersForAccessControlExpression`; see [`AppPluginApi::access_query_users`].
+    async fn query_users_for_access_control_expression(
+        &self,
+        args: api::Z_QueryUsersForAccessControlExpressionArgs,
+    ) -> Result<api::Z_QueryUsersForAccessControlExpressionReturns, NotImplemented> {
+        self.access_query_users(args).await
+    }
+
+    /// `PluginAPI.GetAccessControlFieldsAutocomplete`; see
+    /// [`AppPluginApi::access_fields_autocomplete`].
+    async fn get_access_control_fields_autocomplete(
+        &self,
+        _args: api::Z_GetAccessControlFieldsAutocompleteArgs,
+    ) -> Result<api::Z_GetAccessControlFieldsAutocompleteReturns, NotImplemented> {
+        self.access_fields_autocomplete().await
+    }
+
+    /// `PluginAPI.GetAccessControlVisualAST`; see [`AppPluginApi::access_visual_ast`].
+    async fn get_access_control_visual_ast(
+        &self,
+        args: api::Z_GetAccessControlVisualASTArgs,
+    ) -> Result<api::Z_GetAccessControlVisualASTReturns, NotImplemented> {
+        self.access_visual_ast(args).await
+    }
+
     // -- properties -------------------------------------------------------------------------
 
     /// `PluginAPI.RegisterPropertyGroup`; see [`AppPluginApi::properties_register_group`].

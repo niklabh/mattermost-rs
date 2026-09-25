@@ -11753,6 +11753,11 @@ async fn props_purge_rows() {
         .iter()
         .map(|side| format!("prop_{side}"))
         .collect();
+    sqlx::query("DELETE FROM accesscontrolpolicies WHERE id = ANY($1)")
+        .bind(PROPS_POLICIES.map(|(id, _)| id).to_vec())
+        .execute(&pool)
+        .await
+        .expect("the planted policies go");
     for statement in [
         "DELETE FROM propertyvalues WHERE groupid IN (SELECT id FROM propertygroups WHERE name = ANY($1))",
         "DELETE FROM propertyfields WHERE groupid IN (SELECT id FROM propertygroups WHERE name = ANY($1))",
@@ -11781,6 +11786,30 @@ async fn props_purge_rows() {
             .execute(&pool)
             .await
             .expect("the side teams go");
+    }
+}
+
+/// The two policy rows the access-control calls read, shared by both sides: one of the recorder's
+/// own `doc` type (so `EvaluateAccessControl` must fail closed, 503) and one of another type under
+/// the id it asks about (a foreign row, the vacuous allow). Ids as `examples/recorder/properties.rs`
+/// names them.
+const PROPS_POLICIES: [(&str, &str); 2] = [
+    ("acpolicyownacpolicyownacpo", "mmrs.hookrecorder:doc"),
+    ("acpolicyothacpolicyothacpo", "mmrs.hookrecorder:other"),
+];
+
+async fn props_plant_policies() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    for (id, type_) in PROPS_POLICIES {
+        sqlx::query(
+            "INSERT INTO accesscontrolpolicies (id, name, type, active, createat, revision, version, data, props) \
+             VALUES ($1, $1, $2, true, 1, 1, 'v0.5', '{}', '{}')",
+        )
+        .bind(id)
+        .bind(type_)
+        .execute(&pool)
+        .await
+        .expect("a planted policy");
     }
 }
 
@@ -11845,6 +11874,7 @@ fn props_decode_bytes(value: &mut Json) {
 }
 
 async fn run_the_props_tour(client: &reqwest::Client, admin: &str) {
+    props_plant_policies().await;
     let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-props");
     let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
     let go_log = lay_out(&go_run);
@@ -12195,6 +12225,63 @@ fn assert_props_answers_are_gos(calls: &[Json], frames: &[Json]) {
         answer("UpdatePropertyValues", 1)["A"][1]["Value"],
         "[\"c\"]",
         "each value handed back sanitised"
+    );
+    let evaluated: Vec<Json> = (0..7)
+        .map(|n| {
+            let r = answer("EvaluateAccessControl", n);
+            if r["B"].is_null() {
+                r["A"]["Context"].clone()
+            } else {
+                r["B"]["Id"].clone()
+            }
+        })
+        .collect();
+    assert_eq!(
+        evaluated,
+        [
+            Json::from("app.access_control.plugin.invalid_resource_type.app_error"),
+            Json::from("app.access_control.plugin.resource_type_forbidden.app_error"),
+            Json::from("app.access_control.plugin.invalid_action.app_error"),
+            Json::from("app.access_control.plugin.invalid_id.app_error"),
+            answer("EvaluateAccessControl", 4)["A"]["Context"].clone(),
+            Json::from("app.access_control.plugin.evaluation_unavailable.app_error"),
+            answer("EvaluateAccessControl", 4)["A"]["Context"].clone(),
+        ],
+        "the refusals in order, then no policy, a policy of this type, a foreign one"
+    );
+    assert_eq!(
+        answer("EvaluateAccessControl", 4)["A"]["Decision"],
+        true,
+        "the vacuous allow"
+    );
+    for (name, status) in [
+        ("SaveAccessControlPolicy", 501),
+        ("GetAccessControlPolicy", 501),
+        ("GetAccessControlFieldsAutocomplete", 501),
+        ("GetAccessControlVisualAST", 501),
+    ] {
+        let r = answer(
+            name,
+            if name == "GetAccessControlVisualAST" {
+                1
+            } else {
+                0
+            },
+        );
+        assert_eq!(r["B"]["StatusCode"], status, "{name}: {r}");
+    }
+    assert_eq!(
+        answer("DeleteAccessControlPolicy", 0)["A"]["StatusCode"],
+        501
+    );
+    assert_eq!(
+        [2, 3, 4].map(|n| answer("CheckAccessControlExpression", n)["B"]["Id"].clone()),
+        [
+            Json::from("app.access_control.plugin.invalid_acting_user.app_error"),
+            Json::from("app.access_control.plugin.invalid_acting_user.app_error"),
+            Json::from("app.pap.check_expression.app_error"),
+        ],
+        "a malformed and a missing acting user, then the engine"
     );
     assert!(
         frames

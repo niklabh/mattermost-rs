@@ -10,6 +10,9 @@
 //! lives in a group of its own, `prop_<side>`, a PSAv1 group as a plugin registers one — the
 //! groups the property hooks manage are not touched (the Rust host answers those not
 //! implemented, D-1331).
+//!
+//! Then the eight access-control methods, which read two policy rows the suite plants under
+//! [`OWN_POLICY`] and [`OTHER_POLICY`].
 
 use go_netrpc::Client;
 use mm_plugin::wire::model::{
@@ -647,6 +650,129 @@ async fn updates_and_deletes(
     }
 }
 
+/// A policy id the suite plants with this plugin's `doc` type, and one it plants with a
+/// foreign-looking type (`mmrs.hookrecorder:other`); both are shared by the two sides.
+pub const OWN_POLICY: &str = "acpolicyownacpolicyownacpo";
+pub const OTHER_POLICY: &str = "acpolicyothacpolicyothacpo";
+const DOC: &str = "mmrs.hookrecorder:doc";
+
+/// Access control, as Go's public build answers it: every refusal before the engine, the raw
+/// existence read `EvaluateAccessControl` falls back on, and the engine's 501s.
+async fn access_control(api: &Client, input: &Inputs, out: &mut Vec<Json>) {
+    let own = input.own.as_str();
+    for (user, resource_type, resource, action) in [
+        (own, "no colon", MISSING, "view"),
+        (own, "other.plugin:doc", MISSING, "view"),
+        (own, DOC, MISSING, "Bad Action!"),
+        (MISSING, DOC, "short", "view"),
+        (own, DOC, MISSING, "view"),
+        (own, DOC, OWN_POLICY, "view"),
+        (own, DOC, OTHER_POLICY, "view"),
+    ] {
+        let _: Option<Z_EvaluateAccessControlReturns> = call(
+            api,
+            out,
+            "EvaluateAccessControl",
+            Z_EvaluateAccessControlArgs {
+                a: user.to_owned(),
+                b: resource_type.to_owned(),
+                c: resource.to_owned(),
+                d: action.to_owned(),
+            },
+        )
+        .await;
+    }
+    let _: Option<Z_SaveAccessControlPolicyReturns> = call(
+        api,
+        out,
+        "SaveAccessControlPolicy",
+        Z_SaveAccessControlPolicyArgs {
+            a: own.to_owned(),
+            b: None,
+        },
+    )
+    .await;
+    let _: Option<Z_GetAccessControlPolicyReturns> = call(
+        api,
+        out,
+        "GetAccessControlPolicy",
+        Z_GetAccessControlPolicyArgs {
+            a: OWN_POLICY.to_owned(),
+        },
+    )
+    .await;
+    let _: Option<Z_DeleteAccessControlPolicyReturns> = call(
+        api,
+        out,
+        "DeleteAccessControlPolicy",
+        Z_DeleteAccessControlPolicyArgs {
+            a: own.to_owned(),
+            b: DOC.to_owned(),
+            c: OWN_POLICY.to_owned(),
+        },
+    )
+    .await;
+    for (user, resource_type) in [
+        (own, "no colon"),
+        (own, "other.plugin:doc"),
+        ("short", DOC),
+        (MISSING, DOC),
+        (own, DOC),
+    ] {
+        let _: Option<Z_CheckAccessControlExpressionReturns> = call(
+            api,
+            out,
+            "CheckAccessControlExpression",
+            Z_CheckAccessControlExpressionArgs {
+                a: user.to_owned(),
+                b: resource_type.to_owned(),
+                c: "true".to_owned(),
+            },
+        )
+        .await;
+    }
+    for (user, resource_type) in [(MISSING, DOC), (own, DOC)] {
+        let _: Option<Z_QueryUsersForAccessControlExpressionReturns> = call(
+            api,
+            out,
+            "QueryUsersForAccessControlExpression",
+            Z_QueryUsersForAccessControlExpressionArgs {
+                a: user.to_owned(),
+                b: resource_type.to_owned(),
+                c: "true".to_owned(),
+                d: String::new(),
+                e: String::new(),
+                f: 500,
+            },
+        )
+        .await;
+    }
+    let _: Option<Z_GetAccessControlFieldsAutocompleteReturns> = call(
+        api,
+        out,
+        "GetAccessControlFieldsAutocomplete",
+        Z_GetAccessControlFieldsAutocompleteArgs {
+            a: MISSING.to_owned(),
+            b: String::new(),
+            c: 0,
+        },
+    )
+    .await;
+    for (user, resource_type) in [(own, "other.plugin:doc"), (own, DOC)] {
+        let _: Option<Z_GetAccessControlVisualASTReturns> = call(
+            api,
+            out,
+            "GetAccessControlVisualAST",
+            Z_GetAccessControlVisualASTArgs {
+                a: user.to_owned(),
+                b: resource_type.to_owned(),
+                c: "true".to_owned(),
+            },
+        )
+        .await;
+    }
+}
+
 /// The whole script, in a fixed order.
 pub async fn run(api: &Client, input: &Inputs) -> Vec<Json> {
     let mut out = Vec::new();
@@ -654,5 +780,6 @@ pub async fn run(api: &Client, input: &Inputs) -> Vec<Json> {
     let fields = fields(api, input, &group, &mut out).await;
     let values = values(api, input, &group, &fields, &mut out).await;
     updates_and_deletes(api, input, &group, &fields, &values, &mut out).await;
+    access_control(api, input, &mut out).await;
     out
 }
