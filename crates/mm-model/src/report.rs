@@ -5,8 +5,9 @@
 //! `UserReport.ToReport` renders every timestamp with `time.UnixMilli(ms).String()`, whose layout
 //! is `2006-01-02 15:04:05.999999999 -0700 MST` — space-separated, local zone, fractional seconds
 //! with trailing zeros trimmed, and a **zone abbreviation** at the end. That is what
-//! [`go_time_string`] reproduces, with one documented divergence: Rust has no zone-abbreviation
-//! table, so the trailing `MST` is omitted. Everything before it matches.
+//! [`go_time_string`] reproduces, the abbreviation included: the local zone is resolved to its
+//! IANA name the way Go's `time.Local` is ([`local_time_zone`]) and read from `chrono_tz`'s copy
+//! of the same tz database.
 
 use serde::{Deserialize, Serialize};
 
@@ -61,15 +62,52 @@ pub fn is_valid_report_export_format(format: &str) -> bool {
 /// Layout: `2006-01-02 15:04:05.999999999 -0700 MST`. The `.999…` verb trims trailing zeros and
 /// drops the dot entirely when the fraction is zero, so a whole second renders without one.
 ///
-/// **Divergence:** the trailing zone abbreviation is omitted — Rust has no IANA abbreviation
-/// table, and inventing one would produce a *different* wrong answer rather than a shorter right
-/// one. An unrepresentable instant yields the empty string; Go cannot reach that from an `int64`
-/// of milliseconds.
+/// The zone is [`local_time_zone`], so the abbreviation is the tz database's (`IST`, `UTC`,
+/// `CEST`). Only when that zone cannot be named — a `/etc/localtime` that is not a link into a
+/// zoneinfo tree — is the process-local offset used with no abbreviation, where Go would still
+/// have one. An unrepresentable instant yields the empty string; Go cannot reach that from an
+/// `int64` of milliseconds.
 pub fn go_time_string(millis: i64) -> String {
-    match get_time_for_millis(millis) {
-        Some(t) => go_time_string_in(&t),
-        None => String::new(),
+    let Some(utc) = chrono::DateTime::from_timestamp_millis(millis) else {
+        return String::new();
+    };
+    match local_time_zone() {
+        Some(zone) => go_time_string_tz(&utc.with_timezone(zone)),
+        None => match get_time_for_millis(millis) {
+            Some(t) => go_time_string_in(&t),
+            None => String::new(),
+        },
     }
+}
+
+/// [`go_time_string_in`] plus the zone abbreviation, for an instant in a named zone — Go's full
+/// `time.Time.String()`.
+pub fn go_time_string_tz(t: &chrono::DateTime<chrono_tz::Tz>) -> String {
+    format!("{} {}", go_time_string_in(t), t.format("%Z"))
+}
+
+/// The zone Go's `time.Local` resolves to (time/zoneinfo_unix.go `initLocal`), by IANA name.
+///
+/// `TZ` unset reads `/etc/localtime` — named here by the zoneinfo path its link points at; `TZ`
+/// set but empty is **UTC**; otherwise its value, a leading `:` dropped. A name `chrono_tz` does
+/// not know is `None`, and Go's own answer there is UTC — so an unknown `TZ` is UTC here too.
+/// Resolved once, as Go resolves `time.Local` once.
+pub fn local_time_zone() -> Option<&'static chrono_tz::Tz> {
+    static ZONE: std::sync::OnceLock<Option<chrono_tz::Tz>> = std::sync::OnceLock::new();
+    ZONE.get_or_init(|| {
+        let name = match std::env::var("TZ") {
+            Ok(tz) if tz.is_empty() => "UTC".to_owned(),
+            Ok(tz) => tz.strip_prefix(':').unwrap_or(&tz).to_owned(),
+            Err(_) => {
+                let target = std::fs::read_link("/etc/localtime").ok()?;
+                let target = target.to_string_lossy().into_owned();
+                let (_, name) = target.split_once("zoneinfo/")?;
+                name.to_owned()
+            }
+        };
+        Some(name.parse::<chrono_tz::Tz>().unwrap_or(chrono_tz::Tz::UTC))
+    })
+    .as_ref()
 }
 
 /// The zone-explicit half of [`go_time_string`].
@@ -340,7 +378,7 @@ fn user_report_err(suffix: &str) -> Box<AppError> {
 
 #[cfg(test)]
 mod go_parity {
-    use super::go_time_string_in;
+    use super::{go_time_string_in, go_time_string_tz};
     use chrono::{FixedOffset, TimeZone};
 
     fn oracle() -> serde_json::Value {
@@ -356,30 +394,34 @@ mod go_parity {
     /// `go_time_string` reads the wall clock off the local zone, so using `Local` here would make
     /// the test pass or fail by geography ([D-008]).
     ///
-    /// **The trailing zone abbreviation is a documented divergence** — Rust has no IANA
-    /// abbreviation table — so the comparison is against Go's output with that suffix removed.
+    /// The whole string, the zone abbreviation included — Asia/Kolkata's history has more than
+    /// `IST` in it (`HMT`, `MMT`, `+0630`), so the old instants in the corpus pin the table too.
     #[test]
-    fn time_string_matches_go_without_the_zone_abbreviation() {
+    fn time_string_matches_go_with_the_zone_abbreviation() {
         let oracle = oracle();
-        // Asia/Kolkata is +05:30 and has had no DST since 1945, so a fixed offset reproduces
-        // every instant in the corpus exactly.
         assert_eq!(oracle["time_zone"].as_str().unwrap(), "Asia/Kolkata");
-        let zone = FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap();
+        let zone = chrono_tz::Asia::Kolkata;
 
         let cases = oracle["time_string"].as_array().unwrap();
         assert!(cases.len() >= 15);
         for case in cases {
             let millis = case["millis"].as_i64().unwrap();
             let want = case["out"].as_str().unwrap();
-            let (want_without_zone_name, _) = want.rsplit_once(' ').unwrap();
-
             let instant = zone.timestamp_millis_opt(millis).single().unwrap();
             assert_eq!(
-                go_time_string_in(&instant),
-                want_without_zone_name,
+                go_time_string_tz(&instant),
+                want,
                 "time.UnixMilli({millis}).String()"
             );
         }
+        // The offset-only half still matches with the name removed, for a caller holding a
+        // fixed-offset instant.
+        let fixed = FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap();
+        let instant = fixed
+            .timestamp_millis_opt(1_700_000_000_000)
+            .single()
+            .unwrap();
+        assert_eq!(go_time_string_in(&instant), "2023-11-15 03:43:20 +0530");
     }
 }
 

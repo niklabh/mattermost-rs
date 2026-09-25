@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT createat AS \"create_at!\", userid AS \"user_id!\"\n              FROM drafts\n             WHERE createat > $1 OR (createat = $1 AND userid > $2)\n             ORDER BY createat, userid ASC\n             LIMIT 100\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "c4b970333b7e7d87183ace229dc4dc716cc43ee34f75fdf67a431615219d0868"
+}

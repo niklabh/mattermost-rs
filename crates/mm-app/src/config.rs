@@ -3701,7 +3701,7 @@ fn normalise_webserver_mode(mode: String) -> String {
 /// Go's list is closed and case-sensitive apart from the six forms below: `TRUE`, `True` and
 /// `true` parse, but `tRuE` and `yes` do not. Widening it to `eq_ignore_ascii_case` would accept
 /// values the Go server rejects, which is how the two configurations drift apart.
-pub(crate) fn parse_bool(raw: &str) -> Option<bool> {
+pub fn parse_bool(raw: &str) -> Option<bool> {
     match raw {
         "1" | "t" | "T" | "TRUE" | "true" | "True" => Some(true),
         "0" | "f" | "F" | "FALSE" | "false" | "False" => Some(false),

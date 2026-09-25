@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM preferences\n             WHERE (userid, category, name) IN (\n                   SELECT userid, category, name\n                     FROM preferences\n                    WHERE category = $1\n                      AND name = $2\n                      AND (SUBSTRING(CONCAT('000000000000000', value), LENGTH(value) + 1, 15)\n                               > '000000000000040'\n                           OR SUBSTRING(CONCAT('000000000000000', value), LENGTH(value) + 1, 15)\n                               < '000000000000001')\n                    LIMIT 100\n             )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0d5f0df085642f5504ef05db1b17a53fae2d8a3570f1d6e71ed48fc61a621ed9"
+}

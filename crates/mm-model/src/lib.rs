@@ -69,6 +69,7 @@ pub mod github_release;
 pub mod gitlab;
 pub mod go_bytes;
 pub mod go_charset;
+pub mod go_csv;
 /// x/net/html's tokenizer, which lives in the generic crate `gohtml` (it is Go's code, not
 /// Mattermost's) and is re-exported here under the path the link-preview code has always used.
 pub use gohtml::token as go_html;

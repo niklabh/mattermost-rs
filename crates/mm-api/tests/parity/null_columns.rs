@@ -312,6 +312,8 @@ async fn a_null_banner_is_null_and_a_json_null_banner_is_an_empty_struct() {
 /// `StringArray.Value` itself writes for a nil slice, and it used to fail the read here.
 #[tokio::test]
 async fn a_null_string_array_column_is_null_either_way() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -420,6 +422,8 @@ async fn a_null_string_array_column_is_null_either_way() {
 /// omitted rather than a failed read.
 #[tokio::test]
 async fn a_null_draft_column_reads_as_go_reads_it() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
