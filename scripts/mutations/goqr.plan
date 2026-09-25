@@ -1,0 +1,11 @@
+# Mutation plan for goqr (rsc/qr's encoder and PNG writer), against the Go library's PNGs.
+#
+#   MUTATE_PACKAGE=goqr scripts/mutate-batch.sh scripts/mutations/goqr.plan
+
+qr-mask-one	crates/goqr/src/lib.rs	let plan = coding::Plan::new(v, level, 0)?;	let plan = coding::Plan::new(v, level, 1)?;	pkg	every_png
+qr-pad-byte	crates/goqr/src/coding.rs	                self.write(0x11, 8);	                self.write(0x12, 8);	pkg	every_png
+qr-alpha-before-num	crates/goqr/src/lib.rs	    let enc = if Encoding::Num(text).check() {	    let enc = if false && Encoding::Num(text).check() {	pkg	every_png
+
+# ---- controls
+qr-control-scale-name	crates/goqr/src/lib.rs	        stride: cc.stride,\n        scale: 8,	        stride: cc.stride,\n        scale: 4 + 4,	pkg	every_png
+qr-control-crc-name	crates/goqr/src/png.rs	    let mut crc = Crc32::default();\n    crc.update(name);	    let mut c = Crc32::default();\n    let crc = &mut c;\n    crc.update(name);	pkg	every_png

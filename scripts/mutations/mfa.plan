@@ -1,0 +1,20 @@
+# Mutation plan for D-500 / D-1210's MFA branch: the TOTP (mm_app::otp, against dgoogauth), the
+# app layer's error mapping, the replay-list storage, and the login's MFA check.
+#
+#   MUTATE_PACKAGE=mm-api scripts/mutate-batch.sh scripts/mutations/mfa.plan
+#   MUTATE_PACKAGE=goqr scripts/mutate-batch.sh scripts/mutations/goqr.plan
+
+otp-no-future-step	crates/mm-app/src/otp.rs	let max_t = t0 + WINDOW_SIZE / 2;	let max_t = t0;	unit	otp::
+otp-replay-unchecked	crates/mm-app/src/otp.rs	            if used.contains(&t) {	            if false && used.contains(&t) {	unit	otp::
+otp-window-kept-from-t0	crates/mm-app/src/otp.rs	reuse.retain(|&ts| ts >= min_t);	reuse.retain(|&ts| ts >= t0);	unit	otp::
+otp-untrimmed	crates/mm-app/src/otp.rs	let password = token.trim();	let password = token;	unit	otp::
+otp-scratch-is-parse	crates/mm-app/src/otp.rs	        // `checkScratchCodes` over Mattermost's empty list.\n        return Err(TokenError::Invalid);	        // `checkScratchCodes` over Mattermost's empty list.\n        return Err(TokenError::Parse);	unit	otp::
+otp-base32-lower-case	crates/mm-app/src/otp.rs	BASE32.iter().position(|&a| a == c)	BASE32.iter().position(|&a| a == c.to_ascii_uppercase())	unit	otp::
+otp-www-kept	crates/mm-app/src/otp.rs	s.strip_prefix("www.").unwrap_or(s)	s	unit	otp::
+activate-parse-is-bad-token	crates/mm-app/src/user_auth.rs	Err(crate::otp::TokenError::Parse) => return Err(activate_failed()),	Err(crate::otp::TokenError::Parse) => return Err(activate_failed()).map_err(|mut e: Box<AppError>| { e.status_code = 401; e }),	api	mfa_enrolment
+login-parse-is-bad-code	crates/mm-app/src/login.rs	Err(crate::otp::TokenError::Parse) => Err(authenticate_failed()),	Err(crate::otp::TokenError::Parse) => Err(AppError::boxed("checkUserMfa", "api.user.check_user_mfa.bad_code.app_error", None, String::new(), 401)),	api	mfa_enrolment
+used-timestamps-as-numbers	crates/mm-store/src/user_store.rs	let strings: Vec<String> = ts.iter().map(i64::to_string).collect();	let strings: Vec<i64> = ts.to_vec();	api	mfa_enrolment
+
+# ---- controls
+mfa-control-rename	crates/mm-app/src/otp.rs	    let password = token.trim();\n    let bytes = password.as_bytes();	    let pw = token.trim();\n    let password = pw;\n    let bytes = password.as_bytes();	unit	otp::
+mfa-control-map-or	crates/mm-app/src/login.rs	Err(crate::otp::TokenError::Parse) => Err(authenticate_failed()),	Err(crate::otp::TokenError::Parse) => Err(authenticate_failed()).map(|()| ()),	api	mfa_enrolment

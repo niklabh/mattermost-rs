@@ -331,6 +331,14 @@ pub static PLUGIN_STATES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new
 /// re-run and wrong under `--workspace`.
 pub static PROPERTY_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// **The draft migrations delete drafts across every user**, so no test may hold a draft while one
+/// runs. `delete_orphan_drafts_migration` removes every draft that is not a thread reply — a
+/// channel draft's empty `RootId` names no post — and `delete_empty_drafts_migration` every draft
+/// with an empty message, whoever owns it. `parity::batch_jobs` runs both, on both servers, and
+/// takes this for writing; every test that plants or reads a draft takes it for reading, the
+/// [`ACTIVE_LICENCE_ROW`] pattern. Modules in other shards never run concurrently anyway.
+pub static DRAFT_ROWS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 /// **`brand/image.png` is one file for the whole installation**, and two suites care about it:
 /// `image_writes` uploads one through the forwarded `POST /api/v4/brand/image` to see the 201 and
 /// then deletes it again, while `file_bytes` asserts on what `GET /api/v4/brand/image` answers.

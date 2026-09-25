@@ -101,6 +101,154 @@
             "out": "24h0m0s"
         }
     ],
+    "encoding_csv": [
+        {
+            "error": "",
+            "out": "\n",
+            "record": [
+                ""
+            ]
+        },
+        {
+            "error": "",
+            "out": ",\n",
+            "record": [
+                "",
+                ""
+            ]
+        },
+        {
+            "error": "",
+            "out": "plain\n",
+            "record": [
+                "plain"
+            ]
+        },
+        {
+            "error": "",
+            "out": "a,b,c\n",
+            "record": [
+                "a",
+                "b",
+                "c"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\"\\.\"\n",
+            "record": [
+                "\\."
+            ]
+        },
+        {
+            "error": "",
+            "out": "\\.x\n",
+            "record": [
+                "\\.x"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\"has,comma\"\n",
+            "record": [
+                "has,comma"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\"has\"\"quote\"\n",
+            "record": [
+                "has\"quote"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\"\"\"\"\n",
+            "record": [
+                "\""
+            ]
+        },
+        {
+            "error": "",
+            "out": "\"line\nbreak\"\n",
+            "record": [
+                "line\nbreak"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\"carriage\rreturn\"\n",
+            "record": [
+                "carriage\rreturn"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\"crlf\r\nhere\"\n",
+            "record": [
+                "crlf\r\nhere"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\" leading space\"\n",
+            "record": [
+                " leading space"
+            ]
+        },
+        {
+            "error": "",
+            "out": "trailing space \n",
+            "record": [
+                "trailing space "
+            ]
+        },
+        {
+            "error": "",
+            "out": "\"\tleading tab\"\n",
+            "record": [
+                "\tleading tab"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\" nbsp\"\n",
+            "record": [
+                " nbsp"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\" em space\"\n",
+            "record": [
+                " em space"
+            ]
+        },
+        {
+            "error": "",
+            "out": "héllo,日本語\n",
+            "record": [
+                "héllo",
+                "日本語"
+            ]
+        },
+        {
+            "error": "",
+            "out": "2026-09-25 10:00:00 +0530 IST,system_admin system_user,\"team-a, team-b\"\n",
+            "record": [
+                "2026-09-25 10:00:00 +0530 IST",
+                "system_admin system_user",
+                "team-a, team-b"
+            ]
+        },
+        {
+            "error": "",
+            "out": "\"mixed \"\"q\"\" and, comma\n\"\n",
+            "record": [
+                "mixed \"q\" and, comma\n"
+            ]
+        }
+    ],
     "mod_semver_isvalid": [
         {
             "in": "",

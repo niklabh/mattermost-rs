@@ -26,8 +26,9 @@
 //! The health-check job (health_check.go) is [`HealthCheckJob`]; the prepackaged lists Go keeps on
 //! the environment are [`Environment::prepackaged_plugins`] and its siblings, filled by the app.
 //!
-//! Not ported yet: the per-plugin database connections Go's `AppDriver` tracks
-//! (`ConnWithPluginID`, `ShutdownConns`), which belong to the app's driver.
+//! Each plugin is served the driver through [`DriverForPlugin`], so its connections are opened
+//! under its id, and [`AppDriver::shutdown_conns`] closes what it left open once its process is
+//! stopped — supervisor.go's `Shutdown`, after `doneWg.Wait()`.
 //!
 //! Divergences: Go decodes `plugin.json` with case-insensitive keys ([D-040]) and YAML with
 //! goccy/go-yaml; here JSON keys match exactly and YAML goes through `serde_yaml_ng`. Neither
@@ -52,7 +53,8 @@ use mm_model::plugin_status::{
 
 use crate::error::decodable_error;
 use crate::rpc::{
-    Driver, HooksClient, PluginApiDynamic, PluginApiHttp, PluginApiStreams, handshake,
+    AppDriver, DriverForPlugin, HooksClient, PluginApiDynamic, PluginApiHttp, PluginApiStreams,
+    handshake,
 };
 use crate::wire::plugin::Z_OnDeactivateArgs;
 
@@ -559,7 +561,7 @@ pub struct PrepackagedPlugin {
 impl<A, D> Environment<A, D>
 where
     A: PluginApiDynamic + PluginApiStreams + PluginApiHttp,
-    D: Driver,
+    D: AppDriver,
 {
     pub fn new(
         new_api: ApiFactory<A>,
@@ -823,9 +825,11 @@ where
         self.set_plugin_state(&manifest.id, PLUGIN_STATE_RUNNING);
 
         let api = (self.new_api)(manifest);
-        let returns = supervisor.hooks.on_activate(&api, &self.driver).await;
+        let driver = Arc::new(DriverForPlugin::new(Arc::clone(&self.driver), &manifest.id));
+        let returns = supervisor.hooks.on_activate(&api, &driver).await;
         if let Some(error) = decodable_error(returns.a.as_ref()) {
             supervisor.shutdown().await;
+            self.driver.shutdown_conns(&manifest.id).await;
             return Err(EnvError::Activate(error.go_error()));
         }
         let supervisor = Arc::new(supervisor);
@@ -1010,6 +1014,7 @@ where
         }
         self.set_plugin_state(&id, PLUGIN_STATE_NOT_RUNNING);
         supervisor.shutdown().await;
+        self.driver.shutdown_conns(&id).await;
         true
     }
 
@@ -1148,7 +1153,7 @@ pub struct HealthCheckJob<A, D> {
 impl<A, D> HealthCheckJob<A, D>
 where
     A: PluginApiDynamic + PluginApiStreams + PluginApiHttp + Send + Sync + 'static,
-    D: Driver + Send + Sync + 'static,
+    D: AppDriver + Send + Sync + 'static,
 {
     fn timestamps(&self) -> std::sync::MutexGuard<'_, HashMap<String, Vec<Instant>>> {
         self.failure_timestamps
@@ -1228,7 +1233,7 @@ impl<A, D> HealthCheckJob<A, D> {
 impl<A, D> Environment<A, D>
 where
     A: PluginApiDynamic + PluginApiStreams + PluginApiHttp + Send + Sync + 'static,
-    D: Driver + Send + Sync + 'static,
+    D: AppDriver + Send + Sync + 'static,
 {
     /// environment.go, `TogglePluginHealthCheckJob`: start a job when enabling and none runs;
     /// stop the running one when disabling. Anything else does nothing.
@@ -1280,7 +1285,7 @@ impl<A, D> Environment<A, D> {
 impl<A, D> Environment<A, D>
 where
     A: PluginApiDynamic + PluginApiStreams + PluginApiHttp,
-    D: Driver,
+    D: AppDriver,
 {
     /// The disabling half of `TogglePluginHealthCheckJob`.
     async fn stop_health_check_job(&self) {

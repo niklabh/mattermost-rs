@@ -1,0 +1,25 @@
+# Mutation plan for UNIT P2: the plugin Driver (gopq and mm_app::plugin_driver).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-driver.plan
+
+dest-not-capped	crates/gopq/src/conn.rs	let count = dest.len().min(n);	let count = dest.len();	api	plugin_driver
+empty-query-is-zero-rows	crates/gopq/src/conn.rs	EMPTY_QUERY_RESPONSE => res = Some(ExecResult::Empty),	EMPTY_QUERY_RESPONSE => res = Some(ExecResult::RowsAffected(0)),	api	plugin_driver
+insert-count-is-oid	crates/gopq/src/conn.rs	affected = Some(parts[2]);	affected = Some(parts[1]);	api	plugin_driver
+read-only-swapped	crates/gopq/src/conn.rs	mode.push_str(if read_only {	mode.push_str(if !read_only {	api	plugin_driver
+failed-txn-committed	crates/gopq/src/conn.rs	if self.txn_status == TXN_FAILED {\n            self.rollback_inner().await?;	if false && self.txn_status == TXN_FAILED {\n            self.rollback_inner().await?;	api	plugin_driver
+next-set-after-done	crates/gopq/src/conn.rs	self.next.is_some() && !self.done	self.next.is_some()	api	plugin_driver
+stmt-arity-unchecked	crates/gopq/src/conn.rs	if v.len() != self.param_typs.len() {	if false && v.len() != self.param_typs.len() {	api	plugin_driver
+query-not-in-progress	crates/gopq/src/conn.rs	        if self.in_progress {\n            return Err(Error::msg(QUERY_IN_PROGRESS));\n        }\n        self.in_progress = true;\n        if args.is_empty() {\n            return self.simple_query(q).await;	        self.in_progress = true;\n        if args.is_empty() {\n            return self.simple_query(q).await;	api	plugin_driver
+empty-bytes-not-null	crates/gopq/src/encode.rs	            if v.is_empty() {\n                return Ok(None);\n            }	            if v.is_empty() {\n                return Ok(Some(Vec::new()));\n            }	api	plugin_driver
+string-bytea-raw	crates/gopq/src/encode.rs	encode_bytea(v.as_bytes())	v.clone().into_bytes()	api	plugin_driver
+bad-conn-not-closed	crates/mm-app/src/plugin_driver.rs	            entry.done.store(true, Ordering::SeqCst);	            entry.done.store(false, Ordering::SeqCst);	api	plugin_driver
+close-twice-ok	crates/mm-app/src/plugin_driver.rs	if entry.done.swap(true, Ordering::SeqCst) {	if false && entry.done.swap(true, Ordering::SeqCst) {	api	plugin_driver
+closed-id-conn-done	crates/mm-app/src/plugin_driver.rs	            None => Err(PluginError::Sentinel(Sentinel::BadConn)),	            None => Err(PluginError::Sentinel(Sentinel::ConnDone)),	api	plugin_driver
+dest-not-echoed	crates/mm-app/src/plugin_driver.rs	                if old == new {	                if false && old == new {	api	plugin_driver
+int64-named-int	crates/mm-app/src/plugin_driver.rs	gopq::Value::Int64(v) => Interface::new(names::INT64, v).ok(),	gopq::Value::Int64(v) => Interface::new(names::INT, v).ok(),	api	plugin_driver
+eof-not-sentinel	crates/mm-app/src/plugin_driver.rs	gopq::Error::Eof => PluginError::Sentinel(Sentinel::Eof),	gopq::Error::Eof => PluginError::Message("EOF".into()),	api	plugin_driver
+last-id-error-dropped	crates/mm-app/src/plugin_driver.rs	        Ok(id) => (id, None),\n        Err(e) => (0, encodable_error(Some(&pq_error(e)))),	        Ok(id) => (id, None),\n        Err(_) => (0, None),	api	plugin_driver
+
+# ---- controls
+control-txn-idle-byte	crates/gopq/src/conn.rs	const TXN_IDLE: u8 = b'I';	const TXN_IDLE: u8 = 73;	api	plugin_driver
+control-rows-remove	crates/mm-app/src/plugin_driver.rs	        self.maps().rows.remove(&args);	        let _ = self.maps().rows.remove(&args);	api	plugin_driver

@@ -637,6 +637,38 @@ pub trait UserStore {
         attempts: i32,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlUserStore.UpdateMfaSecret` (user_store.go:547): the secret, **and** the replay
+    /// list reset to `[]`, and `UpdateAt` bumped. `DeactivateMfa` calls it with `""`.
+    fn update_mfa_secret(
+        &self,
+        user_id: &str,
+        secret: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.UpdateMfaActive` (user_store.go:557): the flag and `UpdateAt`.
+    fn update_mfa_active(
+        &self,
+        user_id: &str,
+        active: bool,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.StoreMfaUsedTimestamps` (user_store.go:567): the replay list as a
+    /// JSON array of **decimal strings** (`model.StringArray`), and `UpdateAt`.
+    fn store_mfa_used_timestamps(
+        &self,
+        user_id: &str,
+        ts: &[i64],
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetMfaUsedTimestamps` (user_store.go:580): the list parsed back with
+    /// `strconv.Atoi`. No row, a column that is not an array of strings, or an entry that is not
+    /// an integer is an error; SQL `NULL` and JSON `null` are the empty list, as `StringArray.Scan`
+    /// makes them. Never `None`: the caller relies on a non-nil slice to keep replay protection on.
+    fn get_mfa_used_timestamps(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<i64>, StoreError>> + Send;
+
     /// Port of `SqlUserStore.TryIncrementFailedPasswordAttempts` (user_store.go:434).
     ///
     /// `UPDATE ... SET FailedAttempts = FailedAttempts + 1 WHERE Id = ? AND FailedAttempts < ?`,
@@ -3859,6 +3891,98 @@ impl UserStore for SqlUserStore {
         // visible in the answer.
         tracing::Span::current().record("updated", result.rows_affected());
         Ok(user_id.to_owned())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn update_mfa_secret(&self, user_id: &str, secret: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE users SET mfasecret = $1, mfausedtimestamps = '[]'::jsonb, updateat = $2 \
+             WHERE id = $3",
+            secret,
+            mm_model::utils::get_millis(),
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, active))]
+    async fn update_mfa_active(&self, user_id: &str, active: bool) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE users SET mfaactive = $1, updateat = $2 WHERE id = $3",
+            active,
+            mm_model::utils::get_millis(),
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn store_mfa_used_timestamps(&self, user_id: &str, ts: &[i64]) -> Result<(), StoreError> {
+        let strings: Vec<String> = ts.iter().map(i64::to_string).collect();
+        sqlx::query!(
+            "UPDATE users SET mfausedtimestamps = $1, updateat = $2 WHERE id = $3",
+            serde_json::json!(strings),
+            mm_model::utils::get_millis(),
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn get_mfa_used_timestamps(&self, user_id: &str) -> Result<Vec<i64>, StoreError> {
+        let context = || format!("failed to get MFA used timestamps for user with ID {user_id}");
+        let row =
+            sqlx::query_scalar!("SELECT mfausedtimestamps FROM users WHERE id = $1", user_id,)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: context(),
+                    source,
+                })?;
+        // `Get` on no row is `sql.ErrNoRows`: an error, not an empty list.
+        let Some(column) = row else {
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: format!("userId={user_id}"),
+            });
+        };
+        let strings: Vec<String> = match column {
+            None | Some(serde_json::Value::Null) => Vec::new(),
+            Some(value) => serde_json::from_value(value).map_err(|source| StoreError::Decode {
+                entity: "User",
+                column: "mfausedtimestamps",
+                source,
+            })?,
+        };
+        strings
+            .iter()
+            .map(|t| {
+                // `strconv.Atoi`: an optional sign, then decimal digits, within `int`.
+                t.parse::<i64>().map_err(|_| StoreError::InvalidInput {
+                    entity: "User",
+                    field: "MfaUsedTimestamps",
+                    value: t.clone(),
+                })
+            })
+            .collect()
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, attempts, updated))]

@@ -18,7 +18,8 @@
 //! **It mutates shared state before it can fail.** `Users.FailedAttempts` is claimed before the
 //! password is checked. A forward taken *after* that claim would have Go claim a second slot for
 //! the same attempt, so every condition this port cannot serve is detected **first** — see
-//! [`login`]'s forwarding table. The MFA probe costs an extra `SELECT` for exactly this reason.
+//! [`login`]'s forwarding table. The MFA check is served (since 2026-09-25), in Go's place after
+//! the claim, so it needs no probe.
 //!
 //! **Its success response is four headers and a body.** `Token`, and — only for a request
 //! carrying `X-Requested-With: XMLHttpRequest` — the three cookies `MMAUTHTOKEN` (HttpOnly),
@@ -66,7 +67,7 @@ const HEADER_TOKEN: &str = "Token";
 /// client, and the ones reachable only after a licence or an LDAP server is configured must
 /// survive that change without anyone remembering this file.
 const UNMASKED_ERRORS: &[&str] = &[
-    // Both MFA ids: forwarded by this port, so Go writes them, not us.
+    // Both MFA ids: `App::check_user_mfa`'s 400 and 401.
     "mfa.validate_token.authenticate.app_error",
     "api.user.check_user_mfa.bad_code.app_error",
     "api.user.login.blank_pwd.app_error",
@@ -136,10 +137,10 @@ fn mask_login_error(state: &AppState, err: ApiError) -> ApiError {
 /// | `magic_link_token` present | before the body is otherwise read | `AuthenticateUserForGuestMagicLink` is not ported, and the branch is licensed |
 /// | `LdapSettings.Enable` | before any lookup | both `GetUserForLogin` and `authenticateUser` consult an LDAP client this port has not got |
 /// | the licence is a **cloud** one | before any lookup | the cloud session cookie and the CWS token path; a self-hosted licence is served since 2026-09-13 |
-/// | the account has MFA and the server has MFA on | after the blank-password check, before the counter | Go asks *after* claiming a failed-attempt slot; asking here costs one `SELECT` and keeps the counter honest |
 ///
 /// Every one of those is a read. Nothing in this handler writes until
-/// `App::authenticate_user_for_login`, which is past all four.
+/// `App::authenticate_user_for_login`, which is past all three — and which checks the MFA token
+/// itself, after the failed-attempt claim, as Go does.
 ///
 /// # The order of the checks after authentication
 ///
@@ -209,15 +210,6 @@ pub async fn login(
     if license.as_deref().is_some_and(|l| l.is_cloud()) {
         tracing::Span::current().record("forwarded", true);
         tracing::Span::current().record("outcome", "cloud");
-        return proxy::forward_to_go(State(state), request).await;
-    }
-
-    // `AuthenticateUserForLogin` refuses a blank password before it looks anything up, and that
-    // id is unmasked — so the probe below must not run first or an empty body would answer the
-    // lookup error instead.
-    if !password.is_empty() && state.app.login_needs_mfa(id, login_id).await {
-        tracing::Span::current().record("forwarded", true);
-        tracing::Span::current().record("outcome", "mfa");
         return proxy::forward_to_go(State(state), request).await;
     }
 

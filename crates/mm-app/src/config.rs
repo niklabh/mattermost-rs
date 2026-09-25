@@ -896,6 +896,12 @@ pub struct Config {
     /// only the LDAP path reads it, and that path is forwarded.
     pub maximum_login_attempts: i64,
 
+    /// `ServiceSettings.MaximumURLLength` (config.go:492, defaulted **`2048`** at :1053, and
+    /// `IsValid` refuses anything below 1). `basicSecurityChecks` (web/handlers.go:143) refuses a
+    /// request URI longer than this with the 414 `basic_security_check.url.too_long_error`, before
+    /// `ServeHTTP` does anything else — see `mm_api::ratelimit::serve_http_preamble`.
+    pub maximum_url_length: i64,
+
     /// `ServiceSettings.SessionLengthWebInHours` (config.go:420, defaulted at :745).
     ///
     /// The web twin of [`Config::session_length_mobile_in_hours`] and the **same two-step
@@ -1646,6 +1652,7 @@ impl Default for Config {
             session_length_mobile_in_hours: 720,
             allow_cookies_for_subdomains: false,
             maximum_login_attempts: 10,
+            maximum_url_length: 2048,
             // `30 * 24`, the fresh-install arm — the same cascade and the same reasoning as
             // `session_length_mobile_in_hours` above.
             session_length_web_in_hours: 720,
@@ -2335,6 +2342,11 @@ impl Config {
                 "MM_SERVICESETTINGS_MAXIMUMLOGINATTEMPTS",
                 default.maximum_login_attempts,
             ),
+            maximum_url_length: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_MAXIMUMURLLENGTH",
+                default.maximum_url_length,
+            ),
             session_length_web_in_hours: lookup_int(
                 lookup,
                 "MM_SERVICESETTINGS_SESSIONLENGTHWEBINHOURS",
@@ -2933,6 +2945,9 @@ impl Config {
             maximum_login_attempts: service
                 .maximum_login_attempts
                 .unwrap_or(default.maximum_login_attempts),
+            maximum_url_length: service
+                .maximum_url_length
+                .unwrap_or(default.maximum_url_length),
             // The web half of the cascade at config.go:745, reproduced for the same reason the
             // mobile one above is: a document carrying only `SessionLengthWebInDays` is the
             // middle branch, and it decides both the session's `ExpiresAt` and the cookies'
@@ -3516,6 +3531,8 @@ struct ServiceSettingsDocument {
     allow_cookies_for_subdomains: Option<bool>,
     #[serde(rename = "MaximumLoginAttempts")]
     maximum_login_attempts: Option<i64>,
+    #[serde(rename = "MaximumURLLength")]
+    maximum_url_length: Option<i64>,
     #[serde(rename = "TerminateSessionsOnPasswordChange")]
     terminate_sessions_on_password_change: Option<bool>,
     #[serde(rename = "ExtendSessionLengthWithActivity")]
@@ -3766,7 +3783,7 @@ fn normalise_webserver_mode(mode: String) -> String {
 /// Go's list is closed and case-sensitive apart from the six forms below: `TRUE`, `True` and
 /// `true` parse, but `tRuE` and `yes` do not. Widening it to `eq_ignore_ascii_case` would accept
 /// values the Go server rejects, which is how the two configurations drift apart.
-pub(crate) fn parse_bool(raw: &str) -> Option<bool> {
+pub fn parse_bool(raw: &str) -> Option<bool> {
     match raw {
         "1" | "t" | "T" | "TRUE" | "true" | "True" => Some(true),
         "0" | "f" | "F" | "FALSE" | "false" | "False" => Some(false),
@@ -4304,6 +4321,16 @@ mod tests {
         let from_go = Config::from_document(include_str!("../../../fixtures/config_active.json"))
             .expect("the fixture is a config document");
         assert_eq!(from_go.burn_on_read_duration_seconds, 600);
+        assert_eq!(from_go.maximum_url_length, 2048);
+        let short = Config::from_document(r#"{"ServiceSettings":{"MaximumURLLength":77}}"#)
+            .expect("valid document");
+        assert_eq!(short.maximum_url_length, 77);
+        let env =
+            |key: &str| (key == "MM_SERVICESETTINGS_MAXIMUMURLLENGTH").then(|| "99".to_owned());
+        assert_eq!(
+            Config::default().apply_env_from(&env).maximum_url_length,
+            99
+        );
         assert_eq!(from_go.outgoing_integration_requests_timeout, 30);
         assert!(from_go.enable_permalink_previews, "config.go:536");
         assert!(

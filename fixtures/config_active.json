@@ -196,6 +196,7 @@
     "GoroutineHealthThreshold": -1,
     "MaximumLoginAttempts": 10,
     "MaximumPersonalAccessTokenLifetimeDays": 0,
+    "MaximumURLLength": 2048,
     "OutgoingIntegrationRequestsTimeout": 30,
     "PostEditTimeLimit": -1,
     "PostPriority": true,

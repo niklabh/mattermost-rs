@@ -20,6 +20,10 @@ package main
 //   - `fmt.Sprintf("%s", []string)` — `OutgoingWebhook.IsValid` (outgoing_webhook.go:127)
 //     measures its two 1024-byte caps against this rendering, brackets and separators included.
 //   - `golang.org/x/mod/semver.IsValid` — `AccessControlPolicy`'s five version validators.
+//   - `encoding/csv.Writer` with its defaults — `App.saveCSVChunk` and `compileCSVChunks`
+//     (app/report.go) write the user-export report with it. Recorded as the bytes one `Write` and
+//     `Flush` produce for a record, so the quoting decision and the escaping inside quotes are
+//     both pinned.
 //   - `github.com/Masterminds/semver/v3.StrictNewVersion` and ordering — `Manifest.IsValid` and
 //     `MeetMinServerVersion`. **A different parser from the one above**, and they disagree about
 //     the leading `v`; both are recorded so the port cannot conflate them.
@@ -27,6 +31,8 @@ package main
 // Determinism: fixed corpora only. No rand, no time.Now — see [D-032].
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -52,6 +58,7 @@ func writeGoStdlibBehaviourFixture(outDir string) error {
 		"mod_semver_isvalid": modSemverIsValidAll(),
 		"strict_semver":      strictSemverAll(),
 		"strict_semver_cmp":  strictSemverCompareAll(),
+		"encoding_csv":       encodingCSVAll(),
 		"time_zone":          time.Local.String(),
 	}
 
@@ -361,6 +368,54 @@ func strictSemverCompareAll() []map[string]any {
 		row["compare"] = a.Compare(b)
 		row["a_less_than_b"] = a.LessThan(b)
 		rows = append(rows, row)
+	}
+	return rows
+}
+
+// --- encoding/csv ------------------------------------------------------------------------------
+
+// csvCorpus exercises every branch of `fieldNeedsQuotes` and of the quoted-field loop: the empty
+// field (never quoted), the literal `\.` (always quoted), a comma, a quote, CR, LF and CRLF, a
+// leading space or tab or other Unicode space (quoted) against a trailing one (not), non-ASCII
+// text, and records of one and of several fields.
+var csvCorpus = [][]string{
+	{""},
+	{"", ""},
+	{"plain"},
+	{"a", "b", "c"},
+	{`\.`},
+	{`\.x`},
+	{"has,comma"},
+	{`has"quote`},
+	{`"`},
+	{"line\nbreak"},
+	{"carriage\rreturn"},
+	{"crlf\r\nhere"},
+	{" leading space"},
+	{"trailing space "},
+	{"\tleading tab"},
+	{"\u00a0nbsp"},
+	{"\u2003em space"},
+	{"héllo", "日本語"},
+	{"2026-09-25 10:00:00 +0530 IST", "system_admin system_user", "team-a, team-b"},
+	{"mixed \"q\" and, comma\n"},
+}
+
+func encodingCSVAll() []map[string]any {
+	rows := make([]map[string]any, 0, len(csvCorpus))
+	for _, record := range csvCorpus {
+		var buf bytes.Buffer
+		w := csv.NewWriter(&buf)
+		errText := ""
+		if err := w.Write(record); err != nil {
+			errText = err.Error()
+		}
+		w.Flush()
+		rows = append(rows, map[string]any{
+			"record": record,
+			"out":    buf.String(),
+			"error":  errText,
+		})
 	}
 	return rows
 }

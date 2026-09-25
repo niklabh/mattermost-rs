@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH dd AS (\n                SELECT userid, channelid, rootid\n                  FROM drafts\n                 WHERE createat > $1 OR (createat = $1 AND userid > $2)\n                 ORDER BY createat, userid\n                 LIMIT 100\n            )\n            DELETE FROM drafts d\n             USING dd\n             WHERE d.userid = dd.userid\n               AND d.channelid = dd.channelid\n               AND d.rootid = dd.rootid\n               AND d.message = ''\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3a96aec1c5ccda8d8d9f275c2e19658ebe954b71e9cf822bd1af7e2ab7f5781d"
+}

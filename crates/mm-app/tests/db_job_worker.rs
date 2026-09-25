@@ -32,7 +32,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mm_app::App;
-use mm_app::job_runtime::{SimpleWorker, Workers, do_job};
+use mm_app::job_runtime::{
+    BatchWorker, SimpleWorker, Workers, batch_migration_worker, do_batch_job, do_job,
+};
 use mm_model::job::{self, Job};
 use mm_model::utils::{AppError, StringMap, get_millis};
 use mm_store::{DesktopTokensStore, JobStore, SqlStore};
@@ -688,6 +690,358 @@ async fn job_worker_the_cleanup_desktop_tokens_body_deletes_only_rows_past_its_c
         .delete("mmrsjw_future")
         .await
         .expect("deletes");
+
+    purge(&pool).await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The batch worker shape
+// ---------------------------------------------------------------------------------------------
+
+/// Not a type any Go worker is registered for; see the module note.
+const BATCH_TYPE: &str = "mmrs_batch_probe";
+/// The `Systems` row the probe migration marks complete.
+const BATCH_KEY: &str = "mmrs_batch_probe_migration";
+
+async fn purge_batch_key(pool: &PgPool) {
+    sqlx::query("DELETE FROM systems WHERE name = $1")
+        .bind(BATCH_KEY)
+        .execute(pool)
+        .await
+        .expect("purges the probe key");
+}
+
+async fn system_value(pool: &PgPool, name: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT value FROM systems WHERE name = $1")
+        .bind(name)
+        .fetch_optional(pool)
+        .await
+        .expect("reads systems")
+}
+
+async fn set_status(pool: &PgPool, id: &str, status: &str) {
+    sqlx::query("UPDATE jobs SET status = $2 WHERE id = $1")
+        .bind(id)
+        .bind(status)
+        .execute(pool)
+        .await
+        .expect("the status is written");
+}
+
+/// A migration worker on [`BATCH_TYPE`] whose batch `n` answers `next(n, data)`; every `Data` it
+/// is handed is recorded, and `before(n)` runs first — for a test that moves the row mid-run.
+fn probe_migration(
+    seen: Arc<std::sync::Mutex<Vec<Option<StringMap>>>>,
+    before: impl Fn(usize) -> Option<(String, &'static str)> + Send + Sync + 'static,
+    next: impl Fn(usize) -> Result<(Option<StringMap>, bool), String> + Send + Sync + 'static,
+    pool: PgPool,
+) -> BatchWorker {
+    let before = Arc::new(before);
+    let next = Arc::new(next);
+    batch_migration_worker(
+        "MmrsBatchProbe",
+        BATCH_TYPE,
+        BATCH_KEY,
+        std::time::Duration::from_millis(10),
+        move |_app, data| {
+            let seen = Arc::clone(&seen);
+            let before = Arc::clone(&before);
+            let next = Arc::clone(&next);
+            let pool = pool.clone();
+            Box::pin(async move {
+                let n = {
+                    let mut seen = seen.lock().expect("unpoisoned");
+                    seen.push(data);
+                    seen.len() - 1
+                };
+                if let Some((id, status)) = before(n) {
+                    set_status(&pool, &id, status).await;
+                }
+                next(n).map_err(|message| -> Box<dyn std::error::Error + Send + Sync> {
+                    message.into()
+                })
+            })
+        },
+    )
+}
+
+fn cursor(n: usize) -> StringMap {
+    StringMap::from([("n".to_owned(), n.to_string())])
+}
+
+async fn run_batch(app: App, worker: BatchWorker, job: Job) {
+    let mut workers = Workers::new();
+    workers.add_batch(worker);
+    let slot = Arc::clone(workers.get_batch(BATCH_TYPE).expect("registered"));
+    do_batch_job(app, Arc::clone(&slot), job).await;
+    assert!(!slot.is_busy(), "the slot is released when DoJob returns");
+}
+
+/// `BatchMigrationWorker` end to end: each batch is handed the `Data` the last one left — the
+/// planted map first — until one says done; then progress 100, `success`, and the migration key.
+/// Between batches the only write is `SetJobProgress(0)` with the new cursor, so the finished row
+/// carries the **last** cursor, not the done batch's (it has none).
+#[tokio::test]
+async fn job_worker_batch_migration_runs_until_done_and_marks_the_key() {
+    if !enabled() {
+        return;
+    }
+    let _guard = DB.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    purge_batch_key(&pool).await;
+    let app = app(&pool);
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let worker = probe_migration(
+        Arc::clone(&seen),
+        |_| None,
+        |n| {
+            Ok(if n < 3 {
+                (Some(cursor(n + 1)), false)
+            } else {
+                (None, true)
+            })
+        },
+        pool.clone(),
+    );
+    let job = plant(&pool, "mmrsjw00000000000batchok1", BATCH_TYPE, 20).await;
+    run_batch(app, worker, job.clone()).await;
+
+    let seen = seen.lock().expect("unpoisoned").clone();
+    assert_eq!(
+        seen,
+        vec![
+            Some(StringMap::from([("planted".to_owned(), "yes".to_owned())])),
+            Some(cursor(1)),
+            Some(cursor(2)),
+            Some(cursor(3)),
+        ],
+        "each batch gets the cursor the one before it wrote"
+    );
+    let done = read(&pool, &job.id).await;
+    assert_eq!(done.status, job::JOB_STATUS_SUCCESS);
+    assert_eq!(done.progress, 100);
+    assert_eq!(done.data, Some(cursor(3)));
+    assert_eq!(
+        system_value(&pool, BATCH_KEY).await.as_deref(),
+        Some("true")
+    );
+
+    purge(&pool).await;
+    purge_batch_key(&pool).await;
+}
+
+/// A job whose data is nil is handed an **empty map**, not nothing: `DoJob`'s
+/// `if job.Data == nil { job.Data = make(model.StringMap) }`. And a next cursor of nil (the DM
+/// preference migration's) is written as `null` and handed on as nothing.
+#[tokio::test]
+async fn job_worker_batch_nil_data_is_an_empty_map_first_and_nil_after() {
+    if !enabled() {
+        return;
+    }
+    let _guard = DB.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    purge_batch_key(&pool).await;
+    let app = app(&pool);
+
+    let job = plant(&pool, "mmrsjw0000000000batchnil1", BATCH_TYPE, 21).await;
+    // A JSON `null`, which is Go's nil map. A SQL `NULL` would read back as `{}` (see
+    // `JobRow::into_job`) and never reach the branch — the mutation run that first used it let
+    // `nil-data-not-an-empty-map` survive.
+    sqlx::query("UPDATE jobs SET data = 'null'::jsonb WHERE id = $1")
+        .bind(&job.id)
+        .execute(&pool)
+        .await
+        .expect("the data is cleared");
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let worker = probe_migration(
+        Arc::clone(&seen),
+        |_| None,
+        |n| Ok((None, n == 2)),
+        pool.clone(),
+    );
+    run_batch(app, worker, job.clone()).await;
+
+    let seen = seen.lock().expect("unpoisoned").clone();
+    assert_eq!(seen, vec![Some(StringMap::new()), None, None]);
+    let done = read(&pool, &job.id).await;
+    assert_eq!(done.status, job::JOB_STATUS_SUCCESS);
+    assert_eq!(done.data, None);
+
+    purge(&pool).await;
+    purge_batch_key(&pool).await;
+}
+
+/// **A batch job cancelled while it runs finishes `success`, at the progress it had.** Once the
+/// row is `cancel_requested`, every `SetJobProgress` — the cursor writes and the final 100 —
+/// matches no row and is dropped, and `SetJobSuccess` is unconditional. So the row keeps the data
+/// of its last write before the request and progress 0.
+#[tokio::test]
+async fn job_worker_batch_a_cancel_request_mid_run_still_ends_success() {
+    if !enabled() {
+        return;
+    }
+    let _guard = DB.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    purge_batch_key(&pool).await;
+    let app = app(&pool);
+
+    let id = "mmrsjw00000000000batchcnl";
+    let job = plant(&pool, id, BATCH_TYPE, 22).await;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let worker = probe_migration(
+        Arc::clone(&seen),
+        move |n| (n == 1).then(|| (id.to_owned(), job::JOB_STATUS_CANCEL_REQUESTED)),
+        |n| {
+            Ok(if n < 3 {
+                (Some(cursor(n + 1)), false)
+            } else {
+                (None, true)
+            })
+        },
+        pool.clone(),
+    );
+    run_batch(app, worker, job.clone()).await;
+
+    assert_eq!(seen.lock().expect("unpoisoned").len(), 4, "every batch ran");
+    let done = read(&pool, id).await;
+    assert_eq!(done.status, job::JOB_STATUS_SUCCESS);
+    assert_eq!(done.progress, 0, "the 100 was dropped with the rest");
+    assert_eq!(
+        done.data,
+        Some(cursor(1)),
+        "the last cursor written before the request"
+    );
+    assert_eq!(
+        system_value(&pool, BATCH_KEY).await.as_deref(),
+        Some("true")
+    );
+
+    purge(&pool).await;
+    purge_batch_key(&pool).await;
+}
+
+/// A failing migration batch is `SetJobError` with `model.NoTranslation` wrapping the batch's
+/// error, and no key is written.
+#[tokio::test]
+async fn job_worker_batch_a_failing_migration_batch_is_an_untranslated_error() {
+    if !enabled() {
+        return;
+    }
+    let _guard = DB.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    purge_batch_key(&pool).await;
+    let app = app(&pool);
+
+    let job = plant(&pool, "mmrsjw00000000000batchbad", BATCH_TYPE, 23).await;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let worker = probe_migration(
+        Arc::clone(&seen),
+        |_| None,
+        |n| {
+            if n == 0 {
+                Ok((Some(cursor(1)), false))
+            } else {
+                Err("the store said no".to_owned())
+            }
+        },
+        pool.clone(),
+    );
+    run_batch(app, worker, job.clone()).await;
+
+    let done = read(&pool, &job.id).await;
+    assert_eq!(done.status, job::JOB_STATUS_ERROR);
+    assert_eq!(done.progress, -1);
+    assert_eq!(
+        error_text(&done),
+        Some("<untranslated> — the store said no")
+    );
+    assert_eq!(
+        done.data
+            .as_ref()
+            .and_then(|d| d.get("n"))
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(system_value(&pool, BATCH_KEY).await, None);
+
+    purge(&pool).await;
+    purge_batch_key(&pool).await;
+}
+
+/// `CancellationWatcher` returns once the row reads `cancel_requested`, and not before.
+#[tokio::test]
+async fn job_worker_the_cancellation_watcher_returns_on_cancel_requested() {
+    if !enabled() {
+        return;
+    }
+    let _guard = DB.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    let app = app(&pool);
+
+    let job = plant(&pool, "mmrsjw0000000000watchcnl1", SYNTHETIC_TYPE, 24).await;
+    set_status(&pool, &job.id, job::JOB_STATUS_IN_PROGRESS).await;
+    let watcher = {
+        let app = app.clone();
+        let id = job.id.clone();
+        tokio::spawn(async move { app.cancellation_watcher(&id, 20).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    assert!(
+        !watcher.is_finished(),
+        "an in-progress job is not cancelled"
+    );
+    set_status(&pool, &job.id, job::JOB_STATUS_CANCELED).await;
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    assert!(
+        !watcher.is_finished(),
+        "only `cancel_requested` ends it — not `canceled`"
+    );
+    set_status(&pool, &job.id, job::JOB_STATUS_CANCEL_REQUESTED).await;
+    tokio::time::timeout(std::time::Duration::from_secs(2), watcher)
+        .await
+        .expect("the watcher returns")
+        .expect("it did not panic");
+
+    purge(&pool).await;
+}
+
+/// `UpdateInProgressJobData` writes the data of an `in_progress` job and stamps its activity; a
+/// job that is no longer in progress is left alone and that is not an error.
+#[tokio::test]
+async fn job_worker_update_in_progress_job_data_writes_only_while_in_progress() {
+    if !enabled() {
+        return;
+    }
+    let _guard = DB.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    let app = app(&pool);
+
+    let mut job = plant(&pool, "mmrsjw000000000inprogdata", SYNTHETIC_TYPE, 25).await;
+    set_status(&pool, &job.id, job::JOB_STATUS_IN_PROGRESS).await;
+    job.data = Some(cursor(7));
+    app.update_in_progress_job_data(&mut job)
+        .await
+        .expect("the write runs");
+    assert_eq!(job.status, job::JOB_STATUS_IN_PROGRESS);
+    let row = read(&pool, &job.id).await;
+    assert_eq!(row.data, Some(cursor(7)));
+    assert!(row.last_activity_at > 0);
+
+    set_status(&pool, &job.id, job::JOB_STATUS_CANCEL_REQUESTED).await;
+    job.data = Some(cursor(8));
+    app.update_in_progress_job_data(&mut job)
+        .await
+        .expect("a row that moved is not an error");
+    let row = read(&pool, &job.id).await;
+    assert_eq!(row.data, Some(cursor(7)), "the moved row is untouched");
+    assert_eq!(row.status, job::JOB_STATUS_CANCEL_REQUESTED);
 
     purge(&pool).await;
 }

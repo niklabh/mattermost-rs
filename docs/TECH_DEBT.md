@@ -8275,7 +8275,10 @@ licensed by construction and a licensed server is forwarded whole before anythin
 
 ## D-500 · The MFA pair serves only refusals; anything that touches a secret forwards
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (authentication data)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-13 (authentication data)
+**Closed** 2026-09-25 — both routes are served whole: `mm_app::otp` (TOTP, base32, the `otpauth://` link) and
+the new `goqr` crate (rsc/qr and its PNG) are checked against Go's own output in `behaviour_mfa.json`, with the
+random secret fixed by recording Go's; `parity::mfa_enrolment` enrols on each server and logs in on the other.
 
 `PUT /users/{user_id}/mfa` and `POST /users/{user_id}/mfa/generate` are registered and answer
 every refusal: the id 400, the OAuth-app 403, the `edit_other_users` 403, the `activate` and
@@ -9164,29 +9167,28 @@ corpus (now 24 inputs) with the `refresh_materialized_views` scheduler that regi
 `None` and say so, since a job that skips a day is better than one that runs at an hour nobody
 configured.
 
-## D-804 · Twenty-two of the twenty-nine registered job types have no worker here
+## D-804 · Eighteen of the twenty-nine registered job types have no worker here
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (app/server.go:1585) · **Owner** the jobs subsystem
 
 `mm_app::job::REGISTERED_JOB_TYPES` lists the twenty-nine types the Go server registers a worker
 for, and `App::create_job` validates against it — so this server can create a job of any of them.
-`mm_app::job_runtime::registered_workers` runs seven: `cleanup_desktop_tokens`, and since
-2026-09-25 `active_users`, `mobile_session_metadata`, `refresh_materialized_views`,
-`expiry_notify`, `cleanup_expired_access_tokens` and `notify_expiring_access_tokens`
-(`mm_app::job_workers`, `parity::job_workers_simple`). Every other type is created here and run by the Go server off the
-shared table. `last_accessible_post` and `last_accessible_file` are [D-1300].
+`mm_app::job_runtime::registered_workers` runs eleven. `cleanup_desktop_tokens`; since 2026-09-25
+the batch shape (`BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker`) with its four users —
+`delete_empty_drafts_migration`, `delete_orphan_drafts_migration`,
+`delete_dms_preferences_migration`, `export_users_to_csv` (`parity::batch_jobs`); and six
+`SimpleWorker`s — `active_users`, `mobile_session_metadata`, `refresh_materialized_views`,
+`expiry_notify`, `cleanup_expired_access_tokens`, `notify_expiring_access_tokens`
+(`mm_app::job_workers`, `parity::job_workers_simple`). Every other type is created here and run by
+the Go server off the shared table. `last_accessible_post` and `last_accessible_file` are
+[D-1300]. `CancellationWatcher` and `UpdateInProgressJobData` are ported and tested
+(`db_job_worker`) but have no user yet: their Go users are the `migrations` and `extract_content`
+workers.
 
-The runtime is not the gap; each worker's **body** is. They range from a single `DELETE`
-(`cleanup_expired_access_tokens`) to the import and export pipelines, and several need store
-methods that do not exist yet (`RefreshPostStats`, `RefreshFileStats`,
-`RefreshPostStatsForUsers` for `refresh_materialized_views`). Two also need shapes the runtime
-does not have: `BatchWorker`/`BatchMigrationWorker`/`BatchReportWorker` are not `SimpleWorker`,
-and they are the only users of `JobServer.CancellationWatcher`, `SetJobProgress` mid-run and
-`UpdateInProgressJobData` — none of which is ported.
-
-**What is owed:** one worker at a time, cheapest first (`cleanup_expired_access_tokens`,
-`expirynotify`, `last_accessible_post`), each with the store methods it needs; then the batch
-worker shape and the cancellation watcher with it.
+**What is owed:** the remaining worker bodies one at a time, cheapest first
+(`cleanup_expired_access_tokens`, `expirynotify`, `last_accessible_post`), each with the store
+methods it needs (`RefreshPostStats`, `RefreshFileStats`, `RefreshPostStatsForUsers` for
+`refresh_materialized_views`).
 
 ## D-805 · The committed `.sqlx` offline cache is thirty queries stale; `SQLX_OFFLINE=true` does not build
 
@@ -10100,11 +10102,18 @@ here on the client's key and then in Go's route limiter on one key shared by eve
 MFA logins, 2/s for registrations, across the deployment — and Go's 429 is passed through.
 **What is owed:** port those branches (MFA login first), so no request of these three routes reaches Go.
 
+**2026-09-25:** the MFA branch is served (D-500), so an MFA login no longer reaches Go. Still forwarded:
+the guest magic link (public code, not yet ported), LDAP (the LDAP client is private Enterprise code, so
+that forward is permanent), the cloud branch (needs a cloud licence and the CWS client), and the DCR
+registration (public code, not yet ported).
+
 ---
 
 ## D-1211 · An API request over `MaximumURLLength` is answered, where Go's `basicSecurityChecks` refuses it
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+**Closed** 2026-09-25 — `mm_api::serve_http` refuses it on every served route of both routers, after
+gorilla's charset match and before the per-user limit, with Go's bare 414; `parity::url_length`.
 
 `ServeHTTP` refuses a request URI longer than `ServiceSettings.MaximumURLLength` (default 2048) with
 the 414 `basic_security_check.url.too_long_error` before anything else it does (web/handlers.go:143),
@@ -10187,16 +10196,14 @@ invalid-UTF-8 rewrite the helpers lack), the dynamic-list response (Go uses its 
 and documents this server or Go marshalled itself (licence, token extra, Systems rows, config row,
 log lines, link-metadata rows).
 
-## D-1300 · `last_accessible_post` and `last_accessible_file` need an `isEnabled` that reads the licence
-
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (jobs/last_accessible_post/worker.go) · **Owner** the job runtime
-
-Both Go workers capture the licence **the server started with** (`MakeWorker(s.Jobs, s.License(), …)`,
-app/server.go:1722, :1728) and enable on it: `Limits.PostHistory > 0` for posts,
-`*Features.Cloud` for files. This runtime's `SimpleWorker` takes `is_enabled: fn(&Config)`, which
-cannot see a licence, and changing that shape belongs to the runtime's owner. Registering either
-worker as always-on would claim jobs Go leaves pending on every unlicensed stack. The bodies are
-portable once the shape is: `ComputeLastAccessiblePostTime` (post.go:2196) needs
-`Post().GetNthRecentPostTime`, and `ComputeLastAccessibleFileTime` (file.go:1780) needs
-`FileInfo().GetUptoNSizeFileTime` plus `Cloud().GetCloudLimits`, which is the private cloud
-interface: a cloud licence with a nil `Cloud()` is Go's panic, recorded by `HandleJobPanic`.
+`mm_app::job_runtime::registered_workers` runs eleven. `cleanup_desktop_tokens`; since 2026-09-25
+the batch shape (`BatchWorker`, `BatchMigrationWorker`, `BatchReportWorker`) with its four users —
+`delete_empty_drafts_migration`, `delete_orphan_drafts_migration`,
+`delete_dms_preferences_migration`, `export_users_to_csv` (`parity::batch_jobs`); and six
+`SimpleWorker`s — `active_users`, `mobile_session_metadata`, `refresh_materialized_views`,
+`expiry_notify`, `cleanup_expired_access_tokens`, `notify_expiring_access_tokens`
+(`mm_app::job_workers`, `parity::job_workers_simple`). Every other type is created here and run by
+the Go server off the shared table. `last_accessible_post` and `last_accessible_file` are
+[D-1300]. `CancellationWatcher` and `UpdateInProgressJobData` are ported and tested
+(`db_job_worker`) but have no user yet: their Go users are the `migrations` and `extract_content`
+workers.
