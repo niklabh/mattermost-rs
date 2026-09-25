@@ -309,7 +309,13 @@ impl App {
         // Anything but the default type takes a branch of its own: `card` reads
         // `FeatureFlags.IntegratedBoards`, `burn_on_read` writes TemporaryPost, `custom_*` is a
         // plugin's, and the rest skip the `use_channel_mentions` gate.
-        if !post.post_type.is_empty() {
+        //
+        // The one exception is `custom_up_notification`, the post the notify-admin send writes:
+        // no branch of `CreatePost` reads it, and its path through the pipeline is measured
+        // against Go in `parity::notify_jobs`.
+        if !post.post_type.is_empty()
+            && post.post_type != crate::notify_admin::POST_TYPE_UP_NOTIFICATION
+        {
             return Err(PrepareError::Unreproducible(
                 "a non-default post type takes a branch of its own in CreatePost",
             ));
@@ -335,7 +341,9 @@ impl App {
                 ));
             }
         }
-        if post.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX) {
+        if post.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX)
+            && post.post_type != crate::notify_admin::POST_TYPE_UP_NOTIFICATION
+        {
             return Err(PrepareError::Unreproducible("plugin post type"));
         }
 

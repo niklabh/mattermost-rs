@@ -9157,9 +9157,11 @@ configured.
 ## D-804 · Twenty-eight of the twenty-nine registered job types have no worker here
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (app/server.go:1585) · **Owner** the jobs subsystem
-**Narrowed** 2026-09-25 — `post_persistent_notifications` has a worker
-(`job_runtime::post_persistent_notifications_worker`, compared with Go's run in
-`parity::persistent_notifications`). The count in the title is as raised.
+**Narrowed** 2026-09-25 — `post_persistent_notifications`, `product_notices` and
+`install_plugin_notify_admin` have workers (and the last two their schedulers), each compared with
+Go's own run in `parity::persistent_notifications` / `parity::notify_jobs`. `upgrade_notify_admin`
+and `trial_notify_admin` are [D-1321]; `resend_invitation_email` is [D-1322]. The count in the title
+is as raised.
 
 `mm_app::job::REGISTERED_JOB_TYPES` lists the twenty-nine types the Go server registers a worker
 for, and `App::create_job` validates against it — so this server can create a job of any of them.
@@ -10137,6 +10139,37 @@ cannot hand a claimed job back (its structure is the jobs owner's). Reachable on
 workers on (`MM_API_ENABLE_JOB_WORKERS`).
 
 **What is owed:** either the refused prepare shapes, or a way for a worker to release a claimed job.
+
+---
+
+## D-1321 · `upgrade_notify_admin` and `trial_notify_admin` have no worker: their `isEnabled` is the licence
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (jobs/notify_admin/worker.go)
+
+Both bodies are ported — `App::do_check_for_admin_notifications`, the same send the
+`install_plugin_notify_admin` worker and `trigger-notify-admin-posts` run — but a worker's
+`isEnabled` is `license != nil && *license.Features.Cloud`, over the licence captured when the
+workers were registered, and a `SimpleWorker`'s `is_enabled` is a `fn(&Config)`: the licence is not
+reachable from it. Registering either as always-enabled would run a Cloud-only job on every server.
+Their schedulers (`notify_admin.MakeScheduler`, the same licence test) are unported for the same
+reason. Neither route nor job reaches them on a build without a Cloud licence.
+
+**What is owed:** an `is_enabled` that can read the licence (the runtime is the jobs owner's), then
+two `workers.add` lines.
+
+## D-1322 · `resend_invitation_email` has no worker: its `DoJob` never claims the job
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-25 (jobs/resend_invitation_email/worker.go)
+
+`ResendInvitationEmailWorker` is not a `SimpleWorker`. Its `DoJob` does **not** call `ClaimJob`:
+it reads `Data["scheduledAt"]`, and only once 48 hours (or `MM_RESEND_INVITATION_EMAIL_JOB_DURATION`)
+have passed does it resend the invitations (`InviteNewUsersToTeamGracefully` to the addresses not
+yet in the team) and set the job successful — until then the job stays `pending` and is offered
+again on every poll. A `SimpleWorker` claims first, so registering one would move a waiting job to
+`in_progress` and then `success` without sending anything. It needs a worker shape the runtime does
+not have, plus the graceful invite (email sending is ported; the invite batch is not).
+
+**What is owed:** a non-claiming worker in the runtime, then this worker on it.
 
 ---
 

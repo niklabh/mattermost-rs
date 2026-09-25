@@ -60,8 +60,8 @@ pub async fn handle_notify_admin(
 /// the 403 `api.cloud.app_error` for every request, session or not aside. On, the body is
 /// `Decode(&ptr)` (a `null` or a non-object the 400 `notifyAdminRequest`), then `manage_system`,
 /// then `SendNotifyAdminPosts`: the admins, the system bot, the pending rows, a DM post to each
-/// admin and the rows stamped — forwarded.
-#[tracing::instrument(skip_all, fields(forwarded = false))]
+/// admin and the rows stamped — see [`mm_app::notify_admin`].
+#[tracing::instrument(skip_all)]
 pub async fn handle_trigger_notify_admin_posts(
     State(state): State<AppState>,
     session: AuthenticatedSession,
@@ -86,9 +86,9 @@ pub async fn handle_trigger_notify_admin_posts(
         mm_model::utils::decode_one_from_json::<Option<NotifyAdminToUpgradeRequest>>(&bytes)
             .ok()
             .flatten();
-    if decoded.is_none() {
+    let Some(notify_admin_request) = decoded else {
         return ApiError::invalid_param("notifyAdminRequest").into_response();
-    }
+    };
 
     // only system admins can manually trigger these notifications
     if !state
@@ -103,8 +103,21 @@ pub async fn handle_trigger_notify_admin_posts(
         .into_response();
     }
 
-    tracing::Span::current().record("forwarded", true);
-    tracing::debug!("handing the notify-admin post batch to Go");
-    let request = Request::from_parts(parts, axum::body::Body::from(bytes));
-    crate::proxy::forward_to_go(State(state), request).await
+    // `SendNotifyAdminPosts(c.AppContext, "", "", trial)` — an empty workspace name **and an
+    // empty SKU**, so no row is filtered out by its plan.
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
+    match state
+        .app
+        .send_notify_admin_posts(
+            &hook_ctx,
+            Some(&session.0),
+            "",
+            "",
+            notify_admin_request.trial_notification,
+        )
+        .await
+    {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(*err).into_response(),
+    }
 }

@@ -26,9 +26,9 @@ use crate::common;
 
 use common::push_proxy::{PushRequest, normalize_push, push_proxy};
 use common::{
-    GO, SecondServer, SocketProbe, assert_error_bodies_match_except_known_gaps, client,
-    create_channel, create_plain_user, delete_channel, delete_plain_user, fixture_pool,
-    go_minted_token, licensed, plain_username, post_message, stack_enabled,
+    GO, SocketProbe, assert_error_bodies_match_except_known_gaps, client, create_channel,
+    create_plain_user, delete_channel, delete_plain_user, fixture_pool, go_minted_token, licensed,
+    plain_username, post_message, stack_enabled,
 };
 
 /// The job-running mm-api; see `second_server_ports`.
@@ -408,39 +408,6 @@ async fn job_rows(pool: &sqlx::PgPool, f: &JobFixture) -> Vec<(i16, bool, bool)>
     out
 }
 
-async fn wait_for_job(pool: &sqlx::PgPool, job_id: &str) -> (String, serde_json::Value) {
-    for _ in 0..200 {
-        let (status, data): (String, Option<serde_json::Value>) =
-            sqlx::query_as("SELECT status, data FROM jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_one(pool)
-                .await
-                .expect("the job");
-        if status == "success" || status == "error" {
-            return (status, data.unwrap_or(serde_json::Value::Null));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-    panic!("job {job_id} never finished");
-}
-
-/// A pending job, inserted directly: `post_persistent_notifications` is not a type the jobs API
-/// creates (`api.job.unable_to_create_job.incorrect_job_type`), only its scheduler does.
-async fn create_job(pool: &sqlx::PgPool) -> String {
-    let id = mm_model::utils::new_id();
-    sqlx::query(
-        "INSERT INTO jobs (id, type, priority, createat, startat, lastactivityat, status, \
-         progress, data) VALUES ($1, 'post_persistent_notifications', 0, $2, 0, 0, 'pending', 0, \
-         '{}')",
-    )
-    .bind(&id)
-    .bind(mm_model::utils::get_millis())
-    .execute(pool)
-    .await
-    .expect("the job row");
-    id
-}
-
 /// Everything a run leaves: rows, the events the websocket-connected mentioned user saw, and the
 /// pushes the offline mentioned user's device got — with this run's own ids swapped for markers.
 struct RunCapture {
@@ -515,8 +482,10 @@ async fn capture_run(
         .is_some()
     {}
     let mut probe = SocketProbe::connect(base, reader_token).await;
-    let job = create_job(pool).await;
-    let (job_status, _data) = wait_for_job(pool, &job).await;
+    let job =
+        common::insert_pending_job(pool, "post_persistent_notifications", serde_json::json!({}))
+            .await;
+    let (job_status, _data) = common::wait_for_job(pool, &job).await;
     probe
         .collect_until(Duration::from_secs(5), |frames| {
             frames
@@ -589,6 +558,7 @@ async fn the_persistent_notifications_job_matches_gos_run() {
     let Some(pool) = fixture_pool().await else {
         return;
     };
+    let _jobs = common::JOB_RUNS.lock().await;
     let http = client();
     let admin = go_minted_token(&http).await;
     let (team, _) = common::a_team_and_channel_the_user_is_in(&http, &admin).await;
@@ -640,22 +610,7 @@ async fn the_persistent_notifications_job_matches_gos_run() {
     common::view_channel(&http, &offline.token, &go_fixture.channel).await;
 
     // This server's run, on a second mm-api whose watcher polls every 200 ms.
-    let push_port = std::env::var("MMRS_PUSH_PORT").unwrap_or_default();
-    let push_server = format!("http://localhost:{push_port}");
-    let server = SecondServer::start(
-        JOB_SERVER_PORT,
-        &[
-            ("MM_API_ENABLE_JOB_WORKERS", "true"),
-            ("MM_API_JOB_WATCHER_INTERVAL_MS", "200"),
-            ("MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS", "true"),
-            (
-                "MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER",
-                push_server.as_str(),
-            ),
-        ],
-    )
-    .await
-    .expect("the job server starts");
+    let server = common::job_server(JOB_SERVER_PORT).await;
     // Go's watcher polls every fifteen seconds and this one every 200 ms, so this one claims the
     // job all but ~1% of the time. When Go wins, its events reach Go's hub and this probe sees
     // none: that attempt is discarded and the run repeated on a fresh fixture.
@@ -676,7 +631,7 @@ async fn the_persistent_notifications_job_matches_gos_run() {
         .await;
         let run = capture_run(
             &pool,
-            &server.base,
+            &server.server.base,
             &reader.token,
             "mmrspnjobdevice",
             &fixture,

@@ -322,4 +322,6 @@ mod parity {
     pub mod set_unread_mentions;
     // Appended 2026-09-25: persistent notifications, their resolution and their job (D-401, D-551).
     pub mod persistent_notifications;
+    // Appended 2026-09-25: the product-notices and notify-admin jobs (D-804).
+    pub mod notify_jobs;
 }

@@ -733,6 +733,47 @@ pub fn post_persistent_notifications_worker() -> SimpleWorker {
     )
 }
 
+/// Port of `jobs/product_notices/worker.go`: enabled while either notice switch
+/// (`AnnouncementSettings.AdminNoticesEnabled` or `UserNoticesEnabled`) is on, and the body is
+/// [`App::update_product_notices`] — logged and returned when it fails. It refreshes *this
+/// process's* notice cache, as Go's refreshes the cache of the node that claimed the job.
+pub fn product_notices_worker() -> SimpleWorker {
+    SimpleWorker::new(
+        "ProductNotices",
+        job::JOB_TYPE_PRODUCT_NOTICES,
+        |config| config.admin_notices_enabled || config.user_notices_enabled,
+        |app, _job| {
+            Box::pin(async move {
+                app.update_product_notices().await.map_err(|err| {
+                    tracing::error!(error = %err, "Worker: Failed to fetch product notices");
+                    WorkerError::from(err)
+                })
+            })
+        },
+    )
+}
+
+/// Port of `notify_admin.MakeInstallPluginNotifyWorker` (jobs/notify_admin/worker.go:60): always
+/// enabled, and the body is [`App::do_check_for_admin_notifications`] with `trial` false.
+///
+/// Its two siblings — `upgrade_notify_admin` and `trial_notify_admin` — are **not** registered:
+/// their `isEnabled` is the licence captured at start-up having `Features.Cloud`, and a
+/// [`SimpleWorker`]'s `is_enabled` sees only [`Config`]. [D-1321].
+pub fn install_plugin_notify_admin_worker() -> SimpleWorker {
+    SimpleWorker::new(
+        "InstallNotifyAdmin",
+        job::JOB_TYPE_INSTALL_PLUGIN_NOTIFY_ADMIN,
+        |_config| true,
+        |app, _job| {
+            Box::pin(async move {
+                app.do_check_for_admin_notifications(false)
+                    .await
+                    .map_err(WorkerError::from)
+            })
+        },
+    )
+}
+
 /// The workers this build registers, which is the Rust half of `Server.initJobs`
 /// (app/server.go:1585).
 ///
@@ -745,6 +786,8 @@ pub fn registered_workers() -> Workers {
     let mut workers = Workers::new();
     workers.add(cleanup_desktop_tokens_worker());
     workers.add(post_persistent_notifications_worker());
+    workers.add(product_notices_worker());
+    workers.add(install_plugin_notify_admin_worker());
     workers
 }
 
@@ -765,13 +808,19 @@ mod tests {
                 .get(job::JOB_TYPE_POST_PERSISTENT_NOTIFICATIONS)
                 .is_some()
         );
-        assert_eq!(workers.len(), 2);
+        assert!(workers.get(job::JOB_TYPE_PRODUCT_NOTICES).is_some());
+        assert!(
+            workers
+                .get(job::JOB_TYPE_INSTALL_PLUGIN_NOTIFY_ADMIN)
+                .is_some()
+        );
+        assert_eq!(workers.len(), 4);
     }
 
     #[test]
     fn an_unregistered_type_is_gos_nil_worker() {
         let workers = registered_workers();
-        assert!(workers.get(job::JOB_TYPE_PRODUCT_NOTICES).is_none());
+        assert!(workers.get(job::JOB_TYPE_LDAP_SYNC).is_none());
         assert!(workers.get("").is_none());
     }
 
