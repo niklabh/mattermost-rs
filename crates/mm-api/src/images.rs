@@ -37,6 +37,9 @@ use crate::proxy;
 /// `Cache-Control`.
 const DAY_CACHE_CONTROL: &str = "max-age=86400, private";
 
+/// `getProfileImage`'s answer when the stored picture did not read: five minutes, no etag.
+const FAILED_READ_CACHE_CONTROL: &str = "max-age=300, private";
+
 /// `getEmojiImage`'s, which is thirty days rather than one and is a literal in the handler.
 const EMOJI_CACHE_CONTROL: &str = "max-age=2592000, private";
 
@@ -113,12 +116,12 @@ fn image_response(
 /// `"0"`, which is a perfectly good cache key — it is not the empty string, so `HandleEtag`'s
 /// `etag != ""` guard does not fire.
 ///
-/// # The generated-avatar branch is forwarded
+/// # A failed read is five minutes and no etag
 ///
-/// See [`mm_app::App::get_profile_image`]: when there is no stored image Go draws one from the
-/// user's initials with a TTF rasteriser, and no reimplementation matches it pixel for pixel.
-/// That branch also *writes* — it stores the generated image when `LastPictureUpdate == 0` — so
-/// forwarding is doubly right.
+/// When there is no stored picture [`mm_app::App::get_profile_image`] draws the initials avatar
+/// (and writes it when `LastPictureUpdate == 0`), and the answer changes shape: `Cache-Control`
+/// drops to `max-age=300, private` and **no** `ETag` is sent, so the client asks again soon rather
+/// than keeping a generated picture for a day.
 #[tracing::instrument(skip_all, fields(user_id = %user_id))]
 pub async fn get_profile_image(
     State(state): State<AppState>,
@@ -167,11 +170,17 @@ async fn serve_profile_image(
         return Ok(Some(not_modified(&etag)));
     }
 
-    match state.app.get_profile_image(user_id).await {
-        Ok(image) => Ok(Some(image_response(
+    match state.app.get_profile_image(&user).await {
+        Ok((image, false)) => Ok(Some(image_response(
             "image/png",
             Some(DAY_CACHE_CONTROL),
             Some(&etag),
+            image,
+        ))),
+        Ok((image, true)) => Ok(Some(image_response(
+            "image/png",
+            Some(FAILED_READ_CACHE_CONTROL),
+            None,
             image,
         ))),
         Err(PrepareError::Unreproducible(reason)) => {
@@ -725,10 +734,10 @@ async fn profile_image_locked(
 /// # It reads as a delete and it is a write
 ///
 /// Nothing is removed. `SetDefaultProfileImage` **generates** the initials avatar and writes it
-/// over `users/<id>/profile.png` (app/user.go:1026), zeroes `LastPictureUpdate` through
-/// `ResetLastPictureUpdate`, and publishes a `user_updated` websocket event carrying the
-/// sanitized user. So the route that looks like the one reproducible member of this family is the
-/// one that depends most completely on the TTF rasteriser — see [D-204] — and it forwards.
+/// over `users/<id>/profile.png` (app/user.go:1026), sets `LastPictureUpdate` to minus the current
+/// time through `ResetLastPictureUpdate`, and publishes a `user_updated` websocket event carrying
+/// the sanitized user — [`mm_app::App::set_default_profile_image`], served since D-204. A storage
+/// driver this port does not implement is still Go's, handed over before anything is written.
 ///
 /// # Four refusals, and one of them differs from the POST beside it
 ///
@@ -754,12 +763,24 @@ pub async fn set_default_profile_image(
 ) -> Response {
     tracing::Span::current().record("forwarded", false);
 
-    match refuse_default_profile_image(&state, &user_id, &session).await {
+    let user = match refuse_default_profile_image(&state, &user_id, &session).await {
+        Ok(user) => user,
+        Err(err) => return err.into_response(),
+    };
+    match state.app.set_default_profile_image(&user).await {
         Ok(()) => {
+            // `c.LogAudit("")`, on success only.
+            crate::audit_log::AuditRequest::of_request(&request)
+                .log(&state.app, Some(&session.0), "")
+                .await;
+            crate::thread_writes::status_ok()
+        }
+        Err(mm_app::post::PrepareError::App(err)) => ApiError::from(*err).into_response(),
+        Err(mm_app::post::PrepareError::Unreproducible(why)) => {
             tracing::Span::current().record("forwarded", true);
+            tracing::debug!(why, "the default profile image is Go's to write");
             proxy::forward_to_go(State(state), request).await
         }
-        Err(err) => err.into_response(),
     }
 }
 
@@ -767,7 +788,7 @@ async fn refuse_default_profile_image(
     state: &AppState,
     user_id: &str,
     session: &AuthenticatedSession,
-) -> Result<(), ApiError> {
+) -> Result<mm_model::user::User, ApiError> {
     const WHERE: &str = "setDefaultProfileImage";
 
     let user_id = resolve_me(user_id, session);
@@ -799,7 +820,7 @@ async fn refuse_default_profile_image(
         ));
     }
 
-    Ok(())
+    Ok(user)
 }
 
 /// Port of `getDefaultProfileImage` (api4/user.go:527), reached as
@@ -815,32 +836,28 @@ async fn refuse_default_profile_image(
 /// over `fonts/nunito-bold.ttf`, and the 128×128 RGBA is encoded with
 /// `png.Encoder{CompressionLevel: BestCompression}`.
 ///
-/// Every pixel of that depends on freetype's hinting and anti-aliasing and every byte of the
-/// result on Go's PNG encoder, so it is forwarded — [D-204], unchanged. **Bots** take a different
-/// branch (`botDefaultImage`, a `//go:embed` of a fixed PNG in the Go tree) which *is* a constant
-/// and would be reproducible, but only by copying a binary out of the read-only reference tree;
-/// it is forwarded with the rest rather than vendored.
+/// That is [`mm_app::App::get_default_profile_image`] over `gofont`, byte for byte (D-204); a
+/// **bot** gets `botDefaultImage`, the embedded PNG. The answer carries `max-age=86400, private`
+/// and no etag.
 ///
 /// # The literal segment under a parameter
 ///
 /// This path is `/users/{user_id}/image/default`, one segment deeper than
 /// `/users/{user_id}/image`, which this server already answers for GET. Registering it does not
 /// shadow that route — see the router test — but the two are one typo apart.
-#[tracing::instrument(skip_all, fields(user_id = %user_id, forwarded))]
+#[tracing::instrument(skip_all, fields(user_id = %user_id))]
 pub async fn get_default_profile_image(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     session: AuthenticatedSession,
-    request: Request,
 ) -> Response {
-    tracing::Span::current().record("forwarded", false);
-
-    match refuse_default_image_read(&state, &user_id, &session).await {
-        Ok(()) => {
-            tracing::Span::current().record("forwarded", true);
-            proxy::forward_to_go(State(state), request).await
-        }
-        Err(err) => err.into_response(),
+    let user = match refuse_default_image_read(&state, &user_id, &session).await {
+        Ok(user) => user,
+        Err(err) => return err.into_response(),
+    };
+    match state.app.get_default_profile_image(&user).await {
+        Ok(image) => image_response("image/png", Some(DAY_CACHE_CONTROL), None, image),
+        Err(err) => ApiError::from(*err).into_response(),
     }
 }
 
@@ -848,7 +865,7 @@ async fn refuse_default_image_read(
     state: &AppState,
     user_id: &str,
     session: &AuthenticatedSession,
-) -> Result<(), ApiError> {
+) -> Result<mm_model::user::User, ApiError> {
     let user_id = resolve_me(user_id, session);
     require_id(user_id, "user_id")?;
 
@@ -867,8 +884,7 @@ async fn refuse_default_image_read(
         )));
     }
 
-    state.app.get_user(user_id).await?;
-    Ok(())
+    Ok(state.app.get_user(user_id).await?)
 }
 
 /// Port of `uploadBrandImage` (api4/brand.go:36), reached as `POST /api/v4/brand/image`.

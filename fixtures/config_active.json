@@ -59,6 +59,7 @@
     "EnablePublicLink": false,
     "ExportDirectory": "./data/",
     "ExportDriverName": "local",
+    "InitialFont": "nunito-bold.ttf",
     "MaxFileSize": 104857600,
     "MaxImageResolution": 33177600
   },

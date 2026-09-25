@@ -129,7 +129,7 @@ MODELLED = {
     "ConnectedWorkspacesSettings": ["EnableSharedChannels"],
     "ImageProxySettings": ["Enable"],
     "FileSettings": [
-        "DriverName", "EnablePublicLink", "MaxFileSize",
+        "DriverName", "EnablePublicLink", "MaxFileSize", "InitialFont",
         # The storage directories. PublicLinkSalt is modelled too but never projected: it is a
         # secret generated at first boot, and the Rust test excludes it by name.
         "Directory", "DedicatedExportStore", "ExportDriverName", "ExportDirectory",

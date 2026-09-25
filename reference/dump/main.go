@@ -1446,6 +1446,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := writeAvatarBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: avatar behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
 	if err := writeJobSchedulerBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: job scheduler behaviour fixture: %v\n", err)
 		os.Exit(1)
