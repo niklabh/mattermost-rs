@@ -509,8 +509,8 @@ This is route-sized work from here on, so the ledger counts it.
 - Port `public/plugin/environment.go`, `supervisor.go`, `health_check.go` and
   `hooks_timer_layer` (metrics), plus `app/plugin.go`, `plugin_install.go`,
   `plugin_signature.go`, `plugin_public_keys.go`, `plugin_statuses.go`,
-  `plugin_db_driver.go` (the Driver, with sqlx and dynamic binds producing gob `driver.Value`s)
-  and `plugin_requests.go`.
+  `plugin_db_driver.go` (the Driver — DONE 2026-09-25, over `gopq`, a port of lib/pq, rather
+  than sqlx) and `plugin_requests.go`.
 - Introduce `trait PluginRuntime`, with `Process` as its only implementation, so D2 has a seam.
 - Serve in this order: `GET /plugins/statuses`, `GET /plugins`, `GET /plugins/webapp`,
   enable/disable, `POST /plugins` (upload), remove, install_from_url, marketplace; then the 10
@@ -518,6 +518,13 @@ This is route-sized work from here on, so the ledger counts it.
 - Settle D6's Go-side switch.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
+
+**The Driver: DONE 2026-09-25, 20 of 20 methods.** `mm_app::plugin_driver` answers every
+`db_rpc.go` method over `gopq`, a byte-exact port of the lib/pq connection Go's `*sql.Conn` wraps,
+so the protocol, the result formats, the decoded values and the error texts are lib/pq's. Each
+plugin is served through `DriverForPlugin`, and `ShutdownConns` runs when its process stops.
+`parity::plugin_driver` runs one script plugin under both hosts and compares 171 replies. One
+connection per `Conn` instead of Go's pool is [D-1340].
 
 ### Phase 5 · Hook call sites — IN PROGRESS, 30 of 35 (2026-09-23)
 
@@ -758,7 +765,7 @@ world generated from the IDL, `PluginRuntime::Wasm`, and host-mediated DB access
 | `mm-model` structs lack gob-only fields (`json:"-"`) | The D5 generator fails on the gap; add the fields where the types live, with their JSON skip |
 | Gob merge-decode semantics mis-ported | Merge corpus in Phase 1; `MessageWillBePosted` gets its own conformance case |
 | Go version drift in gob's `time.Time` or `x509` encodings (see `client_rpc.go:419`) | The oracle is built with the pinned Go; the IDL records the Go version |
-| Plugins using `Driver` for arbitrary SQL against Postgres types sqlx doesn't bind dynamically | The Driver corpus in Phase 4 draws on the SQL real plugins send (Playbooks, Boards) |
+| Plugins using `Driver` for SQL whose values or errors differ from lib/pq's | The Driver is `gopq`, a port of lib/pq itself, proven by `parity::plugin_driver` against Go |
 | Scope creep into speculative API porting | Phase 6 is usage-ordered and each method is route-sized; unported methods are counted |
 | Two hosts running at once | D6's single switch, and a startup check in mm-api that refuses `rust` while Go reports active plugins |
 

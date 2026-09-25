@@ -21,6 +21,7 @@ use goplugin::{Dispensed, MuxBroker};
 use crate::wire::plugin::{Z_OnActivateArgs, Z_OnActivateReturns};
 
 mod api;
+mod app_driver;
 mod driver;
 mod dynamic;
 mod file_upload;
@@ -31,6 +32,7 @@ mod serve_http;
 mod streams;
 
 pub use api::{PluginApi, register_api as register_generated_api};
+pub use app_driver::{AppDriver, DriverForPlugin};
 pub use driver::{Driver, register_driver};
 pub use dynamic::{Answer, PluginApiDynamic};
 pub use file_upload::HooksFileUpload;
@@ -245,6 +247,12 @@ impl DriverClient {
     /// A client over the brokered connection the host named in `OnActivate`.
     pub fn new(client: go_netrpc::Client) -> Self {
         Self { client }
+    }
+
+    /// The net/rpc client underneath, for a caller that needs a failed call's error rather than
+    /// the zero values the wrapped methods answer with.
+    pub fn client(&self) -> &go_netrpc::Client {
+        &self.client
     }
 
     async fn call<A, R>(&self, name: &str, args: &A) -> R

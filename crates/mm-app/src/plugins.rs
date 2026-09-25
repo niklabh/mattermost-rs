@@ -21,8 +21,8 @@
 //! # What is not ported yet
 //!
 //! - Most of the plugin API: [`AppPluginApi`] (`crate::plugin_api`) answers the methods Phase 6
-//!   has ported and the typed not-implemented error for the rest, and [`AppPluginDriver`]
-//!   answers not-implemented throughout.
+//!   has ported and the typed not-implemented error for the rest. [`AppPluginDriver`]
+//!   (`crate::plugin_driver`) is the whole database driver.
 //!
 //! Each is a `docs/TECH_DEBT.md` entry. The cluster branches are Go's nil cluster: there is no
 //! cluster here, so a status carries `cluster_id: ""` and no peer statuses are merged.
@@ -48,9 +48,7 @@ pub(crate) const PLUGIN_ID_APPS: &str = "com.mattermost.apps";
 
 pub use crate::plugin_api::AppPluginApi;
 
-/// The database a plugin queries through. Not ported yet (plugin plan Phase 6).
-pub struct AppPluginDriver;
-impl mm_plugin::rpc::Driver for AppPluginDriver {}
+pub use crate::plugin_driver::AppPluginDriver;
 
 /// The environment this server runs its plugins in.
 pub type PluginsEnvironment = Environment<AppPluginApi, AppPluginDriver>;
@@ -210,7 +208,7 @@ impl App {
         let app = self.clone();
         let environment = Environment::new(
             Box::new(move |manifest: &Manifest| Arc::new(AppPluginApi::new(app.clone(), manifest))),
-            Arc::new(AppPluginDriver),
+            Arc::new(AppPluginDriver::new(self.clone())),
             PathBuf::from(plugin_dir),
             PathBuf::from(webapp_plugin_dir),
         );

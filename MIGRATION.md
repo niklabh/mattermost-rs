@@ -13,12 +13,12 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 71/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 71/258, Driver 20/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
 Blended, the migration is **roughly 60–65% by route traffic** and **about 40% with equal weight
-on routes, websocket, plugins and jobs**. The backlog is 161 OPEN entries in
+on routes, websocket, plugins and jobs**. The backlog is 162 OPEN entries in
 [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md). What remains, largest first: the 258 plugin API
 methods and the Driver, 28 job workers, the forwarded branches inside served routes, and the
 e-mail batching and the generated sender avatar ([D-1072]).
@@ -14890,3 +14890,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `github.com/mattermost/rsc` `qr`, `qr/coding`, `gf256` (rsc.io/qr, BSD-3-Clause) | `goqr` (new crate) | DONE | `go_parity` (51 texts, every PNG byte-equal) + 9 unit; `scripts/mutations/goqr.plan` | Encoding chosen for the whole text, mask always 0, and the library's own fixed-Huffman PNG writer. |
 | `platform/shared/mfa`, `dgoogauth` (TOTP, window 3, replay list), `App.GenerateMfaSecret`/`ActivateMfa`/`DeactivateMfa`/`UpdateMfa`/`CheckUserMfa`, the four `UserStore` MFA methods, `updateUserMfa`, `generateMfaSecret` | `mm_app::otp`, `mm_app::user_auth`, `mm_app::login`, `mm_store::user_store`, `mm_api::user_auth` | DONE, closes [D-500]; the MFA branch of [D-1210]; opens [D-1260] | `behaviour_mfa.json` go_parity (90 codes, 24 validate and 24 activate rows relative to the step, 8 generated secrets), `parity::mfa_enrolment` (2, licensed MFA pair); `scripts/mutations/mfa.plan` | A code that is not six digits is Go's 500 on activation and 400 on login; the replay list is JSON strings. The secret alone is random: Go's is recorded and the rest must follow from it. |
 
+## The plugin database driver — UNIT P2 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `app.DriverImpl` (plugin_db_driver.go), `AppDriver`, `driverForPlugin` and the `ShutdownConns` call in `supervisor.Shutdown` | `mm_app::plugin_driver::AppPluginDriver`, `mm_plugin::rpc::{AppDriver, DriverForPlugin}`, `mm_plugin::environment` | DONE, 20/20 methods; opens [D-1340] | `parity::plugin_driver` (171 replies from `examples/driver_script`, compared line for line) + 4 unit; `scripts/mutations/plugin-driver.plan` (17 run, 17 caught) | `database/sql`'s `Raw` is kept: a `driver.ErrBadConn` closes the `*sql.Conn`, and later calls answer `sql.ErrConnDone`. An unknown tx/stmt/rows id panics Go; here the RPC call fails. |
+| github.com/lib/pq v1.12.3 `conn`, `stmt`, `rows`, `encode`, `error`, `scram`, `oid` (MIT) | `gopq` (new crate) | DONE | 10 unit; the parity suite above is its oracle | Chosen over sqlx because lib/pq's result formats (binary only for `bytea`/`int2/4/8`/`uuid`), decoded values and error texts are what a plugin sees. No TLS. |

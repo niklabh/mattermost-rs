@@ -86,7 +86,7 @@ const SUPPORT_GO_OFFSET: u16 = 87;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
-fn repo() -> PathBuf {
+pub(super) fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
@@ -240,7 +240,7 @@ fn lay_out(run: &Path) -> PathBuf {
 }
 
 /// The Go server this suite starts: killed on drop.
-struct GoServer {
+pub(super) struct GoServer {
     child: std::process::Child,
     base: String,
     /// The tour's scratch directory: the parent of both hosts' run directories.
@@ -277,7 +277,7 @@ fn go_port() -> u16 {
 /// `parity::plugin_startup` does. **Two database connections, not fifty**: the stack's servers
 /// already hold most of the ceiling, and a server with Go's default `MaxIdleConns` takes the
 /// database down for every suite running beside this one.
-async fn start_go(run: &Path, env: &[(&str, &str)], offset: u16) -> GoServer {
+pub(super) async fn start_go(run: &Path, env: &[(&str, &str)], offset: u16) -> GoServer {
     start_go_binary("mattermost", run, env, offset).await
 }
 

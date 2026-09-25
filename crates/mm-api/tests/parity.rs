@@ -293,6 +293,7 @@ mod parity {
     pub mod managed_categories;
     pub mod marketplace;
     pub mod marketplace_visit;
+    pub mod plugin_driver;
     pub mod plugin_hooks;
     pub mod plugin_startup;
     // Appended 2026-09-23: the support packet past its licence gate.
