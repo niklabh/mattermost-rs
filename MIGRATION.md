@@ -14,7 +14,7 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
 | Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 34/35 (the 35th needs the private cluster) and the 3 websocket hooks, API methods 240/258 (2026-09-25), Driver 20/20 pooled; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
-| Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
+| Jobs | Watcher, transitions and the batch-worker shape (cancellation watcher, in-progress data) ported; schedulers never started ([D-802]); 14 of 29 job types have a worker here (2026-09-25, [D-804]) | ~48% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
 Blended, the migration is **roughly 60–65% by route traffic** and **about 40% with equal weight
