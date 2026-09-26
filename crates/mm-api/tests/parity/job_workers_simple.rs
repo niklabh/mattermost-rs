@@ -111,15 +111,21 @@ async fn wait_done(pool: &PgPool, job_id: &str) -> Job {
 /// Plant a row and run it through this crate's registered worker, as the watcher would.
 async fn rust_runs(pool: &PgPool, job_id: &str, job_type: &str) -> Job {
     plant_job(pool, job_id, job_type).await;
-    let app = App::new(SqlStore::from_pool(pool.clone()));
     // The stack's translations: a test binary is not where `FindDirRelBinary` looks, and without
     // them every notice would be its message id.
     mm_app::i18n::init_from_dir(&common::stack_run_dir().join("i18n"))
         .await
         .expect("the stack's i18n directory loads");
-    // The stored configuration, as the running server holds it — `App::new` alone is the
-    // defaults, under which `EnableUserAccessTokens` is off.
-    app.refresh_config().await.expect("the stored config loads");
+    // The stored configuration, as the running server holds it — the defaults alone leave
+    // `EnableUserAccessTokens` off. Its `FileSettings.Directory` is Go's relative `./data/`,
+    // which this process would resolve against `crates/mm-api`: the system bot's avatar landed in
+    // the source tree. Write where the stack's Go server does, as `batch_jobs` does.
+    let store = SqlStore::from_pool(pool.clone());
+    let mut config = mm_app::config::Config::load(store.config())
+        .await
+        .expect("the stored config loads");
+    config.file_directory = common::stack_data_dir();
+    let app = App::with_config(store, config);
     let workers = registered_workers();
     let slot = workers
         .get(job_type)
