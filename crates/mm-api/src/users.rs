@@ -219,14 +219,14 @@ pub async fn get_user_me(
 /// an invalid-id 400 is Go's own too, and a literal added upstream keeps working unported. The
 /// same decision D-150 made for the charset, extended to the whole rule.
 ///
-/// # The permission gate is `UserCanSeeOtherUser`, served on its nil-restrictions fast path
+/// # The permission gate is `UserCanSeeOtherUser`, before the fetch
 ///
 /// Go's check (app/user.go:2710): self is always visible; otherwise `GetViewUsersRestrictions`,
 /// which is nil — everyone visible — whenever the viewer holds system-wide `view_members`, the
-/// default `system_user` grant. The restricted remainder (membership-intersection queries, and
-/// the check's own error path, which Go turns into a 403 naming `view_members`) is **forwarded
-/// whole**, like `getTeamStats`'s restrictions branch: unreachable in this deployment without a
-/// role edit, and Go re-runs the id check itself so ordering holds by construction.
+/// default `system_user` grant. A restricted caller (a guest, or a deployment that edited
+/// `system_user`) sees only users on its teams or in its channels. **An error from the check is
+/// the same 403 as a `false`** — Go discards it — and because the check runs first, a guest asking
+/// for a nonexistent id gets the 403, not the 404. `parity::view_restricted_lookups`.
 ///
 /// The `me` literal never reaches this handler — axum matches the literal `/users/me` route
 /// first, same as every other alias pair.
@@ -243,16 +243,18 @@ pub async fn get_user(
         return crate::proxy::forward_to_go(State(state), request).await;
     }
 
-    if session.0.user_id != user_id
-        && !state
-            .app
-            .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
-            .await
-    {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
     tracing::Span::current().record("forwarded", false);
+
+    // Both a `false` and an error are the same 403: Go discards the error (api4/user.go:311).
+    if !matches!(
+        state
+            .app
+            .user_can_see_other_user(&session.0.user_id, &user_id)
+            .await,
+        Ok(true)
+    ) {
+        return view_members_denied(&session);
+    }
 
     let user = match state.app.get_user(&user_id).await {
         Ok(user) => user,
@@ -262,6 +264,53 @@ pub async fn get_user(
     match respond_with_user(&state, &headers, &session, user, ActivityUpdate::Touch).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
+    }
+}
+
+/// `c.SetPermissionError(model.PermissionViewMembers)` — the 403 every visibility refusal in
+/// the single-user lookups answers.
+fn view_members_denied(session: &AuthenticatedSession) -> Response {
+    ApiError::from(make_permission_error(
+        &session.0,
+        &[&PERMISSION_VIEW_MEMBERS],
+    ))
+    .into_response()
+}
+
+/// The fetch-failure branch shared by `getUserByUsername` (api4/user.go:365) and
+/// `getUserByEmail` (api4/user.go:434): a caller with **non-nil** view restrictions gets the
+/// `view_members` 403 instead of the lookup's own error, so a guest cannot tell a missing
+/// username from one it may not see. An unrestricted caller gets the lookup error untouched —
+/// the same 404 id as the 500, only the status differing. A failure computing the restrictions
+/// wins over both.
+async fn restricted_lookup_failure(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    lookup_error: Box<AppError>,
+) -> Response {
+    match state.app.view_users_restrictions(&session.0.user_id).await {
+        Err(err) => ApiError::from(err).into_response(),
+        Ok(Some(_)) => view_members_denied(session),
+        Ok(None) => ApiError::from(lookup_error).into_response(),
+    }
+}
+
+/// `UserCanSeeOtherUser` after a successful lookup, as `getUserByUsername` and `getUserByEmail`
+/// run it: unlike `getUser`, which folds an error into the 403, these two surface the error
+/// itself (`c.Err = err`) and answer the 403 only for a clean `false`. `Some` is the refusal.
+async fn can_see_found_user(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    other_user_id: &str,
+) -> Option<Response> {
+    match state
+        .app
+        .user_can_see_other_user(&session.0.user_id, other_user_id)
+        .await
+    {
+        Ok(true) => None,
+        Ok(false) => Some(view_members_denied(session)),
+        Err(err) => Some(ApiError::from(err).into_response()),
     }
 }
 
@@ -284,11 +333,9 @@ pub(crate) fn segment_matches_username_mux(value: &str) -> bool {
 /// `getUser` checks visibility **before** fetching; this handler fetches **first** and asks
 /// `UserCanSeeOtherUser` about the row it found. The fetch-failure branch then re-checks the
 /// caller's restrictions and answers the restricted caller a **403, not the 404** — so a caller
-/// who may not enumerate users cannot probe which usernames exist. Both the restricted halves
-/// (the failure branch's 403 and the visibility check's remainder) live behind the same
-/// user-based `view_members` fast path as `getUser`, so this port forwards the whole request
-/// for any caller without it — before the fetch, which also keeps the existence-hiding answer
-/// Go's own.
+/// who may not enumerate users cannot probe which usernames exist. After a successful fetch the
+/// check's error surfaces as itself, not as the 403 `getUser` folds it into. Both halves are
+/// [`restricted_lookup_failure`] and [`can_see_found_user`], shared with `getUserByEmail`.
 ///
 /// # `RequireUsername` answers the *body*-param error
 ///
@@ -324,29 +371,16 @@ pub async fn get_user_by_username(
         return ApiError::invalid_param("username").into_response();
     }
 
-    // The nil-restrictions fast path, checked before the fetch: a caller without user-based
-    // `view_members` takes Go's restricted branches — including the failure branch's
-    // existence-hiding 403 — through the forward.
-    if !state
-        .app
-        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
-        .await
-    {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
     tracing::Span::current().record("forwarded", false);
 
     let user = match state.app.get_user_by_username(&username).await {
         Ok(user) => user,
-        // Restrictions are nil for this caller, so Go surfaces the fetch error as-is
-        // (api4/user.go:376) — the same 404 id as the 500, only the status differing.
-        Err(err) => return ApiError::from(err).into_response(),
+        Err(err) => return restricted_lookup_failure(&state, &session, err).await,
     };
 
-    // `UserCanSeeOtherUser(session.UserId, user.Id)`: self is its first branch, and nil
-    // restrictions — established by the fast path above — is its second. True by construction
-    // here; the remainder was forwarded.
+    if let Some(response) = can_see_found_user(&state, &session, &user.id).await {
+        return response;
+    }
     // `getUserByUsername` ends at the encoder — no `UpdateLastActivityAtIfNeeded`, unlike
     // `getUser` three handlers up. See [`ActivityUpdate`].
     match respond_with_user(&state, &headers, &session, user, ActivityUpdate::Skip).await {
@@ -803,6 +837,11 @@ async fn serve_users_by_names(
 /// false the route is a **403** `api.user.get_user_by_email.permissions.app_error` for everyone
 /// but an admin — before the lookup, so it leaks nothing about whether the address exists.
 ///
+/// # A restricted caller
+///
+/// The same two branches as [`get_user_by_username`]: a failed lookup is the `view_members` 403
+/// for a caller with view restrictions, and a found user it cannot see is the 403 too.
+///
 /// # `SanitizeEmail`, and the `.+` in the route
 ///
 /// `c.SanitizeEmail()` (web/context.go:549) lowercases the segment and then runs `IsValidEmail`,
@@ -810,15 +849,14 @@ async fn serve_users_by_names(
 /// pattern is `{email:.+}`, so the segment may contain slashes — hence the wildcard in the route
 /// table rather than a single-segment parameter, and hence `GET /users/email/verify` reaching
 /// here as the invalid address `verify` rather than as the POST route beside it.
-#[tracing::instrument(skip_all, fields(forwarded))]
+#[tracing::instrument(skip_all)]
 pub async fn get_user_by_email(
     state: State<AppState>,
     Path(email): Path<String>,
     headers: HeaderMap,
     session: AuthenticatedSession,
-    request: axum::extract::Request,
 ) -> Response {
-    get_user_by_email_at(state, &email, headers, session, request).await
+    get_user_by_email_at(state, &email, headers, session).await
 }
 
 /// [`get_user_by_email`] with the address supplied by the caller rather than extracted from the
@@ -835,35 +873,20 @@ pub async fn get_user_by_email_at(
     email: &str,
     headers: HeaderMap,
     session: AuthenticatedSession,
-    request: axum::extract::Request,
 ) -> Response {
     let email = match email_lookup_prologue(&state, &session, email).await {
         Ok(email) => email,
         Err(err) => return err.into_response(),
     };
 
-    // The nil-restrictions fast path, checked before the fetch — the same one
-    // [`get_user_by_username`] takes, and for the same reason: a caller whose restrictions are
-    // non-nil takes Go's existence-hiding 403 on the failure branch, which this port does not
-    // reproduce.
-    if !state
-        .app
-        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
-        .await
-    {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
-
     let user = match state.app.get_user_by_email(&email).await {
         Ok(user) => user,
-        // Restrictions are nil for this caller, so Go surfaces the fetch error as-is.
-        Err(err) => return ApiError::from(err).into_response(),
+        Err(err) => return restricted_lookup_failure(&state, &session, err).await,
     };
 
-    // `UserCanSeeOtherUser`: self is its first branch, nil restrictions its second. True by
-    // construction after the fast path above.
+    if let Some(response) = can_see_found_user(&state, &session, &user.id).await {
+        return response;
+    }
     respond_user_by_email(&state, &headers, &session, user).await
 }
 

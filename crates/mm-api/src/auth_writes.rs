@@ -343,9 +343,8 @@ pub async fn get_user_by_email_verify(
     state: State<AppState>,
     headers: axum::http::HeaderMap,
     session: AuthenticatedSession,
-    request: Request,
 ) -> Response {
-    crate::users::get_user_by_email_at(state, "verify", headers, session, request).await
+    crate::users::get_user_by_email_at(state, "verify", headers, session).await
 }
 
 /// Port of `resetPassword` (api4/user.go:2066), reached as
