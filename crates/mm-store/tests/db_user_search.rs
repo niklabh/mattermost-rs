@@ -63,12 +63,13 @@ async fn pool() -> PgPool {
         .expect("connects to Postgres")
 }
 
-fn options(allow_full_names: bool, limit: i64) -> UserSearchOptions {
+fn options(allow_full_names: bool, limit: i64) -> UserSearchOptions<'static> {
     UserSearchOptions {
         allow_emails: false,
         allow_inactive: false,
         allow_full_names,
         limit,
+        view_restrictions: None,
     }
 }
 

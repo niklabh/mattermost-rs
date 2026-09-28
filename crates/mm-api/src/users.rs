@@ -630,28 +630,23 @@ pub async fn search_users(
         return ApiError::invalid_param("limit").into_response();
     }
 
-    // The nil-restrictions fast path: `RestrictUsersSearchByPermissions` rewrites the query for a
-    // caller whose `view_members` is scheme-granted, and that rewrite is Go's.
-    if !state
-        .app
-        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
-        .await
-    {
-        tracing::Span::current().record("forwarded", true);
-        let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
     tracing::Span::current().record("forwarded", false);
 
     let is_admin = state
         .app
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await;
+    // `RestrictUsersSearchByPermissions`, after the privacy flags and before the search.
+    let restrictions = match state.app.view_users_restrictions(&session.0.user_id).await {
+        Ok(restrictions) => restrictions,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
     let search_options = mm_store::user_store::UserSearchOptions {
         allow_emails: is_admin || state.show_email_address(),
         allow_inactive: props.allow_inactive,
         allow_full_names: is_admin || state.show_full_name(),
         limit,
+        view_restrictions: restrictions.as_ref(),
     };
 
     let mut users = match state
@@ -1805,17 +1800,16 @@ fn allow_full_names(is_admin: bool, show_full_name: bool) -> bool {
 /// `Option` or a bare `Vec` without the skip would emit `"agents":null` or `"agents":[]`, and
 /// neither has ever appeared on this deployment's wire.
 ///
-/// # Not ported
+/// # A restricted caller
 ///
-/// `RestrictUsersSearchByPermissions` only fills in `ViewRestrictions`, so a caller who lacks
-/// user-based `view_members` is forwarded whole — `getUsers`' rule, for the same reason: every
-/// query below would need the restriction joins.
-#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, arm, forwarded))]
+/// `RestrictUsersSearchByPermissions` fills in `ViewRestrictions`, and every arm's query — both
+/// halves of the channel arm included — keeps only users on the caller's permitted teams and in
+/// its channels (`performSearch`, user_store.go:1802). `parity::view_restricted_lookups`.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, arm))]
 pub async fn autocomplete_users(
     State(state): State<AppState>,
     axum::extract::RawQuery(query): axum::extract::RawQuery,
     session: AuthenticatedSession,
-    request: axum::extract::Request,
 ) -> Response {
     let parsed = parse_autocomplete_request(query.as_deref());
 
@@ -1825,12 +1819,6 @@ pub async fn autocomplete_users(
         .app
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await;
-    let options = mm_store::user_store::UserSearchOptions {
-        allow_emails: false,
-        allow_inactive: false,
-        allow_full_names: allow_full_names(is_admin, state.show_full_name()),
-        limit: parsed.limit,
-    };
 
     if !parsed.in_channel.is_empty() {
         let (allowed, _) = state
@@ -1861,17 +1849,18 @@ pub async fn autocomplete_users(
     }
 
     // `RestrictUsersSearchByPermissions` stands here in Go — after both gates, before the
-    // dispatch. A caller with non-nil restrictions goes to Go whole, including for the
-    // missing-team-id 500 below, which Go raises in exactly the same place.
-    if !state
-        .app
-        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
-        .await
-    {
-        tracing::Span::current().record("forwarded", "view_restrictions");
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
+    // dispatch, so its error precedes the missing-team-id 500 below.
+    let restrictions = match state.app.view_users_restrictions(&session.0.user_id).await {
+        Ok(restrictions) => restrictions,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let options = mm_store::user_store::UserSearchOptions {
+        allow_emails: false,
+        allow_inactive: false,
+        allow_full_names: allow_full_names(is_admin, state.show_full_name()),
+        limit: parsed.limit,
+        view_restrictions: restrictions.as_ref(),
+    };
 
     match serve_autocomplete(&state, &parsed, &options, is_admin).await {
         Ok(response) => response,
@@ -1883,7 +1872,7 @@ pub async fn autocomplete_users(
 async fn serve_autocomplete(
     state: &AppState,
     query: &AutocompleteQuery,
-    options: &mm_store::user_store::UserSearchOptions,
+    options: &mm_store::user_store::UserSearchOptions<'_>,
     is_admin: bool,
 ) -> Result<Response, ApiError> {
     let mut autocomplete = mm_model::user_autocomplete::UserAutocomplete::default();

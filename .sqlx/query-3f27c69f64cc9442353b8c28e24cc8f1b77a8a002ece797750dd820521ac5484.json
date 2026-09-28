@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              LEFT JOIN teammembers tm\n                ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)\n              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $2)\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE cm.userid IS NULL\n               AND ($1 = '' OR tm.userid IS NOT NULL)\n               AND ($6 OR u.deleteat = 0)\n               AND NOT EXISTS (\n                     SELECT 1\n                       FROM unnest($3::text[]) AS s(term)\n                      WHERE NOT (\n                                lower(u.username) LIKE lower('%' || s.term || '%') ESCAPE '*'\n                             OR ($4 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR ($4 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'\n                             OR ($7 AND lower(u.email) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR u.id = s.term\n                            )\n                   )\n             ORDER BY u.username ASC\n             LIMIT $5\n            ",
+  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              LEFT JOIN teammembers tm\n                ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE ($1 = '' OR tm.userid IS NOT NULL)\n               AND ($5 OR u.deleteat = 0)\n               AND NOT EXISTS (\n                     SELECT 1\n                       FROM unnest($2::text[]) AS s(term)\n                      WHERE NOT (\n                                lower(u.username) LIKE lower('%' || s.term || '%') ESCAPE '*'\n                             OR ($3 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR ($3 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'\n                             OR ($6 AND lower(u.email) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR u.id = s.term\n                            )\n                   )\n               AND NOT $7::boolean\n               AND (cardinality($8::text[]) = 0 OR EXISTS (\n                     SELECT 1 FROM teammembers rtm\n                      WHERE rtm.userid = u.id\n                        AND rtm.deleteat = 0\n                        AND rtm.teamid = ANY($8::text[])))\n               AND (cardinality($9::text[]) = 0 OR EXISTS (\n                     SELECT 1 FROM channelmembers rcm\n                      WHERE rcm.userid = u.id\n                        AND rcm.channelid = ANY($9::text[])))\n             ORDER BY u.username ASC\n             LIMIT $4\n            ",
   "describe": {
     "columns": [
       {
@@ -162,12 +162,14 @@
     "parameters": {
       "Left": [
         "Text",
-        "Text",
         "TextArray",
         "Bool",
         "Int8",
         "Bool",
-        "Bool"
+        "Bool",
+        "Bool",
+        "TextArray",
+        "TextArray"
       ]
     },
     "nullable": [
@@ -204,5 +206,5 @@
       null
     ]
   },
-  "hash": "0cfdb432a2055c43388db072c2afd046cf34db09b4221e3a1ef89e7d1b1678d4"
+  "hash": "3f27c69f64cc9442353b8c28e24cc8f1b77a8a002ece797750dd820521ac5484"
 }

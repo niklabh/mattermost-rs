@@ -498,3 +498,183 @@ async fn a_restricted_callers_user_lists_are_gos() {
         .await
         .expect("the synthetic role is removed");
 }
+
+/// `POST /users/search` and `GET /users/autocomplete` for a restricted caller: every arm's query
+/// keeps only the users it can see (`performSearch` applies the filter last), and both halves of
+/// the channel arm are filtered. Every body is compared byte for byte.
+#[tokio::test]
+async fn a_restricted_callers_searches_are_gos() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team = create_team(&http, &admin, "vrq").await;
+    let away = create_team(&http, &admin, "vrqaway").await;
+    let first = create_channel_typed(&http, &admin, &team, "vrq", "O").await;
+    let second = create_channel_typed(&http, &admin, &team, "vrqsecond", "O").await;
+
+    let guest = create_plain_user(&http, &admin, &team, "vrqguest").await;
+    let granted = create_plain_user(&http, &admin, &team, "vrqgranted").await;
+    let nobody = create_plain_user(&http, &admin, &team, "vrqnobody").await;
+    // In the first channel only, and in the second only: the in-channel and out-of-channel halves.
+    let inside = create_plain_user(&http, &admin, &team, "vrqinside").await;
+    let outside = create_plain_user(&http, &admin, &team, "vrqoutside").await;
+    // On the team, in no channel: visible only to a team grant, and then only without channels.
+    let teammate = create_plain_user(&http, &admin, &team, "vrqmate").await;
+    // On another team, in a DM with each caller.
+    let stranger = create_plain_user(&http, &admin, &away, "vrqstranger").await;
+    // In the first channel, but gone from the team: the in-channel half's team filter drops it
+    // for the team-granted caller, and only its.
+    let leaver = create_plain_user(&http, &admin, &team, "vrqleaver").await;
+    for user in [&guest.id, &granted.id, &inside.id, &leaver.id] {
+        add_user_to_channel(&http, &admin, &first, user).await;
+    }
+    for user in [&guest.id, &granted.id, &outside.id] {
+        add_user_to_channel(&http, &admin, &second, user).await;
+    }
+    for caller in [&guest.id, &granted.id] {
+        let (status, _, body) = post_json(
+            &http,
+            GO,
+            "/api/v4/channels/direct",
+            &admin,
+            &serde_json::json!([caller, stranger.id]),
+        )
+        .await;
+        assert_eq!(status, 201, "the admin's DM: {body}");
+    }
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after the epoch")
+        .as_millis();
+    let role_id = format!("mmrsvrq{stamp:019}");
+    let role_name = format!("mmrs_vrq_viewer_{stamp}");
+    sqlx::query(
+        "INSERT INTO roles
+            (id, name, displayname, description, createat, updateat, deleteat,
+             permissions, schememanaged, builtin, schemeid)
+         VALUES
+            ($1, $2, 'mmrs team viewer', 'written straight into the table',
+             1701355039000, 1701355040000, 0, ' view_members view_team', false, false, NULL)",
+    )
+    .bind(&role_id)
+    .bind(&role_name)
+    .execute(&pool)
+    .await
+    .expect("the synthetic role is written");
+    for user in [&guest.id, &granted.id, &nobody.id] {
+        make_guest(&pool, user).await;
+    }
+    sqlx::query("UPDATE teammembers SET roles = $2 WHERE userid = $1")
+        .bind(&granted.id)
+        .bind(&role_name)
+        .execute(&pool)
+        .await
+        .expect("the custom team role is granted");
+    for table in ["channelmembers", "teammembers"] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE userid = $1"))
+            .bind(&nobody.id)
+            .execute(&pool)
+            .await
+            .expect("the memberships are dropped");
+    }
+    sqlx::query("DELETE FROM channelmembers WHERE userid = $1")
+        .bind(&teammate.id)
+        .execute(&pool)
+        .await
+        .expect("the teammate's channel memberships are dropped");
+    sqlx::query("UPDATE teammembers SET deleteat = 1701355041000 WHERE userid = $1")
+        .bind(&leaver.id)
+        .execute(&pool)
+        .await
+        .expect("the departure is written");
+    invalidate_go_caches(&http, &admin).await;
+
+    let searches = [
+        serde_json::json!({"term": "vrq"}),
+        serde_json::json!({"term": "vrq", "team_id": team}),
+    ];
+    let autocompletes = [
+        "/api/v4/users/autocomplete?name=vrq".to_owned(),
+        format!("/api/v4/users/autocomplete?in_team={team}&name=vrq"),
+        format!("/api/v4/users/autocomplete?in_team={team}&in_channel={first}&name=vrq"),
+    ];
+    for (caller, token) in [
+        ("guest", &guest.token),
+        ("team-granted", &granted.token),
+        ("nobody", &nobody.token),
+    ] {
+        for body in &searches {
+            let case = format!("{caller}, search {body}");
+            let path = "/api/v4/users/search";
+            let (go_status, _, go_body) = post_json(&http, GO, path, token, body).await;
+            let (rust_status, served, rust_body) = post_json(&http, RUST, path, token, body).await;
+            assert_eq!(
+                rust_status, go_status,
+                "{case}: Go {go_body}, we {rust_body}"
+            );
+            assert!(served, "{case}: served here");
+            if go_status == 200 {
+                assert_eq!(rust_body, go_body, "{case}: byte for byte");
+            } else {
+                assert_error_bodies_match_except_known_gaps(
+                    go_body.as_bytes(),
+                    rust_body.as_bytes(),
+                    &case,
+                );
+            }
+            if caller == "guest" && go_status == 200 {
+                assert!(
+                    go_body.contains(&inside.id),
+                    "{case}: a channel mate is found"
+                );
+                assert!(
+                    !go_body.contains(&teammate.id),
+                    "{case}: the restriction bites"
+                );
+            }
+        }
+        for path in &autocompletes {
+            let case = format!("{caller}, {path}");
+            let (go_status, _, go_body) = get(&http, GO, path, token).await;
+            let (rust_status, served, rust_body) = get(&http, RUST, path, token).await;
+            assert_eq!(
+                rust_status, go_status,
+                "{case}: Go {go_body}, we {rust_body}"
+            );
+            assert!(served, "{case}: served here");
+            if go_status == 200 {
+                assert_eq!(rust_body, go_body, "{case}: byte for byte");
+            } else {
+                assert_error_bodies_match_except_known_gaps(
+                    go_body.as_bytes(),
+                    rust_body.as_bytes(),
+                    &case,
+                );
+            }
+        }
+    }
+
+    for user in [
+        &guest.id,
+        &granted.id,
+        &nobody.id,
+        &inside.id,
+        &outside.id,
+        &teammate.id,
+        &stranger.id,
+        &leaver.id,
+    ] {
+        common::delete_plain_user(&http, &admin, user).await;
+    }
+    sqlx::query("DELETE FROM roles WHERE id = $1")
+        .bind(&role_id)
+        .execute(&pool)
+        .await
+        .expect("the synthetic role is removed");
+}

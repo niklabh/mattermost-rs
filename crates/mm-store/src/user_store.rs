@@ -374,7 +374,7 @@ pub trait UserStore {
         &self,
         team_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.SearchInChannel` (user_store.go:1727) → `performSearch`.
@@ -382,7 +382,7 @@ pub trait UserStore {
         &self,
         channel_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.SearchNotInChannel` (user_store.go:1707) → `performSearch`, for
@@ -397,7 +397,7 @@ pub trait UserStore {
         team_id: &str,
         channel_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetUserReport` (user_store.go:2503) — the System Console's user
@@ -852,12 +852,11 @@ pub const USER_SEARCH_MAX_LIMIT: i64 = 1000;
 /// | `AllowInactive` | never set, so `false` | `Users.DeleteAt = 0` is unconditional |
 /// | `Role` / `Roles` / `TeamRoles` / `ChannelRoles` | never set | `applyRoleFilter` and `applyMultiRoleFilters` are both no-ops |
 /// | `GroupConstrained` | never set | no group-constrained join |
-/// | `ViewRestrictions` | non-nil only for a caller without `view_members`, whom the api layer forwards to Go | `applyViewRestrictionsFilter` is a no-op, and so is its `DISTINCT` |
 ///
 /// `IsAdmin` is absent for a different reason: it is carried in the same Go struct but no query
 /// reads it — only the sanitizer does, and sanitisation lives in the api layer here (D-085).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UserSearchOptions {
+pub struct UserSearchOptions<'a> {
     /// `AllowFullNames`: whether `FirstName` and `LastName` join `Username` and `Nickname` as
     /// searchable columns (`UserSearchTypeNames` vs `UserSearchTypeNamesNoFullName`,
     /// user_store.go:34-35).
@@ -878,6 +877,10 @@ pub struct UserSearchOptions {
     /// hands it to Postgres unchecked, so a **negative** limit is a failed query and a 500 on
     /// both servers — measured against the running Go server, not inferred.
     pub limit: i64,
+    /// `ViewRestrictions`: `performSearch` applies [`restriction_binds`]' distinct form last, so
+    /// a restricted caller searches only users on its permitted teams and in its channels.
+    /// `None` — Go's nil — for a caller holding `view_members` and for every plugin search.
+    pub view_restrictions: Option<&'a ViewUsersRestrictions>,
 }
 
 /// Port of `sanitizeSearchTerm` (sqlstore/utils.go:62).
@@ -2669,9 +2672,10 @@ impl UserStore for SqlUserStore {
         &self,
         team_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> Result<Vec<User>, StoreError> {
         let terms = search_terms(term);
+        let (restricted_to_nobody, teams, channels) = restriction_binds(options.view_restrictions);
         tracing::Span::current().record("terms", terms.len());
 
         // `usersQuery.OrderBy("Username ASC").Limit(...)`, plus the `TeamMembers` join when a
@@ -2731,6 +2735,16 @@ impl UserStore for SqlUserStore {
                              OR u.id = s.term
                             )
                    )
+               AND NOT $7::boolean
+               AND (cardinality($8::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM teammembers rtm
+                      WHERE rtm.userid = u.id
+                        AND rtm.deleteat = 0
+                        AND rtm.teamid = ANY($8::text[])))
+               AND (cardinality($9::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM channelmembers rcm
+                      WHERE rcm.userid = u.id
+                        AND rcm.channelid = ANY($9::text[])))
              ORDER BY u.username ASC
              LIMIT $4
             "#,
@@ -2740,6 +2754,9 @@ impl UserStore for SqlUserStore {
             options.limit,
             options.allow_inactive,
             options.allow_emails,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_all(&self.pool)
         .await
@@ -2757,9 +2774,10 @@ impl UserStore for SqlUserStore {
         &self,
         channel_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> Result<Vec<User>, StoreError> {
         let terms = search_terms(term);
+        let (restricted_to_nobody, teams, channels) = restriction_binds(options.view_restrictions);
         tracing::Span::current().record("terms", terms.len());
 
         // No team join and no `TeamMembers` at all — `SearchInChannel` takes no team id, so a
@@ -2814,6 +2832,16 @@ impl UserStore for SqlUserStore {
                              OR u.id = s.term
                             )
                    )
+               AND NOT $5::boolean
+               AND (cardinality($6::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM teammembers rtm
+                      WHERE rtm.userid = u.id
+                        AND rtm.deleteat = 0
+                        AND rtm.teamid = ANY($6::text[])))
+               AND (cardinality($7::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM channelmembers rcm
+                      WHERE rcm.userid = u.id
+                        AND rcm.channelid = ANY($7::text[])))
              ORDER BY u.username ASC
              LIMIT $4
             "#,
@@ -2821,6 +2849,9 @@ impl UserStore for SqlUserStore {
             &terms,
             options.allow_full_names,
             options.limit,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_all(&self.pool)
         .await
@@ -2839,9 +2870,10 @@ impl UserStore for SqlUserStore {
         team_id: &str,
         channel_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> Result<Vec<User>, StoreError> {
         let terms = search_terms(term);
+        let (restricted_to_nobody, teams, channels) = restriction_binds(options.view_restrictions);
         tracing::Span::current().record("terms", terms.len());
 
         // The anti-join: `cm.UserId IS NULL` against a **LEFT** join whose channel id sits in
@@ -2902,6 +2934,16 @@ impl UserStore for SqlUserStore {
                              OR u.id = s.term
                             )
                    )
+               AND NOT $8::boolean
+               AND (cardinality($9::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM teammembers rtm
+                      WHERE rtm.userid = u.id
+                        AND rtm.deleteat = 0
+                        AND rtm.teamid = ANY($9::text[])))
+               AND (cardinality($10::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM channelmembers rcm
+                      WHERE rcm.userid = u.id
+                        AND rcm.channelid = ANY($10::text[])))
              ORDER BY u.username ASC
              LIMIT $5
             "#,
@@ -2912,6 +2954,9 @@ impl UserStore for SqlUserStore {
             options.limit,
             options.allow_inactive,
             options.allow_emails,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_all(&self.pool)
         .await

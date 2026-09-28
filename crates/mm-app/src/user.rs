@@ -591,7 +591,7 @@ impl App {
         &self,
         team_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> AppResult<Vec<User>> {
         let users = self
             .store()
@@ -610,7 +610,7 @@ impl App {
         &self,
         channel_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> AppResult<Vec<User>> {
         let users = self
             .store()
@@ -632,7 +632,7 @@ impl App {
         &self,
         team_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> AppResult<UserAutocompleteInTeam> {
         let users = self
             .store()
@@ -673,7 +673,7 @@ impl App {
         team_id: &str,
         channel_id: &str,
         term: &str,
-        options: &UserSearchOptions,
+        options: &UserSearchOptions<'_>,
     ) -> AppResult<UserAutocompleteInChannel> {
         let term = term.trim();
         let store = self.store().user();

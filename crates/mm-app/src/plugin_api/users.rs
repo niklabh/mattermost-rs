@@ -230,6 +230,8 @@ impl AppPluginApi {
             allow_emails: false,
             allow_inactive: search.allow_inactive,
             limit: search.limit,
+            // `api.app.SearchUsers(search, options)` with no `ViewRestrictions` set.
+            view_restrictions: None,
         };
         let result = match search_arm(&search) {
             SearchArm::InTeam(team) => {
