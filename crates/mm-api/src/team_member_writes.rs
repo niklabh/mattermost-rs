@@ -131,17 +131,10 @@ pub async fn remove_team_member(
     }
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507) — **every** failure is an empty map.
-///
-/// Go's `json.NewDecoder(...).Decode(&objmap)` result is discarded and a nil map replaced with an
-/// allocated one, so a body that is not an object, an object with a non-string value, and an
-/// empty body are all indistinguishable from `{}`. The one divergence is a *partial* decode:
-/// `{"roles":"team_user","n":5}` fills Go's map before failing and so yields `{"roles":…}`, where
-/// `serde_json` has no partial result and yields `{}`. Same divergence as
-/// [`crate::channel_member_writes`]'s copy; kept local rather than shared so neither module's
-/// tests constrain the other.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    serde_json::from_slice::<StringMap>(bytes).unwrap_or_default()
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// Port of `web.ReturnStatusOK` (web/web.go:127) — `w.Write([]byte(MapToJSON(m)))`, so **no
@@ -282,7 +275,7 @@ pub async fn update_team_member_scheme_roles(
             return ApiError::invalid_param("scheme_roles").into_response();
         }
     };
-    let scheme_roles: SchemeRoles = match serde_json::from_slice(&bytes) {
+    let scheme_roles: SchemeRoles = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(roles) => roles,
         Err(err) => {
             tracing::debug!(error = %err, "scheme_roles body did not decode");
@@ -745,22 +738,12 @@ fn has_non_empty_query_value(query: &str, name: &str) -> bool {
 }
 
 /// Go's `json.NewDecoder(r.Body).Decode(&member)` into a **struct**: a JSON object decodes, an
-/// explicit `null` leaves the zero value and succeeds, and everything else is an error.
-///
-/// `serde`'s derived `Deserialize` is looser in exactly one direction that matters here: a struct
-/// also deserializes **from a sequence**, and `#[serde(default)]` fills the missing tail — so
-/// `from_slice::<TeamMember>(b"[]")` yields a zero-valued member where Go returns a decode error.
-/// The two then answer *different* 400s, `api.context.invalid_body_param.app_error` against
-/// `api.team.add_team_member.invalid_body.app_error`. Measured: the first version of this handler
-/// did exactly that and the parity suite caught it.
+/// explicit `null` leaves the zero value and succeeds (and then fails the `team_id` comparison),
+/// trailing bytes are ignored, and everything else is an error — including `[]`, which serde's
+/// derive alone would take as a zero member and answer with the *other* 400
+/// (`invalid_body_param` against `api.team.add_team_member.invalid_body.app_error`).
 fn decode_team_member(bytes: &[u8]) -> Option<TeamMember> {
-    match serde_json::from_slice::<serde_json::Value>(bytes) {
-        // `Decode` into a non-pointer struct leaves it untouched for `null`, and Go carries on
-        // with the zero value — which then fails the `team_id` comparison below.
-        Ok(serde_json::Value::Null) => Some(TeamMember::default()),
-        Ok(value @ serde_json::Value::Object(_)) => serde_json::from_value(value).ok(),
-        _ => None,
-    }
+    mm_model::utils::decode_one_value_from_json(bytes).ok()
 }
 
 /// The list form, with the same screen applied to the outer value and to every element.
@@ -770,19 +753,10 @@ fn decode_team_member(bytes: &[u8]) -> Option<TeamMember> {
 /// reproduce a panic and treats it as a zero-valued member instead, which is a 400. The only way
 /// to reach it is a body containing a literal `null` inside the array.
 fn decode_team_members(bytes: &[u8]) -> Option<Vec<TeamMember>> {
-    match serde_json::from_slice::<serde_json::Value>(bytes) {
-        // A `null` body is a nil slice, which the length checks then call "no members in batch".
-        Ok(serde_json::Value::Null) => Some(Vec::new()),
-        Ok(serde_json::Value::Array(items)) => items
-            .into_iter()
-            .map(|item| match item {
-                serde_json::Value::Null => Some(TeamMember::default()),
-                value @ serde_json::Value::Object(_) => serde_json::from_value(value).ok(),
-                _ => None,
-            })
-            .collect(),
-        _ => None,
-    }
+    // A `null` body is a nil slice, which the length checks then call "no members in batch".
+    let members: Vec<Option<TeamMember>> =
+        mm_model::utils::decode_one_value_from_json(bytes).ok()?;
+    Some(members.into_iter().map(Option::unwrap_or_default).collect())
 }
 
 /// `model.NewAppError("addTeamMember", "api.team.add_team_member.invalid_body.app_error", nil,
@@ -840,22 +814,38 @@ mod tests {
 
     /// The three inputs that make `/roles` and `/schemeRoles` disagree about the same body.
     #[test]
-    fn map_from_json_swallows_everything_the_scheme_roles_decoder_refuses() {
-        assert!(map_from_json(b"").is_empty());
-        assert!(map_from_json(b"not json").is_empty());
-        assert!(map_from_json(b"[1,2]").is_empty());
-        assert!(map_from_json(br#"{"roles":5}"#).is_empty());
+    fn map_from_json_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"roles":"team_user","n":5} trailing"#);
+        assert_eq!(mixed.get("roles").map(String::as_str), Some("team_user"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(br#"{"roles":"team_user"}"#).get("roles"),
-            Some(&"team_user".to_owned())
+            map_from_json(br#"{"roles":7}"#)
+                .get("roles")
+                .map(String::as_str),
+            Some("")
         );
 
-        // The same three bodies against `SchemeRoles`, which is the route's 400.
-        for body in [b"not json".as_slice(), b"[1,2]".as_slice()] {
-            assert!(serde_json::from_slice::<SchemeRoles>(body).is_err());
+        // The route's own 400 comes from `SchemeRoles`, a value: `null` is the zero roles.
+        for body in [
+            b"not json".as_slice(),
+            b"[1,2]".as_slice(),
+            b"[]".as_slice(),
+        ] {
+            assert!(mm_model::utils::decode_one_value_from_json::<SchemeRoles>(body).is_err());
         }
-        let empty: SchemeRoles = serde_json::from_slice(b"{}").unwrap();
-        assert!(!empty.scheme_guest && !empty.scheme_user && !empty.scheme_admin);
+        for body in [b"{}".as_slice(), b"null".as_slice()] {
+            let empty: SchemeRoles = mm_model::utils::decode_one_value_from_json(body).unwrap();
+            assert!(!empty.scheme_guest && !empty.scheme_user && !empty.scheme_admin);
+        }
     }
 
     /// `props["roles"]` on a map with no `roles` key is `""`, and Go's `IsValidUserRoles("")` is

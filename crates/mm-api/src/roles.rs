@@ -410,16 +410,20 @@ fn not_allowed_permissions() -> [&'static Permission; 4] {
 ///    `system_manager`, who holds the first permission but not this one, fails on a custom role.
 /// 7. [`mm_app::App::patch_role`], and the role `json.Encoder`-encoded with its newline.
 ///
-/// The audit record Go writes around the patch has no port; nothing on the wire carries it.
+/// On success, `c.LogAudit("")` — one `Audits` row, readable through `GET /audits`.
 #[tracing::instrument(skip_all, fields(role_id = %role_id, role_name))]
 pub async fn patch_role(
     State(state): State<AppState>,
     Path(role_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     match patch_role_checked(&state, &role_id, &session.0, request).await {
-        Ok(role) => serve_one_role(async { Ok(role) }).await,
+        Ok(role) => {
+            audit.log(&state.app, Some(&session.0), "").await;
+            serve_one_role(async { Ok(role) }).await
+        }
         Err(err) => err.into_response(),
     }
 }
@@ -549,12 +553,7 @@ fn patch_roles_error(id: &'static str, details: String) -> ApiError {
 /// not an error — and it still reaches `UpdateRole`, which rewrites the row; an object is the
 /// patch, its unknown keys dropped; anything else, an empty body included, is the 400.
 fn decode_role_patch(bytes: &[u8]) -> Option<RolePatch> {
-    let mut values = serde_json::Deserializer::from_slice(bytes).into_iter::<serde_json::Value>();
-    match values.next()? {
-        Ok(serde_json::Value::Null) => Some(RolePatch::default()),
-        Ok(value @ serde_json::Value::Object(_)) => serde_json::from_value(value).ok(),
-        _ => None,
-    }
+    mm_model::utils::decode_one_value_from_json(bytes).ok()
 }
 
 #[cfg(test)]

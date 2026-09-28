@@ -1,0 +1,22 @@
+# Mutation plan for unit J2: the batch-worker shape, its four workers, the Go CSV writer and the
+# zone abbreviation.
+# 2026-09-25: 13 run, 10 caught, 3 survived — two controls, and `nil-data-not-an-empty-map`, whose
+# fixture planted a SQL NULL (read back as `{}`); with a JSON null it is caught (1 of 1).
+#
+#   scripts/mutate-batch.sh scripts/mutations/jobs-batch-j2.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+nil-data-not-an-empty-map	crates/mm-app/src/job_runtime.rs	    if job.data.is_none() {\n        job.data = Some(mm_model::utils::StringMap::new());\n    }	    if job.data.is_none() {\n        job.data = None;\n    }	app	job_worker_batch
+cursor-not-written-mid-run	crates/mm-app/src/job_runtime.rs	                    job.data = next;\n                    if let Err(err) = app.set_job_progress(&mut job, 0).await {	                    job.data = next;\n                    if let Err(err) = Ok::<(), AppError>(()) {	api	batch_jobs
+file-count-not-incremented	crates/mm-app/src/job_runtime.rs	    data.insert("file_count".to_owned(), (file_count + 1).to_string());	    data.insert("file_count".to_owned(), file_count.to_string());	api	batch_jobs
+chunks-not-cleaned	crates/mm-app/src/job_runtime.rs	        .cleanup_report_chunks(report_format, &job.id, file_count)	        .cleanup_report_chunks(report_format, &job.id, 0)	api	batch_jobs
+dms-stops-after-one-batch	crates/mm-app/src/job_runtime.rs	                Ok((None, deleted == 0))	                Ok((None, deleted >= 0))	api	batch_jobs
+delete-keyed-on-next-cursor	crates/mm-app/src/job_runtime.rs	                .delete_empty_drafts_by_create_at_and_user_id(create_at, &user_id)	                .delete_empty_drafts_by_create_at_and_user_id(next_create_at, &next_user_id)	api	batch_jobs
+empty-sweep-wrong-message	crates/mm-store/src/draft_store.rs	               AND d.message = ''	               AND d.message = 'text'	api	batch_jobs
+orphan-sweep-missing-root-kept	crates/mm-store/src/draft_store.rs	                    OR NOT EXISTS (SELECT 1 FROM posts WHERE posts.id = d.rootid))	                    OR false)	api	batch_jobs
+dm-limit-upper-bound-41	crates/mm-store/src/preference_store.rs	                               > '000000000000040'	                               > '000000000000041'	api	batch_jobs
+time-string-without-abbreviation	crates/mm-model/src/report.rs	    format!("{} {}", go_time_string_in(t), t.format("%Z"))	    format!("{}", go_time_string_in(t))	api	batch_jobs
+csv-leading-space-unquoted	crates/mm-model/src/go_csv.rs	    field.chars().next().is_some_and(char::is_whitespace)	    false	unit	go_csv
+control-nil-data-comment	crates/mm-app/src/job_runtime.rs	    if job.data.is_none() {\n        job.data = Some(mm_model::utils::StringMap::new());\n    }	    if job.data.is_none() {\n        job.data = Some(Default::default());\n    }	app	job_worker_batch
+control-report-count-binding	crates/mm-app/src/job_runtime.rs	    data.insert("file_count".to_owned(), (file_count + 1).to_string());	    let next_count = file_count + 1;\n    data.insert("file_count".to_owned(), next_count.to_string());	api	batch_jobs

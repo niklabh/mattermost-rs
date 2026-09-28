@@ -1,3 +1,7 @@
+// The job runtime's future, awaited in-process by `parity::job_workers_simple`, is deeper than the
+// default query depth allows for its layout (measured after the batch-worker shape landed).
+#![recursion_limit = "256"]
+
 //! Consolidated integration test suite for mm-api cross-server parity.
 //!
 //! This binary consolidates all the parity tests that were previously separate
@@ -29,6 +33,7 @@ mod common;
 mod parity {
     pub mod access_control_policies;
     pub mod access_control_reads;
+    pub mod api_compression;
     pub mod auth_migrations;
     pub mod auth_writes;
     pub mod authorized_oauth_apps;
@@ -45,11 +50,13 @@ mod parity {
     pub mod channel_get;
     pub mod channel_join_requests;
     pub mod channel_member;
+    pub mod channel_member_removal;
     pub mod channel_member_writes;
     pub mod channel_members_for_team_for_user;
     pub mod channel_members_for_user;
     pub mod channel_members_list;
     pub mod channel_move;
+    pub mod channel_patch_writes;
     pub mod channel_pinned;
     pub mod channel_posts;
     pub mod channel_posts_unread;
@@ -82,6 +89,7 @@ mod parity {
     pub mod custom_status_writes;
     pub mod data_retention;
     pub mod desktop_login;
+    pub mod dm_team_restriction;
     pub mod draft_and_preference_writes;
     pub mod drafts;
     pub mod email_send;
@@ -111,6 +119,7 @@ mod parity {
     pub mod image_writes;
     pub mod incoming_hooks;
     pub mod invite_info;
+    pub mod job_workers_simple;
     pub mod job_writes;
     pub mod jobs;
     pub mod latest_version;
@@ -161,6 +170,7 @@ mod parity {
     pub mod schemes;
     pub mod server_limits;
     pub mod session_activity;
+    pub mod session_expiry;
     pub mod session_team_members;
     pub mod session_writes;
     pub mod sessions_for_user;
@@ -228,6 +238,7 @@ mod parity {
     pub mod users_stats;
     pub mod users_stats_filtered;
     pub mod users_wipe;
+    pub mod view_restricted_creates;
     pub mod views;
     pub mod webhook_writes;
     pub mod websocket;
@@ -271,6 +282,8 @@ mod parity {
     pub mod postrest;
     // Appended 2026-09-15: the searchmisc family.
     pub mod agents;
+    pub mod audit_rows;
+    pub mod batch_jobs;
     pub mod file_search;
     // Appended 2026-09-16: the configuration projection follows a write (D-701).
     pub mod config_reload;
@@ -286,6 +299,7 @@ mod parity {
     pub mod managed_categories;
     pub mod marketplace;
     pub mod marketplace_visit;
+    pub mod plugin_driver;
     pub mod plugin_hooks;
     pub mod plugin_startup;
     // Appended 2026-09-23: the support packet past its licence gate.
@@ -302,4 +316,23 @@ mod parity {
     pub mod manualtest;
     // Appended 2026-09-20: the translated error message in eight locales (D-092).
     pub mod error_i18n;
+    // Appended 2026-09-24: HEAD on the api4 tree, as gorilla answers it (D-1110).
+    pub mod api_head;
+    // Appended 2026-09-24: rate limiting against its own Go server (D-430).
+    pub mod ratelimit;
+    // Appended 2026-09-25: arrays, nulls and trailing bytes as bodies (D-941).
+    pub mod malformed_bodies;
+    // Appended 2026-09-25: SQL NULL versus JSON null in every map, slice and pointer column
+    // (D-331, D-158).
+    pub mod null_columns;
+    // Appended 2026-09-25: set_unread's open-channel and reply arms (D-421).
+    pub mod set_unread_mentions;
+    // Appended 2026-09-25: basicSecurityChecks' 414 (D-1211).
+    pub mod url_length;
+    // Appended 2026-09-25: MFA enrolment and the MFA login across both servers (D-500, D-1210).
+    pub mod mfa_enrolment;
+    // Appended 2026-09-25: persistent notifications, their resolution and their job (D-401, D-551).
+    pub mod persistent_notifications;
+    // Appended 2026-09-25: the product-notices and notify-admin jobs (D-804).
+    pub mod notify_jobs;
 }

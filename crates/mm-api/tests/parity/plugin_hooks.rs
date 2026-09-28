@@ -72,7 +72,7 @@ const CHANNEL_HOST_PORT: u16 = 8134;
 /// Its Go server.
 const CHANNEL_GO_OFFSET: u16 = 84;
 /// The Rust host of the onboarding tranche, `OnInstall`.
-const ONBOARDING_HOST_PORT: u16 = 8135;
+const ONBOARDING_HOST_PORT: u16 = 8146;
 /// Its Go server.
 const ONBOARDING_GO_OFFSET: u16 = 85;
 /// The Rust host of the scheduled-post tranche, `ScheduledPostWillBeCreated`.
@@ -83,10 +83,16 @@ const SCHEDULED_GO_OFFSET: u16 = 86;
 const SUPPORT_HOST_PORT: u16 = 8137;
 /// Its Go server — licensed too: the packet is refused without a licence.
 const SUPPORT_GO_OFFSET: u16 = 87;
+/// The Rust host of the notification tranche, `EmailNotificationWillBeSent` and
+/// `NotificationWillBePushed`, and its Go server's offset: `parity::plugin_driver`'s pair, reused
+/// — every port below the next stack's is taken, and the two never run at once, both holding
+/// `common::PLUGIN_STATES` for their whole run.
+const NOTIFY_HOST_PORT: u16 = super::plugin_driver::HOST_PORT;
+const NOTIFY_GO_OFFSET: u16 = super::plugin_driver::GO_OFFSET;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
-fn repo() -> PathBuf {
+pub(super) fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
@@ -240,7 +246,7 @@ fn lay_out(run: &Path) -> PathBuf {
 }
 
 /// The Go server this suite starts: killed on drop.
-struct GoServer {
+pub(super) struct GoServer {
     child: std::process::Child,
     base: String,
     /// The tour's scratch directory: the parent of both hosts' run directories.
@@ -277,7 +283,7 @@ fn go_port() -> u16 {
 /// `parity::plugin_startup` does. **Two database connections, not fifty**: the stack's servers
 /// already hold most of the ceiling, and a server with Go's default `MaxIdleConns` takes the
 /// database down for every suite running beside this one.
-async fn start_go(run: &Path, env: &[(&str, &str)], offset: u16) -> GoServer {
+pub(super) async fn start_go(run: &Path, env: &[(&str, &str)], offset: u16) -> GoServer {
     start_go_binary("mattermost", run, env, offset).await
 }
 
@@ -827,9 +833,19 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(guarded.clone());
     plant_guard(&guarded, true).await;
 
+    // Both hosts trust two proxy headers, so `IPAddress` is `utils.GetIPAddress`'s header walk
+    // (step 1b) as well as its peer fallback (step 1). An environment override, so nothing is
+    // written to the shared configuration document.
+    const TRUSTED: (&str, &str) = (
+        "MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER",
+        "X-Real-IP X-Forwarded-For",
+    );
     let go = start_go(
         &go_run,
-        &[("HOOK_RECORDER_TRANSCRIPT", &go_log.to_string_lossy())],
+        &[
+            ("HOOK_RECORDER_TRANSCRIPT", &go_log.to_string_lossy()),
+            TRUSTED,
+        ],
         GO_OFFSET,
     )
     .await;
@@ -845,6 +861,7 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
             ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
             ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
             ("HOOK_RECORDER_TRANSCRIPT", &rust_log.to_string_lossy()),
+            TRUSTED,
         ],
     )
     .await
@@ -929,6 +946,10 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
             .header("Accept-Language", "fr-CA,fr;q=0.9")
             .header("Connection-Id", "conn-parity-1")
             .header("X-Request-ID", "client-supplied")
+            // The first trusted header is not an address, so the walk moves on to the second,
+            // whose first element wins.
+            .header("X-Real-IP", "not-an-address")
+            .header("X-Forwarded-For", "203.0.113.7, 10.0.0.1")
             .body(post_body("hook recorder with headers"))
             .send()
             .await
@@ -940,6 +961,10 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
     assert_eq!(context["UserAgent"], "mmrs-hook-parity/1.0");
     assert_eq!(context["AcceptLanguage"], "fr-CA,fr;q=0.9");
     assert_eq!(context["ConnectionId"], "conn-parity-1");
+    assert_eq!(
+        context["IPAddress"], "203.0.113.7",
+        "TrustedProxyIPHeader's walk"
+    );
     assert_ne!(
         context["RequestId"], "client-supplied",
         "the request id is minted, never the client's"
@@ -2893,6 +2918,8 @@ static CHANNEL_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec:
 /// GM's name is a function of its members' ids, so it is scrubbed whole rather than piecewise.
 #[tokio::test]
 async fn the_channel_hooks_fire_as_go_fires_them() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     use futures_util::FutureExt as _;
 
     if !stack_enabled() {
@@ -3462,6 +3489,8 @@ async fn transcript_reaches(path: &Path, expected: usize, side: &str) -> Vec<Jso
 /// host starts from a plugin that is not enabled.
 #[tokio::test]
 async fn the_install_hook_fires_as_go_fires_it() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     use futures_util::FutureExt as _;
 
     if !stack_enabled() {
@@ -3652,6 +3681,8 @@ static SCHEDULED_CHANNEL: std::sync::Mutex<Option<String>> = std::sync::Mutex::n
 /// answers off the post's message, as it does for drafts.
 #[tokio::test]
 async fn the_scheduled_post_hook_fires_as_go_fires_it() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     use futures_util::FutureExt as _;
 
     if !stack_enabled() {
@@ -6417,8 +6448,11 @@ impl CommandSide {
     }
 }
 
-/// The commands the Rust host must hand on to Go: no plugin answers them.
-const COMMAND_FORWARDED: [&str; 2] = ["/hookrec nothing", "/nosuchhookrec at all"];
+/// The commands the Rust host must hand on to Go. None since 2026-09-25: a trigger no plugin
+/// answers used to forward (`/hookrec nothing`, `/nosuchhookrec at all`) because this process
+/// could not see Go's plugin directory; under the Rust host Go runs no plugins, so the rest of
+/// `ExecuteCommand` — custom, built-in, the 404 — is answered here.
+const COMMAND_FORWARDED: [&str; 0] = [];
 
 /// Every `TriggerId` in an `ExecuteCommand` entry, decoded: `<client id>:<user id>:<millis>:
 /// <signature>`. Read before anything is masked.
@@ -6945,7 +6979,7 @@ async fn run_the_command_tour(client: &reqwest::Client, admin: &str) {
     drop(go);
 
     // A plugin disabled through the Rust host takes its commands with it: the trigger is then
-    // nobody's, and Go answers it.
+    // nobody's, and — Go running no plugins under this host — the 404 is answered here.
     let (status, body, _) = request_raw(
         client,
         &rust.base,
@@ -6981,7 +7015,7 @@ async fn run_the_command_tour(client: &reqwest::Client, admin: &str) {
         (
             404,
             Some("api.command.execute_command.not_found.app_error"),
-            false
+            true
         ),
         "a disabled plugin's command is nobody's: {answer}"
     );
@@ -11127,4 +11161,1708 @@ fn assert_auth_answers_are_gos(calls: &[Json], hooks: &[Json], frames: &[Json], 
             "the own user heard {event}: {events:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: commands, plugins, upload sessions, team icons, the profile image,
+// typing, toasts, push, channel restore, the cluster and the audit log (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the server tranche; see `second_server_ports`.
+const SERVER_HOST_PORT: u16 = 8148;
+/// Its Go server: **below 100**, because Go's port + 100 is the next stack's Go server.
+const SERVER_GO_OFFSET: u16 = 93;
+/// Each side's tag: in its users' names, its team, and every name its script makes.
+const SERVER_SIDES: [&str; 2] = ["psvsidego", "psvsiders"];
+
+/// The plain users the server tour makes, for the cleanup.
+static SERVER_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the plugin API's command, plugin, upload-session, team-icon,
+/// profile-image, typing, toast, push, channel-restore, cluster and audit methods
+/// (`mm_app::plugin_api::server`).
+///
+/// A `!server-script` post, made by each side's own user in its own channel, runs
+/// `examples/recorder/server.rs` inside `MessageWillBePosted`. Every answer is compared in
+/// order, every hook the script's writes fired, and every websocket frame the own user's socket
+/// received — the team icon's and the profile image's bytes among the answers, so the two image
+/// pipelines are compared byte for byte.
+///
+/// # What differs between the sides, and how it is taken out
+///
+/// Each side has its own team, channel and three users (own, other, and an outsider removed from
+/// the team for the graceful batch to bring back), made through main Go before either host
+/// starts. The side's ids, tag and run directory (in a plugin status's path) are scrubbed, and
+/// the ids the script learned first (the made channel, the command); what is left is masked as
+/// in the channels tranche.
+#[tokio::test]
+async fn the_plugin_api_server_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    server_purge_rows().await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_server_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *SERVER_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in &users {
+        common::delete_plain_user(&client, &admin, id).await;
+    }
+    server_purge_rows().await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// What the tour leaves that the fixture purge does not reach: each side team with its
+/// channels, members, posts and commands, and the upload sessions the script made.
+async fn server_purge_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let teams: Vec<String> = SERVER_SIDES
+        .iter()
+        .map(|side| format!("mmrs-parity-hookserver{side}"))
+        .collect();
+    for statement in [
+        "DELETE FROM commands WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM sidebarchannels WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM threads WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM posts WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM publicchannels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM channels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM sidebarcategories WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teams WHERE name = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&teams)
+            .execute(&pool)
+            .await
+            .expect("the side teams go");
+    }
+    sqlx::query("DELETE FROM uploadsessions WHERE id LIKE 'srvupload%'")
+        .execute(&pool)
+        .await
+        .expect("the tour's upload sessions go");
+}
+
+/// One side of the server tour.
+struct ServerSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    other: common::PlainUser,
+    outsider: common::PlainUser,
+    team: String,
+    channel: String,
+}
+
+impl ServerSide {
+    /// What the host passes down to the recorder for this side.
+    fn env(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("HOOK_RECORDER_SERVER_OWN", self.own.id.clone()),
+            ("HOOK_RECORDER_SERVER_OTHER", self.other.id.clone()),
+            ("HOOK_RECORDER_SERVER_OUTSIDER", self.outsider.id.clone()),
+            ("HOOK_RECORDER_SERVER_TEAM", self.team.clone()),
+            ("HOOK_RECORDER_SERVER_SIDE", self.tag.to_owned()),
+        ]
+    }
+
+    /// This side's scrub pairs: its run directory, what the script's answers taught it, then
+    /// the fixture.
+    fn pairs(&self, run: &Path, calls: &[Json]) -> Vec<(String, String)> {
+        let mut pairs = vec![(run.to_string_lossy().into_owned(), "<run>".to_owned())];
+        for (name, n, pointer, token) in [
+            ("CreateChannel", 0, "/returns/A/Id", "<made>"),
+            ("CreateCommand", 0, "/returns/A/Id", "<command>"),
+        ] {
+            if let Some(value) = learned(calls, name, n, pointer) {
+                pairs.push((value, token.to_owned()));
+            }
+        }
+        pairs.extend([
+            (self.own.id.clone(), "<own>".to_owned()),
+            (self.other.id.clone(), "<other>".to_owned()),
+            (self.outsider.id.clone(), "<outsider>".to_owned()),
+            (self.team.clone(), "<side-team>".to_owned()),
+            (self.channel.clone(), "<own-channel>".to_owned()),
+            (self.own.token.clone(), "<token>".to_owned()),
+            (self.tag.to_owned(), "<side>".to_owned()),
+        ]);
+        pairs
+    }
+}
+
+/// The id of the server tour's second plugin, which no state enables.
+const SERVER_INACTIVE_ID: &str = "mmrs.srvinactive";
+
+/// A bundle holding nothing but a manifest: `GetPlugins` lists it after the active recorder,
+/// as `PluginAPI.GetPlugins` appends the inactive manifests to the active ones.
+fn server_inactive_bundle() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-inactive");
+            let stage = scratch.join(SERVER_INACTIVE_ID);
+            let _ = std::fs::remove_dir_all(&scratch);
+            std::fs::create_dir_all(&stage).expect("the staging directory");
+            std::fs::write(
+                stage.join("plugin.json"),
+                format!(
+                    r#"{{"id": "{SERVER_INACTIVE_ID}", "name": "Inactive", "version": "0.0.1"}}"#
+                ),
+            )
+            .expect("the manifest");
+            let tarball = scratch.join(format!("{SERVER_INACTIVE_ID}.tar.gz"));
+            let status = Command::new("sh")
+                .arg("-c")
+                .arg(format!(
+                    "tar -c -C {stage} {SERVER_INACTIVE_ID} | gzip -1 > {out}",
+                    stage = scratch.display(),
+                    out = tarball.display()
+                ))
+                .status()
+                .expect("tar runs");
+            assert!(status.success(), "packing the inactive bundle failed");
+            tarball
+        })
+        .clone()
+}
+
+async fn run_the_server_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-server");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+    for run in [&go_run, &rs_run] {
+        std::fs::copy(
+            server_inactive_bundle(),
+            run.join("data/plugins")
+                .join(format!("{SERVER_INACTIVE_ID}.tar.gz")),
+        )
+        .expect("the inactive bundle reaches the file store");
+    }
+
+    plant_state(client, admin, Some(true)).await;
+
+    // Every fixture is made through **main** Go, which hosts no plugins.
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+
+    let mut sides = Vec::new();
+    for tag in SERVER_SIDES {
+        let team = common::create_team(client, admin, &format!("hookserver{tag}")).await;
+        let own = common::create_plain_user(client, admin, &team, &format!("svown{tag}")).await;
+        let other = common::create_plain_user(client, admin, &team, &format!("svoth{tag}")).await;
+        let outsider =
+            common::create_plain_user(client, admin, &team, &format!("svout{tag}")).await;
+        SERVER_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend([own.id.clone(), other.id.clone(), outsider.id.clone()]);
+        let channel = common::create_channel(client, admin, &team, &format!("srv{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        common::add_user_to_channel(client, admin, &channel, &other.id).await;
+        common::remove_user_from_team(client, admin, &team, &outsider.id).await;
+        // The admin made the team and the channel; leaving the team takes it out of both.
+        common::remove_user_from_team(client, admin, &team, &admin_id).await;
+        sides.push(ServerSide {
+            tag,
+            own,
+            other,
+            outsider,
+            team,
+            channel,
+        });
+    }
+
+    let go_env = sides[0].env();
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    env.extend(go_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let go = start_go(&go_run, &env, SERVER_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_env = sides[1].env();
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    env.extend(rust_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let rust = SecondServer::start_in(SERVER_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let shared_ids = vec![admin_id.clone(), CORE_MISSING.to_owned()];
+    let mut recorded = Vec::new();
+    for (side, base, log, run, host) in [
+        (
+            &sides[0],
+            go.base.as_str(),
+            go_log.as_path(),
+            go_run.as_path(),
+            "Go",
+        ),
+        (
+            &sides[1],
+            rust.base.as_str(),
+            rust_log.as_path(),
+            rs_run.as_path(),
+            "Rust",
+        ),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "channel_id": side.channel,
+            "message": "!server-script",
+        }))
+        .expect("the post");
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(&side.own.token),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(
+            status,
+            201,
+            "{host}: the trigger: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        if host == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the trigger was forwarded"
+            );
+        }
+        script_transcript_settles(log, "ServerScript", host).await;
+        core_frames_settle(&mut probe).await;
+
+        let calls = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+            .find(|e| e["hook"] == "ServerScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .unwrap_or_default();
+        let pairs = side.pairs(run, &calls);
+        let mut entries = transcript_of(log, &pairs);
+        for entry in entries.iter_mut() {
+            mask_core(entry, &shared_ids);
+            mask_password(entry);
+        }
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, &shared_ids))
+            .collect();
+        frames.iter_mut().for_each(mask_member_clocks);
+        frames.iter_mut().for_each(mask_password_update);
+        frames.iter_mut().for_each(server_mask_image_clocks);
+        frames.sort_by_key(Json::to_string);
+        recorded.push((entries, frames));
+    }
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+
+    // The answers, in order.
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "ServerScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {:?}",
+        go_calls
+            .iter()
+            .filter(|c| c.get("error").is_some())
+            .collect::<Vec<_>>()
+    );
+    let differing: Vec<String> = go_calls
+        .iter()
+        .zip(&rust_calls)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("call {index} ({}):\n  go:   {g}\n  rust: {r}", g["call"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    // The hooks the script's writes fired, in canonical order.
+    let hooks = |entries: &[Json]| -> Vec<Json> {
+        let rest: Vec<Json> = entries
+            .iter()
+            .filter(|e| e["hook"] != "ServerScript")
+            .cloned()
+            .collect();
+        in_canonical_order(&rest)
+    };
+    let (go_hooks, rust_hooks) = (hooks(&go_side.0), hooks(&rust_side.0));
+    assert_eq!(names(&go_hooks), names(&rust_hooks), "the hooks that fired");
+    let differing: Vec<String> = go_hooks
+        .iter()
+        .zip(&rust_hooks)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("hook {index} ({}):\n  go:   {g}\n  rust: {r}", g["hook"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+
+    // Every frame the own user's socket received, in canonical order.
+    let event_names = |frames: &[Json]| -> Vec<String> {
+        frames
+            .iter()
+            .filter_map(|f| f["event"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        event_names(&go_side.1),
+        event_names(&rust_side.1),
+        "the events the own user received:\n  go:   {:?}\n  rust: {:?}",
+        go_side.1,
+        rust_side.1
+    );
+    let differing: Vec<String> = go_side
+        .1
+        .iter()
+        .zip(&rust_side.1)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("frame {index} ({}):\n  go:   {g}\n  rust: {r}", g["event"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+
+    assert_server_answers_are_gos(&go_calls, &go_side.1);
+
+    drop(rust);
+    drop(go);
+    for side in &sides {
+        common::delete_channel(client, admin, &side.channel).await;
+    }
+}
+
+/// A frame's `last_picture_update` and `last_team_icon_update`, stamped by each side's own write:
+/// `<set>` when set, so a `0` from the removal still reads as one.
+fn server_mask_image_clocks(value: &mut Json) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(server_mask_image_clocks),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if matches!(
+                    key.as_str(),
+                    "last_picture_update" | "last_team_icon_update"
+                ) && entry.as_i64().is_some_and(|n| n != 0)
+                {
+                    *entry = Json::String("<set>".to_owned());
+                    continue;
+                }
+                server_mask_image_clocks(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// What parity alone would not pin, because both hosts could agree on a wrong answer: read off
+/// Go's scrubbed answers.
+fn assert_server_answers_are_gos(calls: &[Json], frames: &[Json]) {
+    let answer = |name: &str, n: usize| -> Json {
+        calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    let error_id = |name: &str, n: usize, key: &str| -> Json { answer(name, n)[key]["Id"].clone() };
+
+    let plugins: Vec<Json> = answer("GetPlugins", 0)["A"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|m| m["Name"].clone())
+        .collect();
+    assert_eq!(
+        plugins,
+        [Json::from("Hook Recorder"), Json::from("Inactive")],
+        "the active plugin, then the inactive one"
+    );
+    assert_eq!(
+        error_id("GetChannelOfType", 1, "B"),
+        "app.channel.get.existing.app_error",
+        "a channel of another type is missing"
+    );
+    assert_eq!(
+        error_id("RestoreChannel", 1, "A"),
+        "api.channel.restore_channel.restored.app_error",
+        "the second restore refuses"
+    );
+    let batch = answer("CreateTeamMembersGracefully", 0)["A"].clone();
+    assert_eq!(
+        batch.as_array().map(Vec::len),
+        Some(3),
+        "one entry per user: {batch}"
+    );
+    assert!(
+        batch[2]["Error"]["Id"].is_string(),
+        "the missing user is an entry's error: {batch}"
+    );
+    assert!(
+        answer("GetTeamIcon", 1)["A"]["$bytes"]
+            .as_str()
+            .is_some_and(|b| b.len() > 100),
+        "the icon is read back after it is set: {}",
+        answer("GetTeamIcon", 1)
+    );
+    assert_eq!(
+        answer("GetTeamIcon", 1)["A"],
+        answer("GetTeamIcon", 2)["A"],
+        "the removal leaves the file"
+    );
+    assert_eq!(
+        error_id("SetTeamIcon", 1, "A"),
+        "api.team.set_team_icon.decode.app_error"
+    );
+    assert_eq!(
+        error_id("SetProfileImage", 2, "A"),
+        "api.user.upload_profile_user.decode.app_error"
+    );
+    assert_eq!(
+        error_id("GetLDAPUserAttributes", 0, "B"),
+        "ent.ldap.disabled.app_error"
+    );
+    assert_eq!(
+        error_id("RequestTrialLicense", 2, "A"),
+        "app.user.missing_account.const"
+    );
+    assert_eq!(
+        answer("GetCommand", 1)["B"]["value"]["Err"],
+        format!("resource \"Command\" not found, id: {CORE_MISSING}"),
+        "the store's own error: {}",
+        answer("GetCommand", 1)
+    );
+    assert_eq!(
+        answer("UpdateCommand", 0)["B"]["value"]["Id"],
+        "model.command.is_valid.plugin_id.app_error",
+        "the plugin's creator is kept, and a command cannot have both"
+    );
+    assert_eq!(
+        answer("UpdateCommand", 1)["A"]["TeamId"],
+        "<side-team>",
+        "a command sent without a team keeps its own"
+    );
+    assert!(
+        answer("DeleteCommand", 1)["A"].is_null(),
+        "a missing command deletes without error"
+    );
+    assert!(
+        frames.iter().any(|f| f["event"] == "show_toast"),
+        "the toast reached its user: {frames:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: property groups, fields and values (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the property tranche; see `second_server_ports`.
+const PROPS_HOST_PORT: u16 = 8150;
+/// Its Go server: **below 100**, because Go's port + 100 is the next stack's Go server.
+const PROPS_GO_OFFSET: u16 = 95;
+/// Each side's tag: in its user's name, its team, and its property group's name.
+const PROPS_SIDES: [&str; 2] = ["propsidego", "propsiders"];
+
+/// The plain users the property tour makes, for the cleanup.
+static PROPS_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the plugin API's property methods (`mm_app::plugin_api::properties`):
+/// groups, fields, values and the five `*WithOptions` variants.
+///
+/// A `!properties-script` post runs `examples/recorder/properties.rs` inside
+/// `MessageWillBePosted` on each host, in a PSAv1 group of the side's own (`prop_<side>`), as a
+/// plugin registers one. Every answer is compared in order — the values' `json.RawMessage` bytes
+/// among them, so which bytes each method hands back (the input sanitised, or Postgres's
+/// rendering of the `jsonb`) is compared exactly — and every frame the own user's socket
+/// received: the `property_values_updated` events of the deletes and of a type change's cleanup.
+#[tokio::test]
+async fn the_plugin_api_property_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    props_purge_rows().await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_props_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *PROPS_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in &users {
+        common::delete_plain_user(&client, &admin, id).await;
+    }
+    props_purge_rows().await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// Each side's team with its channels, members and posts, and its property group with every
+/// field and value in it.
+async fn props_purge_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let teams: Vec<String> = PROPS_SIDES
+        .iter()
+        .map(|side| format!("mmrs-parity-hookprops{side}"))
+        .collect();
+    let groups: Vec<String> = PROPS_SIDES
+        .iter()
+        .map(|side| format!("prop_{side}"))
+        .collect();
+    sqlx::query("DELETE FROM accesscontrolpolicies WHERE id = ANY($1)")
+        .bind(PROPS_POLICIES.map(|(id, _)| id).to_vec())
+        .execute(&pool)
+        .await
+        .expect("the planted policies go");
+    for statement in [
+        "DELETE FROM propertyvalues WHERE groupid IN (SELECT id FROM propertygroups WHERE name = ANY($1))",
+        "DELETE FROM propertyfields WHERE groupid IN (SELECT id FROM propertygroups WHERE name = ANY($1))",
+        "DELETE FROM propertygroups WHERE name = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&groups)
+            .execute(&pool)
+            .await
+            .expect("the side groups go");
+    }
+    for statement in [
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM sidebarchannels WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM threads WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM posts WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM publicchannels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM channels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM sidebarcategories WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teams WHERE name = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&teams)
+            .execute(&pool)
+            .await
+            .expect("the side teams go");
+    }
+}
+
+/// The two policy rows the access-control calls read, shared by both sides: one of the recorder's
+/// own `doc` type (so `EvaluateAccessControl` must fail closed, 503) and one of another type under
+/// the id it asks about (a foreign row, the vacuous allow). Ids as `examples/recorder/properties.rs`
+/// names them.
+const PROPS_POLICIES: [(&str, &str); 2] = [
+    ("acpolicyownacpolicyownacpo", "mmrs.hookrecorder:doc"),
+    ("acpolicyothacpolicyothacpo", "mmrs.hookrecorder:other"),
+];
+
+async fn props_plant_policies() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    for (id, type_) in PROPS_POLICIES {
+        sqlx::query(
+            "INSERT INTO accesscontrolpolicies (id, name, type, active, createat, revision, version, data, props) \
+             VALUES ($1, $1, $2, true, 1, 1, 'v0.5', '{}', '{}')",
+        )
+        .bind(id)
+        .bind(type_)
+        .execute(&pool)
+        .await
+        .expect("a planted policy");
+    }
+}
+
+/// One side of the property tour.
+struct PropsSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    channel: String,
+}
+
+impl PropsSide {
+    fn env(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("HOOK_RECORDER_PROPS_OWN", self.own.id.clone()),
+            ("HOOK_RECORDER_PROPS_SIDE", self.tag.to_owned()),
+        ]
+    }
+
+    /// The ids the script's answers taught it, then the fixture.
+    fn pairs(&self, calls: &[Json]) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        for (name, n, pointer, token) in [
+            ("RegisterPropertyGroup", 2, "/returns/A/ID", "<group>"),
+            ("CreatePropertyField", 1, "/returns/A/ID", "<colour>"),
+            ("CreatePropertyField", 2, "/returns/A/ID", "<size>"),
+            ("CreatePropertyValue", 1, "/returns/A/ID", "<first>"),
+            ("CreatePropertyValue", 2, "/returns/A/ID", "<second>"),
+            ("CreatePropertyValue", 7, "/returns/A/ID", "<late>"),
+        ] {
+            if let Some(value) = learned(calls, name, n, pointer) {
+                pairs.push((value, token.to_owned()));
+            }
+        }
+        pairs.extend([
+            (self.own.id.clone(), "<own>".to_owned()),
+            (self.channel.clone(), "<own-channel>".to_owned()),
+            (self.own.token.clone(), "<token>".to_owned()),
+            (self.tag.to_owned(), "<side>".to_owned()),
+        ]);
+        pairs
+    }
+}
+
+/// A `json.RawMessage` as the transcript renders it (`{"$bytes": base64}`), decoded, so the two
+/// sides' bytes are compared — and asserted — as text. Scrubbing ran on the base64, so an id
+/// inside a value would be missed; no value this script writes holds one.
+fn props_decode_bytes(value: &mut Json) {
+    use base64::Engine as _;
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(props_decode_bytes),
+        Json::Object(map) => {
+            if let Some(text) = map.get("$bytes").and_then(Json::as_str) {
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(text) {
+                    *value = Json::String(String::from_utf8_lossy(&bytes).into_owned());
+                    return;
+                }
+            }
+            map.values_mut().for_each(props_decode_bytes);
+        }
+        _ => {}
+    }
+}
+
+async fn run_the_props_tour(client: &reqwest::Client, admin: &str) {
+    props_plant_policies().await;
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-props");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(client, admin, Some(true)).await;
+
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+
+    let mut sides = Vec::new();
+    for tag in PROPS_SIDES {
+        let team = common::create_team(client, admin, &format!("hookprops{tag}")).await;
+        let own = common::create_plain_user(client, admin, &team, &format!("prown{tag}")).await;
+        PROPS_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(own.id.clone());
+        let channel = common::create_channel(client, admin, &team, &format!("prp{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        common::remove_user_from_team(client, admin, &team, &admin_id).await;
+        sides.push(PropsSide { tag, own, channel });
+    }
+
+    let go_env = sides[0].env();
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    env.extend(go_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let go = start_go(&go_run, &env, PROPS_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_env = sides[1].env();
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    env.extend(rust_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let rust = SecondServer::start_in(PROPS_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let shared_ids = vec![admin_id.clone(), CORE_MISSING.to_owned()];
+    let mut recorded = Vec::new();
+    for (side, base, log, host) in [
+        (&sides[0], go.base.as_str(), go_log.as_path(), "Go"),
+        (&sides[1], rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "channel_id": side.channel,
+            "message": "!properties-script",
+        }))
+        .expect("the post");
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(&side.own.token),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(
+            status,
+            201,
+            "{host}: the trigger: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        if host == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the trigger was forwarded"
+            );
+        }
+        script_transcript_settles(log, "PropertiesScript", host).await;
+        core_frames_settle(&mut probe).await;
+
+        let calls = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+            .find(|e| e["hook"] == "PropertiesScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .unwrap_or_default();
+        let pairs = side.pairs(&calls);
+        let mut entries = transcript_of(log, &pairs);
+        for entry in entries.iter_mut() {
+            props_decode_bytes(entry);
+            mask_core(entry, &shared_ids);
+        }
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, &shared_ids))
+            .filter(|f| f["event"] == "property_values_updated")
+            .collect();
+        frames.sort_by_key(Json::to_string);
+        recorded.push((entries, frames));
+    }
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "PropertiesScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {:?}",
+        go_calls
+            .iter()
+            .filter(|c| c.get("error").is_some())
+            .collect::<Vec<_>>()
+    );
+    let differing: Vec<String> = go_calls
+        .iter()
+        .zip(&rust_calls)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("call {index} ({}):\n  go:   {g}\n  rust: {r}", g["call"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    assert_eq!(
+        go_side.1, rust_side.1,
+        "the property_values_updated frames the own user received"
+    );
+
+    assert_props_answers_are_gos(&go_calls, &go_side.1);
+
+    drop(rust);
+    drop(go);
+    for side in &sides {
+        common::delete_channel(client, admin, &side.channel).await;
+    }
+}
+
+/// What parity alone would not pin, read off Go's scrubbed answers.
+fn assert_props_answers_are_gos(calls: &[Json], frames: &[Json]) {
+    let answer = |name: &str, n: usize| -> Json {
+        calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    let error = |name: &str, n: usize, key: &str| -> (Json, Json, Json) {
+        let e = answer(name, n)[key]["value"].clone();
+        (e["Id"].clone(), e["StatusCode"].clone(), e["Where"].clone())
+    };
+    let e = |id: &str, status: i64, where_: &str| {
+        (Json::from(id), Json::from(status), Json::from(where_))
+    };
+
+    assert!(
+        answer("GetPropertyGroup", 0)["B"]["value"]["Err"]
+            .as_str()
+            .is_some_and(|t| t.contains("has been deprecated")),
+        "the deprecated name is a plain error: {}",
+        answer("GetPropertyGroup", 0)
+    );
+    assert_eq!(
+        error("RegisterPropertyGroup", 1, "B"),
+        e(
+            "app.property_group.register.app_error",
+            500,
+            "RegisterPropertyGroup"
+        ),
+        "an invalid name is the 500"
+    );
+    assert_eq!(
+        answer("RegisterPropertyGroup", 3)["A"]["ID"],
+        "<group>",
+        "a second registration answers the first"
+    );
+    assert_eq!(
+        error("GetPropertyGroup", 2, "B"),
+        e("app.property_group.get.app_error", 404, "GetPropertyGroup")
+    );
+    assert_eq!(
+        error("CreatePropertyField", 0, "B"),
+        e(
+            "app.property_field.invalid_input.app_error",
+            400,
+            "CreatePropertyField"
+        )
+    );
+    assert_eq!(
+        answer("CreatePropertyField", 1)["A"]["Name"],
+        "colour",
+        "trimmed"
+    );
+    assert_eq!(
+        [3, 4, 5, 6, 7, 8].map(|n| error("CreatePropertyField", n, "B")),
+        [
+            e(
+                "app.property_field.create.app_error",
+                500,
+                "CreatePropertyField"
+            ),
+            e(
+                "app.property_field.create.app_error",
+                500,
+                "CreatePropertyField"
+            ),
+            e(
+                "app.property_field.create.protected.app_error",
+                400,
+                "CreatePropertyField"
+            ),
+            e(
+                "app.property_field.version_mismatch.app_error",
+                400,
+                "CreatePropertyField"
+            ),
+            e(
+                "app.property.not_found.app_error",
+                404,
+                "CreatePropertyField"
+            ),
+            e(
+                "model.property_field.is_valid.app_error",
+                400,
+                "PropertyField.IsValid"
+            ),
+        ],
+        "a duplicate, an id, protected, a v2 field, a missing group, a blank name"
+    );
+    assert_eq!(
+        error("GetPropertyFields", 1, "B"),
+        e(
+            "app.property_field.not_found.app_error",
+            404,
+            "GetPropertyFields"
+        )
+    );
+    assert_eq!(
+        answer("CreatePropertyValue", 1)["A"]["Value"],
+        "\"\\u003cblue\\u003e\"",
+        "trimmed, and re-marshalled as json.Marshal writes it"
+    );
+    assert_eq!(
+        answer("CreatePropertyValue", 2)["A"]["Value"],
+        "[\"a\",\"b\"]"
+    );
+    assert_eq!(
+        error("CreatePropertyValue", 4, "B"),
+        e(
+            "app.property.not_found.app_error",
+            404,
+            "CreatePropertyValue"
+        ),
+        "a missing field is the template check's mismatch"
+    );
+    assert_eq!(
+        answer("UpdatePropertyValue", 1)["A"]["Value"],
+        "{\"k\":  [1, 2]}",
+        "an update hands back the bytes it was given"
+    );
+    assert_eq!(
+        answer("GetPropertyValue", 0)["A"]["Value"],
+        "\"<blue>\"",
+        "a read is Postgres's rendering"
+    );
+    assert_eq!(
+        answer("UpsertPropertyValueWithOptions", 0)["A"]["Value"],
+        "{\"a\": 2, \"b\": 1}",
+        "an upsert hands back the row as jsonb renders it"
+    );
+    assert_eq!(
+        [1, 2, 3].map(|n| error("UpsertPropertyValues", n, "B").0),
+        [
+            Json::from("app.property_value.upsert.invalid_field_id.app_error"),
+            Json::from("app.property_value.upsert.duplicate_field_id.app_error"),
+            Json::from("app.property_value.upsert.mixed_groups.app_error"),
+        ]
+    );
+    assert_eq!(
+        error("UpdatePropertyFields", 0, "B"),
+        e(
+            "app.property_field.invalid_input.app_error",
+            400,
+            "UpdatePropertyFields"
+        )
+    );
+    assert_eq!(answer("UpdatePropertyField", 0)["A"]["Name"], "hue");
+    assert_eq!(
+        error("UpdatePropertyField", 2, "B"),
+        e(
+            "app.property.not_found.app_error",
+            404,
+            "UpdatePropertyFields"
+        ),
+        "an empty group finds the field and fails the group lookup"
+    );
+    assert_eq!(
+        error("DeletePropertyValue", 1, "A"),
+        e("app.property.not_found.app_error", 404, "GetPropertyValue"),
+        "the delete reads first, under the read's name"
+    );
+    assert_eq!(
+        error("DeletePropertyField", 2, "A"),
+        e(
+            "app.property.not_found.app_error",
+            404,
+            "DeletePropertyField"
+        )
+    );
+    assert!(
+        answer("DeletePropertyField", 1)["A"].is_null(),
+        "a deleted field deletes again"
+    );
+    assert_eq!(
+        error("UpdatePropertyValue", 2, "B"),
+        e(
+            "app.property_value.update.app_error",
+            500,
+            "UpdatePropertyValue"
+        ),
+        "a missing value is the store's row count"
+    );
+    assert_eq!(
+        answer("UpdatePropertyValues", 1)["A"][1]["Value"],
+        "[\"c\"]",
+        "each value handed back sanitised"
+    );
+    let evaluated: Vec<Json> = (0..7)
+        .map(|n| {
+            let r = answer("EvaluateAccessControl", n);
+            if r["B"].is_null() {
+                r["A"]["Context"].clone()
+            } else {
+                r["B"]["Id"].clone()
+            }
+        })
+        .collect();
+    assert_eq!(
+        evaluated,
+        [
+            Json::from("app.access_control.plugin.invalid_resource_type.app_error"),
+            Json::from("app.access_control.plugin.resource_type_forbidden.app_error"),
+            Json::from("app.access_control.plugin.invalid_action.app_error"),
+            Json::from("app.access_control.plugin.invalid_id.app_error"),
+            answer("EvaluateAccessControl", 4)["A"]["Context"].clone(),
+            Json::from("app.access_control.plugin.evaluation_unavailable.app_error"),
+            answer("EvaluateAccessControl", 4)["A"]["Context"].clone(),
+        ],
+        "the refusals in order, then no policy, a policy of this type, a foreign one"
+    );
+    assert_eq!(
+        answer("EvaluateAccessControl", 4)["A"]["Decision"],
+        true,
+        "the vacuous allow"
+    );
+    for (name, status) in [
+        ("SaveAccessControlPolicy", 501),
+        ("GetAccessControlPolicy", 501),
+        ("GetAccessControlFieldsAutocomplete", 501),
+        ("GetAccessControlVisualAST", 501),
+    ] {
+        let r = answer(
+            name,
+            if name == "GetAccessControlVisualAST" {
+                1
+            } else {
+                0
+            },
+        );
+        assert_eq!(r["B"]["StatusCode"], status, "{name}: {r}");
+    }
+    assert_eq!(
+        answer("DeleteAccessControlPolicy", 0)["A"]["StatusCode"],
+        501
+    );
+    assert_eq!(
+        [2, 3, 4].map(|n| answer("CheckAccessControlExpression", n)["B"]["Id"].clone()),
+        [
+            Json::from("app.access_control.plugin.invalid_acting_user.app_error"),
+            Json::from("app.access_control.plugin.invalid_acting_user.app_error"),
+            Json::from("app.pap.check_expression.app_error"),
+        ],
+        "a malformed and a missing acting user, then the engine"
+    );
+    assert!(
+        frames
+            .iter()
+            .any(|f| f["data"]["field_id"] == "<size>"
+                && f["data"]["values"] == serde_json::json!([])),
+        "the type change cleared the field's values: {frames:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The notification tranche
+// ---------------------------------------------------------------------------------------------
+
+/// The device the notification tranche's reader carries; no other test uses it.
+const NOTIFY_DEVICE: &str = "android_rn:mmrs-hook-notify";
+
+/// Every entry past the first `from`, once the transcript has held at least `from + expected` and
+/// then stopped growing: the two notification hooks run on detached tasks on both hosts.
+async fn grown(path: &Path, from: usize, expected: usize, pairs: &[(String, String)]) -> Vec<Json> {
+    let mut last = usize::MAX;
+    let mut since = std::time::Instant::now();
+    for _ in 0..300 {
+        let now = transcript_of(path, pairs);
+        if now.len() != last {
+            last = now.len();
+            since = std::time::Instant::now();
+        } else if now.len() >= from + expected && since.elapsed() >= QUIET {
+            return now[from..].to_vec();
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!(
+        "{}: waited for {expected} hooks past {from}; saw {:?}",
+        path.display(),
+        names(&transcript_of(path, pairs)[from.min(last)..])
+    );
+}
+
+/// `POST /plugins/{id}/{verb}` on `base`.
+async fn toggle(client: &reqwest::Client, admin: &str, base: &str, verb: &str) {
+    let (status, body, _) = request_raw(
+        client,
+        base,
+        reqwest::Method::POST,
+        Some(admin),
+        &format!("/api/v4/plugins/{PLUGIN_ID}/{verb}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "{base}: {verb}: {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+/// Wait until `base` no longer reports the recorder running.
+async fn wait_until_stopped(client: &reqwest::Client, admin: &str, base: &str) {
+    for _ in 0..200 {
+        let (status, body, _) = request_raw(
+            client,
+            base,
+            reqwest::Method::GET,
+            Some(admin),
+            "/api/v4/plugins/statuses",
+            None,
+        )
+        .await;
+        if status == 200 {
+            let value: Json = serde_json::from_slice(&body).unwrap_or(Json::Null);
+            if !value.as_array().is_some_and(|all| {
+                all.iter()
+                    .any(|s| s["plugin_id"] == PLUGIN_ID && s["state"] == 2)
+            }) {
+                return;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    panic!("{base}: the hook recorder never stopped");
+}
+
+/// A websocket hook's connection id (`A`), which each server mints, as a token. The message's
+/// `remote_addr` is compared as it is: `utils.GetIPAddress`, so no port.
+fn without_connection(mut value: Json) -> Json {
+    if let Some(id) = value["args"].get_mut("A")
+        && id.as_str().is_some_and(|s| s.len() == 26)
+    {
+        *id = Json::String("<connection>".into());
+    }
+    value
+}
+
+/// A push's hook argument and request carry the reader's badge, which each post raises by one; the
+/// two servers post one after the other, so the badge is the one value that must differ.
+fn without_badge(mut value: Json) -> Json {
+    fn walk(value: &mut Json) {
+        match value {
+            Json::Object(map) => {
+                for (key, entry) in map.iter_mut() {
+                    if key == "Badge" || key == "badge" {
+                        *entry = Json::String("<badge>".into());
+                    } else {
+                        walk(entry);
+                    }
+                }
+            }
+            Json::Array(items) => items.iter_mut().for_each(walk),
+            _ => {}
+        }
+    }
+    walk(&mut value);
+    value
+}
+
+/// `EmailNotificationWillBeSent` and `NotificationWillBePushed`, from a mention's e-mail and push
+/// under each host: what each hook was handed, and what the mail sink and the push proxy then
+/// received — nothing after a refusal, the plugin's content after a rewrite (with Go's transport
+/// put back on the push). Then `/join`, `JoinChannel`'s `UserHasJoinedChannel` (channel.go:2764)
+/// with a nil actor, after `AddUserToChannel`'s `ChannelMemberWillBeAdded`, and the join post's
+/// two hooks. Last, `RegisterChannelGuard` and `UnregisterChannelGuard` through each host's plugin
+/// API, and the guard's effect while its plugin is off: the post is refused from each host's
+/// guard cache, which only the register reloaded.
+#[tokio::test]
+async fn the_notification_join_and_guard_hooks_fire_as_go_fires_them() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_notification_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn run_the_notification_tour(client: &reqwest::Client, admin: &str) {
+    let sink = common::smtp_sink::smtp_sink().expect("the SMTP sink binds this stack's port");
+    let proxy = common::push_proxy::push_proxy().expect("the push proxy binds this stack's port");
+    let is_push = |kind: &'static str| {
+        move |r: &common::push_proxy::PushRequest| {
+            let body = r.json();
+            body["device_id"]
+                .as_str()
+                .is_some_and(|d| d.ends_with("mmrs-hook-notify"))
+                && body["type"] == kind
+        }
+    };
+
+    let tag = "hooknotify";
+    let (team, _) = common::a_team_and_channel_the_user_is_in(client, admin).await;
+    let reader = common::create_plain_user(client, admin, &team, tag).await;
+    let email = format!("{}@mmrs.invalid", common::plain_username(tag));
+    let status = client
+        .put(format!("{GO}/api/v4/users/sessions/device"))
+        .bearer_auth(&reader.token)
+        .header("X-Requested-With", "XMLHttpRequest")
+        .json(&serde_json::json!({ "device_id": NOTIFY_DEVICE }))
+        .send()
+        .await
+        .expect("Go answers")
+        .status();
+    assert_eq!(status, 200, "attaching the device");
+    let channel = common::create_channel(client, admin, &team, tag).await;
+    common::add_user_to_channel(client, admin, &channel, &reader.id).await;
+    // One channel for each host to `/join`: the same user cannot join one channel twice.
+    let join_targets = [
+        common::create_channel(client, admin, &team, "hookjoingo").await,
+        common::create_channel(client, admin, &team, "hookjoinrs").await,
+    ];
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-notify");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+    // The mail is rendered from `templates/` and the sender's avatar drawn with `fonts/`, both
+    // resolved against the working directory, as `start_go` links them for Go.
+    let src = repo().join("reference/mattermost/server");
+    for dir in ["templates", "fonts"] {
+        let _ = std::os::unix::fs::symlink(src.join(dir), rs_run.join(dir));
+    }
+    // The sender's stored avatar, which the mail embeds, lives in the stack's file store; each
+    // host here has a file store of its own, so both get a copy of the one image rather than each
+    // drawing and storing its own.
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let sender = me["id"].as_str().expect("an id");
+    let avatar = format!("users/{sender}/profile.png");
+    let stored = PathBuf::from(common::stack_data_dir()).join(&avatar);
+    for run in [&go_run, &rs_run] {
+        let target = run.join("data").join(&avatar);
+        std::fs::create_dir_all(target.parent().expect("a directory")).expect("the avatar dir");
+        std::fs::copy(&stored, &target).expect("the sender has a stored avatar");
+    }
+    plant_state(client, admin, Some(true)).await;
+    // The stack's servers get the sink's port and the push proxy from the environment
+    // (`scripts/go-server.sh`, `scripts/mm-api-env.sh`), not the shared document, so these two
+    // need the same.
+    let smtp_port = common::smtp_sink::smtp_port().to_string();
+    let push_server = format!("http://localhost:{}", common::push_proxy::push_port());
+    let mail_and_push = [
+        ("MM_EMAILSETTINGS_SMTPPORT", smtp_port.as_str()),
+        ("MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS", "true"),
+        (
+            "MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER",
+            push_server.as_str(),
+        ),
+    ];
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut go_env = vec![
+        ("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str()),
+        ("HOOK_RECORDER_NOTIFY", "1"),
+        ("HOOK_RECORDER_WEBSOCKET", "1"),
+    ];
+    go_env.extend(mail_and_push);
+    let go = start_go(&go_run, &go_env, NOTIFY_GO_OFFSET).await;
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    // The mail's links are built on `SiteURL`, which `start_go` sets to Go's own address; the Rust
+    // host is told the same one, so the links compare.
+    let site_url = go.base.replace("127.0.0.1", "localhost");
+    let rust = SecondServer::start_in(
+        NOTIFY_HOST_PORT,
+        &rs_run,
+        &[
+            ("MMRS_PLUGIN_HOST", "rust"),
+            ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+            ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+            ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+            ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+            ("HOOK_RECORDER_NOTIFY", "1"),
+            ("HOOK_RECORDER_WEBSOCKET", "1"),
+            mail_and_push[0],
+            mail_and_push[1],
+            mail_and_push[2],
+            ("MM_SERVICESETTINGS_SITEURL", site_url.as_str()),
+        ],
+    )
+    .await
+    .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+    // The add above mentions the reader too, through main Go; its mail and push are not ours.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    sink.discard(&email);
+    proxy.discard(is_push("message"));
+
+    let username = common::plain_username(tag);
+    let mut seen = (0usize, 0usize);
+    // (marker, a mail arrives, a push arrives)
+    let steps = [
+        ("plain", true, true),
+        ("!mail-rewrite", true, true),
+        ("!mail-reject !push-reject", false, false),
+        ("!push-rewrite", true, true),
+    ];
+    for (marker, mailed, pushed) in steps {
+        let message = format!("@{username} {marker} from the hook recorder's tour");
+        let mut attempt = 0;
+        loop {
+            let mut sides = Vec::new();
+            let mut minutes = Vec::new();
+            for (base, log, from) in [
+                (go.base.as_str(), go_log.as_path(), &mut seen.0),
+                (rust.base.as_str(), rust_log.as_path(), &mut seen.1),
+            ] {
+                let response = client
+                    .post(format!("{base}/api/v4/posts"))
+                    .bearer_auth(admin)
+                    .json(&serde_json::json!({ "channel_id": channel, "message": message }))
+                    .send()
+                    .await
+                    .expect("the server answers");
+                assert_eq!(response.status(), 201, "{base}: {marker}");
+                let post: Json = response.json().await.expect("a post");
+                let post_id = post["id"].as_str().expect("an id").to_owned();
+                minutes.push(post["create_at"].as_i64().unwrap_or_default() / 60_000);
+                let pairs = [(post_id.clone(), "POSTID".to_owned())];
+                let hooks = grown(log, *from, 4, &pairs).await;
+                *from += hooks.len();
+                let mail = sink
+                    .take(&email, Duration::from_secs(if mailed { 10 } else { 2 }))
+                    .await;
+                let push = proxy
+                    .take(
+                        Duration::from_secs(if pushed { 10 } else { 2 }),
+                        is_push("message"),
+                    )
+                    .await;
+                let mail = mail.map(|m| {
+                    common::smtp_sink::normalize_message(
+                        &super::email_send::mask_across_soft_breaks(&m.data_str(), &post_id, 'P'),
+                    )
+                });
+                let push = push.map(|p| {
+                    let mut body = common::push_proxy::normalize_push(p.json());
+                    body["post_id"] = Json::from("POSTID");
+                    without_badge(body)
+                });
+                let hooks: Vec<Json> = in_canonical_order(&hooks)
+                    .into_iter()
+                    .map(without_badge)
+                    .collect();
+                sides.push((hooks, mail, push));
+            }
+            // The mail prints the post's hour and minute: two posts either side of a minute
+            // boundary differ there and nowhere else.
+            if minutes[0] != minutes[1] && attempt < 2 {
+                attempt += 1;
+                continue;
+            }
+            let (go_side, rust_side) = (&sides[0], &sides[1]);
+            assert_eq!(
+                names(&go_side.0),
+                [
+                    "EmailNotificationWillBeSent",
+                    "MessageHasBeenPosted",
+                    "MessageWillBePosted",
+                    "NotificationWillBePushed"
+                ],
+                "{marker}: the hooks Go fired"
+            );
+            for (index, (g, r)) in go_side.0.iter().zip(&rust_side.0).enumerate() {
+                assert_eq!(g, r, "{marker}: hook {index} differs");
+            }
+            assert_eq!(
+                go_side.0.len(),
+                rust_side.0.len(),
+                "{marker}: the hook counts"
+            );
+            assert_eq!(go_side.1.is_some(), mailed, "{marker}: Go's mail");
+            assert_eq!(go_side.1, rust_side.1, "{marker}: the mails");
+            assert_eq!(go_side.2.is_some(), pushed, "{marker}: Go's push");
+            assert_eq!(go_side.2, rust_side.2, "{marker}: the pushes");
+            if marker == "!mail-rewrite" {
+                let mail = go_side.1.as_deref().unwrap_or_default();
+                assert!(
+                    mail.contains("Subject: rewritten by the hook recorder"),
+                    "the rewritten subject: {mail}"
+                );
+            }
+            if marker == "!push-rewrite" {
+                let push = go_side.2.as_ref().expect("a push");
+                assert_eq!(push["message"], "rewritten by the hook recorder");
+                assert_ne!(push["type"], Json::Null);
+            }
+            break;
+        }
+    }
+
+    // `/join`: the command runs as the reader, in the tour's channel.
+    let mut joined = Vec::new();
+    for ((base, log, from), (target, name)) in [
+        (go.base.as_str(), go_log.as_path(), &mut seen.0),
+        (rust.base.as_str(), rust_log.as_path(), &mut seen.1),
+    ]
+    .into_iter()
+    .zip(join_targets.iter().zip(["hookjoingo", "hookjoinrs"]))
+    {
+        let response = client
+            .post(format!("{base}/api/v4/commands/execute"))
+            .bearer_auth(&reader.token)
+            .json(&serde_json::json!({
+                "command": format!("/join mmrs-parity-{name}"),
+                "channel_id": channel,
+            }))
+            .send()
+            .await
+            .expect("the server answers");
+        assert_eq!(response.status(), 200, "{base}: /join");
+        let pairs = [
+            (target.clone(), "JOINED".to_owned()),
+            (name.to_owned(), "JOINEDNAME".to_owned()),
+        ];
+        let hooks = grown(log, *from, 4, &pairs).await;
+        *from += hooks.len();
+        joined.push(in_canonical_order(&hooks));
+    }
+    assert_eq!(
+        names(&joined[0]),
+        [
+            "ChannelMemberWillBeAdded",
+            "MessageHasBeenPosted",
+            "MessageWillBePosted",
+            "UserHasJoinedChannel"
+        ],
+        "the hooks /join fired under Go"
+    );
+    assert_eq!(joined[0], joined[1], "/join's hooks");
+    let join_hook = joined[0]
+        .iter()
+        .find(|h| h["hook"] == "UserHasJoinedChannel")
+        .expect("the join hook");
+    assert!(
+        join_hook["args"].get("C").is_none(),
+        "no actor: {join_hook}"
+    );
+
+    // The websocket hooks: a socket that sends a routed and a plugin-only message and closes, and
+    // an anonymous one that authenticates over the socket and closes.
+    let mut sockets = Vec::new();
+    for (base, log, from) in [
+        (go.base.as_str(), go_log.as_path(), &mut seen.0),
+        (rust.base.as_str(), rust_log.as_path(), &mut seen.1),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &reader.token).await;
+        probe
+            .send(serde_json::json!({
+                "seq": 1, "action": "user_typing", "data": { "channel_id": channel }
+            }))
+            .await;
+        probe
+            .send(serde_json::json!({
+                "seq": 2, "action": "custom_mmrs_ping",
+                "data": { "n": 1, "s": "x", "nested": { "a": [1, "b", null] }, "none": null }
+            }))
+            .await;
+        probe.collect_for(Duration::from_millis(300)).await;
+        probe.close().await;
+        let mut anonymous = common::SocketProbe::connect_anonymous(base).await;
+        anonymous
+            .send(serde_json::json!({
+                "seq": 1, "action": "authentication_challenge",
+                "data": { "token": reader.token }
+            }))
+            .await;
+        anonymous.collect_for(Duration::from_millis(300)).await;
+        anonymous.close().await;
+        let hooks = grown(log, *from, 7, &[]).await;
+        *from += hooks.len();
+        sockets.push(in_canonical_order(
+            &hooks
+                .into_iter()
+                .map(without_connection)
+                .collect::<Vec<_>>(),
+        ));
+    }
+    assert_eq!(
+        names(&sockets[0]),
+        [
+            "OnWebSocketConnect",
+            "OnWebSocketConnect",
+            "OnWebSocketDisconnect",
+            "OnWebSocketDisconnect",
+            "WebSocketMessageHasBeenPosted",
+            "WebSocketMessageHasBeenPosted",
+            "WebSocketMessageHasBeenPosted"
+        ],
+        "the websocket hooks Go fired"
+    );
+    for (index, (g, r)) in sockets[0].iter().zip(&sockets[1]).enumerate() {
+        assert_eq!(g, r, "websocket hook {index}");
+    }
+
+    // Channel guards: each host registers its plugin's claim on its own join target, and the
+    // claim holds while the plugin is off — a post there is refused — until it is removed.
+    let sides = [
+        (go.base.as_str(), go_log.as_path(), &join_targets[0]),
+        (rust.base.as_str(), rust_log.as_path(), &join_targets[1]),
+    ];
+    let post_as_admin = |base: &str, channel_id: &str, message: String| {
+        let (client, admin) = (client.clone(), admin.to_owned());
+        let (base, channel_id) = (base.to_owned(), channel_id.to_owned());
+        async move {
+            let response = client
+                .post(format!("{base}/api/v4/posts"))
+                .bearer_auth(&admin)
+                .json(&serde_json::json!({ "channel_id": channel_id, "message": message }))
+                .send()
+                .await
+                .expect("the server answers");
+            let status = response.status().as_u16();
+            let body: Json = response.json().await.unwrap_or(Json::Null);
+            (status, body)
+        }
+    };
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let claims = |target: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (String, bool)>(
+                "SELECT PluginId, CreatedAt > 0 FROM ChannelGuards WHERE ChannelId = $1",
+            )
+            .bind(target)
+            .fetch_all(&pool)
+            .await
+            .expect("the guards read")
+        }
+    };
+    for (script, entry) in [
+        ("!guard-script", "GuardScript"),
+        ("!unguard-script", "UnguardScript"),
+    ] {
+        let mut scripts = Vec::new();
+        for ((base, log, target), from) in sides.iter().zip([&mut seen.0, &mut seen.1]) {
+            let (status, body) = post_as_admin(base, &channel, format!("{script} {target}")).await;
+            assert_eq!(status, 201, "{base}: {script}: {body}");
+            let pairs = [((*target).clone(), "TARGET".to_owned())];
+            let hooks = grown(log, *from, 3, &pairs).await;
+            *from += hooks.len();
+            scripts.push(
+                hooks
+                    .into_iter()
+                    .find(|h| h["hook"] == entry)
+                    .unwrap_or_else(|| panic!("{base}: no {entry}")),
+            );
+        }
+        assert_eq!(scripts[0], scripts[1], "{script}");
+        for (_, _, target) in &sides {
+            let rows = claims((*target).clone()).await;
+            if script == "!guard-script" {
+                assert_eq!(rows, [(PLUGIN_ID.to_owned(), true)], "{script}: the claim");
+            } else {
+                assert!(rows.is_empty(), "{script}: the claim is gone");
+            }
+        }
+        if script == "!guard-script" {
+            // The plugin off: a guarded channel is refused, from each host's own cache.
+            // Each host is told itself: the two share the configuration document but not its
+            // change notifications.
+            for (base, _, _) in &sides {
+                toggle(client, admin, base, "disable").await;
+                wait_until_stopped(client, admin, base).await;
+            }
+            let mut refusals = Vec::new();
+            for (base, _, target) in &sides {
+                let (status, body) =
+                    post_as_admin(base, target, "into a guarded channel".to_owned()).await;
+                refusals.push((
+                    status,
+                    error_of(&body).0.map(str::to_owned),
+                    body["message"].clone(),
+                ));
+            }
+            assert_eq!(
+                refusals[0], refusals[1],
+                "a post while the guard's plugin is off"
+            );
+            assert_eq!(refusals[0].0, 503, "{:?}", refusals[0]);
+            for (base, _, _) in &sides {
+                toggle(client, admin, base, "enable").await;
+                wait_until_running(client, admin, base).await;
+            }
+        }
+    }
+    // Unguarded again: a post there goes through on both.
+    for ((base, log, target), from) in sides.iter().zip([&mut seen.0, &mut seen.1]) {
+        let (status, body) = post_as_admin(base, target, "after the guard".to_owned()).await;
+        assert_eq!(status, 201, "{base}: {body}");
+        *from += grown(log, *from, 2, &[]).await.len();
+    }
+
+    drop(rust);
+    drop(go);
+    for target in [&channel, &join_targets[0], &join_targets[1]] {
+        common::delete_channel(client, admin, target).await;
+    }
+    common::delete_plain_user(client, admin, &reader.id).await;
 }

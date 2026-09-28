@@ -331,6 +331,14 @@ pub static PLUGIN_STATES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new
 /// re-run and wrong under `--workspace`.
 pub static PROPERTY_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// **The draft migrations delete drafts across every user**, so no test may hold a draft while one
+/// runs. `delete_orphan_drafts_migration` removes every draft that is not a thread reply — a
+/// channel draft's empty `RootId` names no post — and `delete_empty_drafts_migration` every draft
+/// with an empty message, whoever owns it. `parity::batch_jobs` runs both, on both servers, and
+/// takes this for writing; every test that plants or reads a draft takes it for reading, the
+/// [`ACTIVE_LICENCE_ROW`] pattern. Modules in other shards never run concurrently anyway.
+pub static DRAFT_ROWS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 /// **`brand/image.png` is one file for the whole installation**, and two suites care about it:
 /// `image_writes` uploads one through the forwarded `POST /api/v4/brand/image` to see the 201 and
 /// then deletes it again, while `file_bytes` asserts on what `GET /api/v4/brand/image` answers.
@@ -2553,8 +2561,22 @@ impl SecondServer {
             .env("MM_FILESETTINGS_DIRECTORY", stack_data_dir())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
+        // `MMRS_SECOND_SERVER_LOG=<dir>` keeps each second server's log as `<dir>/<port>.log`, at
+        // debug — the only way to see *why* a second server forwarded a request it should serve.
+        if let Ok(dir) = std::env::var("MMRS_SECOND_SERVER_LOG")
+            && let Ok(file) = std::fs::File::create(format!("{dir}/{port}.log"))
+        {
+            command.stdout(file).env("RUST_LOG", "debug");
+        }
         for (key, value) in env {
             command.env(key, value);
+        }
+        // `MMRS_STDOUT_LOG` in `env` is the harness's own: the child's log goes to that file,
+        // which is how a job test proves *this* server ran the job ([`job_server`]).
+        if let Some((_, path)) = env.iter().find(|(key, _)| *key == "MMRS_STDOUT_LOG")
+            && let Ok(file) = std::fs::File::create(path)
+        {
+            command.stdout(file);
         }
         // The stack's run directory unless the caller named one: that is where the stack's own
         // mm-api runs (`scripts/mm-api-env.sh`), and it is where `i18n/` — which the process now
@@ -2706,6 +2728,10 @@ async fn start_licensed_rust(
         ("MM_SQLSETTINGS_DRIVERNAME", "postgres"),
         ("MM_SQLSETTINGS_DATASOURCE", database_url.as_str()),
         ("MM_SERVICESETTINGS_ENABLELOCALMODE", "false"),
+        // The licensed oracles run no jobs and no schedulers (`scripts/go-licensed.sh`), and
+        // both settings are in the configuration the two servers are compared on.
+        ("MM_JOBSETTINGS_RUNJOBS", "false"),
+        ("MM_JOBSETTINGS_RUNSCHEDULER", "false"),
     ];
     env.extend_from_slice(extra);
     SecondServer::start(port, &env)
@@ -3262,6 +3288,27 @@ impl SocketProbe {
             .collect()
     }
 
+    /// Every collected frame whose `event` is `name`, **as the bytes that arrived** — for the
+    /// comparisons a parsed value cannot make (key order, spacing, the trailing newline). See
+    /// [`json_skeleton`].
+    pub fn raw_events_named(&self, name: &str) -> Vec<&str> {
+        self.raw
+            .iter()
+            .filter(|raw| {
+                serde_json::from_str::<serde_json::Value>(raw)
+                    .ok()
+                    .and_then(|frame| {
+                        frame
+                            .get("event")
+                            .and_then(|e| e.as_str())
+                            .map(|e| e == name)
+                    })
+                    .unwrap_or(false)
+            })
+            .map(String::as_str)
+            .collect()
+    }
+
     /// The frames that answer a request this probe sent, raw and parsed, in arrival order.
     ///
     /// **A socket is not isolated the way a request is.** Anything else running against the same
@@ -3448,3 +3495,216 @@ pub async fn set_bot_fixture_text(bot_user_id: &str, description: &str, display_
 /// write holds it exclusively from the patch to the restore. The client-config maps are not
 /// affected: the patched keys are not projected into them.
 pub static CONFIG_DOCUMENT: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+/// **`ServiceSettings.ExtendSessionLengthWithActivity` is one resource.** `parity::session_expiry`
+/// turns it on for both servers and restores it, holding this exclusively from the patch to the
+/// restore. The setting also **disarms the idle-timeout revoke** (`GetSession` skips it when
+/// sliding expiry is on), so `parity::session_activity`'s idle tests hold it shared: run while it
+/// is on, their idle session would be accepted rather than revoked.
+pub static SESSION_EXPIRY_SETTING: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+/// A JSON text with its **values** masked and everything else kept byte for byte: key order,
+/// punctuation, the space Go's precomputed frame puts after each colon, and a trailing newline.
+///
+/// Two servers never agree on ids and timestamps, so a frame cannot be compared as bytes; parsed,
+/// it loses exactly what [D-541] is about — the order of an object's keys. This keeps the order and
+/// drops the values: a string value becomes `"…"` (an empty one stays `""`), a number `0`, and an
+/// object key that is a 26-character Mattermost id `"<id>"`. `true`, `false` and `null` are kept. A
+/// string value that itself holds a JSON object or array — Go's `property_field` is one — is
+/// skeletonised recursively, since its key order is on the wire too.
+pub fn json_skeleton(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j] != b'"' {
+                    j += if bytes[j] == b'\\' { 2 } else { 1 };
+                }
+                let token = &raw[i..=j];
+                i = j + 1;
+                let mut k = i;
+                while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                    k += 1;
+                }
+                let text: String = serde_json::from_str(token).expect("a JSON string token");
+                if k < bytes.len() && bytes[k] == b':' {
+                    let is_id = text.len() == 26
+                        && text
+                            .bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+                    out.push_str(if is_id { "\"<id>\"" } else { token });
+                } else if text.is_empty() {
+                    out.push_str("\"\"");
+                } else if (text.starts_with('{') || text.starts_with('['))
+                    && serde_json::from_str::<serde_json::Value>(&text).is_ok()
+                {
+                    out.push_str("\"<json:");
+                    out.push_str(&json_skeleton(&text));
+                    out.push_str(">\"");
+                } else {
+                    out.push_str("\"…\"");
+                }
+            }
+            b'-' | b'0'..=b'9' => {
+                while i < bytes.len()
+                    && matches!(bytes[i], b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9')
+                {
+                    i += 1;
+                }
+                out.push('0');
+            }
+            // Outside a string every byte of a JSON text is ASCII.
+            other => {
+                out.push(char::from(other));
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------------------------
+// Jobs: running one on the stack's Go, or on an mm-api of the test's own
+// ---------------------------------------------------------------------------------------------
+
+/// Insert a `pending` job of `job_type` straight into `Jobs`, returning its id. Several types
+/// (`post_persistent_notifications`, `product_notices`, the notify-admin three) are not ones the
+/// jobs API creates — only their schedulers do.
+///
+/// Who runs it: the stack's main Go server, whose watcher polls every fifteen seconds (the
+/// oracles run no jobs — `scripts/go-*.sh`), or a [`job_server`] of the test's own, whose watcher
+/// polls every 200 ms and so claims it first all but ~1% of the time.
+pub async fn insert_pending_job(
+    pool: &sqlx::PgPool,
+    job_type: &str,
+    data: serde_json::Value,
+) -> String {
+    let id = mm_model::utils::new_id();
+    sqlx::query(
+        "INSERT INTO jobs (id, type, priority, createat, startat, lastactivityat, status, \
+         progress, data) VALUES ($1, $2, 0, $3, 0, 0, 'pending', 0, $4)",
+    )
+    .bind(&id)
+    .bind(job_type)
+    .bind(mm_model::utils::get_millis())
+    .bind(data)
+    .execute(pool)
+    .await
+    .expect("the job row");
+    id
+}
+
+/// Held by every test that writes or reads `NotifyAdmin` rows: a notify-admin send
+/// (`parity::notify_jobs`) marks the plugin rows sent and deletes every other unsent row.
+pub static NOTIFY_ADMIN_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Held by every test that plants `ProductNoticeViewState` rows: a `product_notices` job run
+/// (`ClearOldNotices`) deletes each view of a notice the live feed no longer carries.
+pub static PRODUCT_NOTICE_VIEWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Wait for a job to reach `success` or `error`, returning the status and its `Data`.
+pub async fn wait_for_job(pool: &sqlx::PgPool, job_id: &str) -> (String, serde_json::Value) {
+    for _ in 0..200 {
+        let (status, data): (String, Option<serde_json::Value>) =
+            sqlx::query_as("SELECT status, data FROM jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(pool)
+                .await
+                .expect("the job");
+        if status == "success" || status == "error" {
+            return (status, data.unwrap_or(serde_json::Value::Null));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    panic!("job {job_id} never finished");
+}
+
+/// An mm-api of the caller's own with the job workers on and a 200 ms poll, pushing to the
+/// stack's push proxy and mailing the stack's SMTP sink as the stack's own servers do.
+pub struct JobServer {
+    pub server: SecondServer,
+    log: std::path::PathBuf,
+}
+
+impl Drop for JobServer {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.log);
+    }
+}
+
+impl JobServer {
+    /// Whether this server's worker completed `job_id` — its `SimpleWorker: Job is complete`
+    /// line. A job the Go server claimed first has no such line here.
+    pub fn ran(&self, job_id: &str) -> bool {
+        std::fs::read_to_string(&self.log).is_ok_and(|log| {
+            log.lines()
+                .any(|line| line.contains("SimpleWorker: Job is complete") && line.contains(job_id))
+        })
+    }
+}
+
+/// Held for the whole of every test that plants a pending job: a [`JobServer`] claims **every**
+/// type it has a worker for, so one test's job server would run another test's job — Go's
+/// phase included.
+pub static JOB_RUNS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Start a [`JobServer`] on `port`.
+pub async fn job_server(port: u16) -> JobServer {
+    let push_port = std::env::var("MMRS_PUSH_PORT").unwrap_or_default();
+    let smtp_port = std::env::var("MMRS_SMTP_PORT").unwrap_or_default();
+    let push_server = format!("http://localhost:{push_port}");
+    let log =
+        std::env::temp_dir().join(format!("mmrs-job-server-{port}-{}.log", std::process::id()));
+    let log_text = log.display().to_string();
+    let server = SecondServer::start(
+        port,
+        &[
+            ("MM_API_ENABLE_JOB_WORKERS", "true"),
+            ("MM_API_JOB_WATCHER_INTERVAL_MS", "200"),
+            ("MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS", "true"),
+            (
+                "MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER",
+                push_server.as_str(),
+            ),
+            ("MM_EMAILSETTINGS_SMTPPORT", smtp_port.as_str()),
+            (
+                "RUST_LOG",
+                "mm_api=info,mm_app=info,mm_app::job_runtime=debug",
+            ),
+            ("MMRS_STDOUT_LOG", log_text.as_str()),
+        ],
+    )
+    .await
+    .expect("the job server starts");
+    JobServer { server, log }
+}
+
+#[cfg(test)]
+mod json_skeleton_tests {
+    use super::json_skeleton;
+
+    #[test]
+    fn keeps_order_and_spacing_and_masks_values() {
+        assert_eq!(
+            json_skeleton(
+                "{\"b\": 1, \"a\":\"x\",\"c\":[true,null,\"\"],\"abcdefghijklmnopqrstuvwxyz\":-1.5e3}\n"
+            ),
+            "{\"b\": 0, \"a\":\"…\",\"c\":[true,null,\"\"],\"<id>\":0}\n"
+        );
+        assert_ne!(
+            json_skeleton(r#"{"a":1,"b":2}"#),
+            json_skeleton(r#"{"b":1,"a":2}"#)
+        );
+    }
+
+    #[test]
+    fn recurses_into_a_string_holding_json() {
+        assert_eq!(
+            json_skeleton(r#"{"f":"{\"z\":\"q\",\"a\":7}"}"#),
+            r#"{"f":"<json:{"z":"…","a":0}>"}"#
+        );
+    }
+}

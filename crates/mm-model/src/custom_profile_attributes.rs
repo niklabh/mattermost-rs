@@ -339,11 +339,13 @@ impl<'de> Deserialize<'de> for CPAField {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
         let attrs: CPAAttrs = match value.get("attrs") {
-            Some(raw) => serde_json::from_value(raw.clone()).map_err(serde::de::Error::custom)?,
+            Some(raw) => crate::utils::from_value_go(raw).map_err(serde::de::Error::custom)?,
             None => CPAAttrs::default(),
         };
+        // Go's rules on the buffered document too: an array is not a field, a `null` member or a
+        // folded key decodes as `encoding/json` decodes it.
         let property_field: PropertyField =
-            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+            crate::utils::from_value_go(&value).map_err(serde::de::Error::custom)?;
         Ok(CPAField {
             property_field,
             attrs,
@@ -457,7 +459,8 @@ impl CPAField {
     /// rather than failing.
     pub fn from_property_field(pf: &PropertyField) -> Result<Self, CPAError> {
         let attrs: CPAAttrs = match &pf.attrs {
-            Some(map) => serde_json::from_value(serde_json::Value::Object(map.clone()))
+            // Marshal then `json.Unmarshal` in Go (custom_profile_attributes.go:240).
+            Some(map) => crate::utils::from_value_go(&serde_json::Value::Object(map.clone()))
                 .map_err(|e| CPAError::Attrs(e.to_string()))?,
             None => CPAAttrs::default(),
         };
@@ -501,6 +504,19 @@ pub enum CPAError {
 #[cfg(test)]
 mod wire_parity {
     use super::*;
+
+    /// The hand-written `Deserialize` buffers a `Value`, so the body decoder's rules have to be
+    /// applied again below it: an array is not a field (the `createCPAField` 400, not the
+    /// permission 403 that decoding it positionally reached), and a folded key still lands.
+    #[test]
+    fn the_buffered_decode_keeps_go_s_rules() {
+        assert!(crate::utils::decode_one_from_json::<CPAField>(b"[]").is_err());
+        assert!(crate::utils::decode_one_from_json::<CPAField>(br#"["x"]"#).is_err());
+        let field: CPAField =
+            crate::utils::decode_one_from_json(br#"{"NAME":"n","type":"text","attrs":null}"#)
+                .unwrap();
+        assert_eq!(field.property_field.name, "n");
+    }
 
     /// Round-trips the Go-generated fixture: decode into the port's type, re-encode, and compare
     /// the value graphs. The fixture is produced by `reference/dump`, whose reflective filler

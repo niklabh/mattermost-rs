@@ -1634,6 +1634,385 @@
             }
         }
     ],
+    "gzhttp_stream": [
+        {
+            "case": {
+                "name": "json_below_min_size",
+                "accept_encoding": "gzip",
+                "content_type": "application/json",
+                "declared_length": 0,
+                "body_kind": "text",
+                "body_length": 600,
+                "write_size": 0
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-length": "600",
+                    "content-type": "application/json",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 600,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "json_one_write_zstd",
+                "accept_encoding": "gzip, deflate, br, zstd",
+                "content_type": "application/json",
+                "declared_length": 0,
+                "body_kind": "text",
+                "body_length": 5000,
+                "write_size": 0
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-encoding": "zstd",
+                    "content-length": "70",
+                    "content-type": "application/json",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 5000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "json_many_small_writes",
+                "accept_encoding": "gzip",
+                "content_type": "application/json",
+                "declared_length": 0,
+                "body_kind": "text",
+                "body_length": 5000,
+                "write_size": 100
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-encoding": "gzip",
+                    "content-length": "97",
+                    "content-type": "application/json",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 5000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "json_no_accept_encoding_streamed",
+                "accept_encoding": "",
+                "content_type": "application/json",
+                "declared_length": 0,
+                "body_kind": "text",
+                "body_length": 5000,
+                "write_size": 700
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-type": "application/json",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": true,
+                "decoded_length": 5000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "declared_file_compresses_to_a_length",
+                "accept_encoding": "gzip",
+                "content_type": "text/plain; charset=utf-8",
+                "declared_length": 50000,
+                "body_kind": "text",
+                "body_length": 50000,
+                "write_size": 4096
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-encoding": "gzip",
+                    "content-length": "228",
+                    "content-type": "text/plain; charset=utf-8",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 50000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "undeclared_stream_compresses_to_a_length",
+                "accept_encoding": "gzip",
+                "content_type": "text/plain; charset=utf-8",
+                "declared_length": 0,
+                "body_kind": "text",
+                "body_length": 50000,
+                "write_size": 4096
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-encoding": "gzip",
+                    "content-length": "228",
+                    "content-type": "text/plain; charset=utf-8",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 50000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "declared_noise_compresses_to_chunks",
+                "accept_encoding": "gzip",
+                "content_type": "application/octet-stream",
+                "declared_length": 200000,
+                "body_kind": "noise",
+                "body_length": 200000,
+                "write_size": 4096
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-encoding": "gzip",
+                    "content-type": "application/octet-stream",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": true,
+                "decoded_length": 200000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "declared_jpeg_is_plain_with_its_length",
+                "accept_encoding": "gzip",
+                "content_type": "image/jpeg",
+                "declared_length": 200000,
+                "body_kind": "noise",
+                "body_length": 200000,
+                "write_size": 4096
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-length": "200000",
+                    "content-type": "image/jpeg",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 200000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "declared_below_min_size_streamed",
+                "accept_encoding": "gzip",
+                "content_type": "text/plain; charset=utf-8",
+                "declared_length": 800,
+                "body_kind": "text",
+                "body_length": 800,
+                "write_size": 100
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-length": "800",
+                    "content-type": "text/plain; charset=utf-8",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 800,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "undeclared_plain_stream_totals_a_length",
+                "accept_encoding": "gzip",
+                "content_type": "image/jpeg",
+                "declared_length": 0,
+                "body_kind": "noise",
+                "body_length": 1500,
+                "write_size": 100
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-length": "1500",
+                    "content-type": "image/jpeg",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 1500,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "undeclared_plain_stream_is_chunked",
+                "accept_encoding": "gzip",
+                "content_type": "image/jpeg",
+                "declared_length": 0,
+                "body_kind": "noise",
+                "body_length": 5000,
+                "write_size": 700
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-type": "image/jpeg",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": true,
+                "decoded_length": 5000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "no_type_text_is_sniffed_and_compressed",
+                "accept_encoding": "gzip",
+                "content_type": "",
+                "declared_length": 0,
+                "body_kind": "text",
+                "body_length": 5000,
+                "write_size": 0
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-encoding": "gzip",
+                    "content-length": "97",
+                    "content-type": "text/plain; charset=utf-8",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 5000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "no_type_jpeg_is_sniffed_and_left_alone",
+                "accept_encoding": "gzip",
+                "content_type": "",
+                "declared_length": 0,
+                "body_kind": "jpeg",
+                "body_length": 5000,
+                "write_size": 0
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-type": "image/jpeg",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": true,
+                "decoded_length": 5000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "no_type_below_min_size_is_sniffed_at_close",
+                "accept_encoding": "gzip",
+                "content_type": "",
+                "declared_length": 0,
+                "body_kind": "text",
+                "body_length": 500,
+                "write_size": 0
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-length": "500",
+                    "content-type": "text/plain; charset=utf-8",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 500,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "no_type_declared_is_sniffed_on_first_write",
+                "accept_encoding": "gzip",
+                "content_type": "",
+                "declared_length": 5000,
+                "body_kind": "jpeg",
+                "body_length": 5000,
+                "write_size": 1000
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-length": "5000",
+                    "content-type": "image/jpeg",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 5000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "no_type_streamed_zstd",
+                "accept_encoding": "zstd",
+                "content_type": "",
+                "declared_length": 0,
+                "body_kind": "text",
+                "body_length": 5000,
+                "write_size": 300
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-encoding": "zstd",
+                    "content-length": "70",
+                    "content-type": "text/plain; charset=utf-8",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 5000,
+                "decodes_to_body": true
+            }
+        },
+        {
+            "case": {
+                "name": "empty_json_body",
+                "accept_encoding": "gzip",
+                "content_type": "application/json",
+                "declared_length": 0,
+                "body_kind": "text",
+                "body_length": 0,
+                "write_size": 0
+            },
+            "response": {
+                "status": 200,
+                "headers": {
+                    "content-length": "0",
+                    "content-type": "application/json",
+                    "vary": "Accept-Encoding"
+                },
+                "chunked": false,
+                "decoded_length": 0,
+                "decodes_to_body": true
+            }
+        }
+    ],
     "static_script_hashes": [
         {
             "directive": "",

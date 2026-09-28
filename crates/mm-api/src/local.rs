@@ -109,8 +109,11 @@ pub fn local_session() -> AuthenticatedSession {
 /// The local twin of [`crate::partially_migrated`], and it is just as non-optional: axum matches
 /// the path before the method, so registering `POST /api/v4/server_busy` without this would turn
 /// the `GET` beside it into a 405 from our router instead of Go's answer.
+///
+/// Merged with `any` rather than given a `fallback`, so no `Allow` header is added to what Go's
+/// socket answers — see [`crate::partially_migrated`].
 pub(crate) fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState> {
-    methods.fallback(forward_to_go_local)
+    methods.merge(axum::routing::any(forward_to_go_local))
 }
 
 /// [`crate::mux_segments_or_forward`] for the socket: forward, over the **unix socket**, any
@@ -287,6 +290,11 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
         .merge(crate::local_sysops::routes())
         // `plugin_local.go`, all ten pairs; see `local_plugins` for what a Go plugin host forwards.
         .merge(crate::local_plugins::routes(&state))
+        // `basicSecurityChecks` for every local route: `APILocal` is a `web.Handler` too.
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::serve_http::local_preamble,
+        ))
         // `srv.LocalRouter.Handle("/api/v4/{anything:.*}", api.Handle404)` (api.go:527) is Go's
         // own fallback; ours forwards instead, so an unmigrated local route is answered by the Go
         // process rather than 404'd by this one.
@@ -303,6 +311,11 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
             state.clone(),
             crate::refresh_config_after_write,
         ))
+        // Inside the socket extension, so a `HEAD` it cannot answer is forwarded over the socket.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::mux_guard::local_api4_head,
+        ))
         .layer(Extension(GoLocalSocket(Arc::new(go_socket))))
         // The socket goes through the same `web.Handler.ServeHTTP` in Go, so its errors are
         // translated the same way. The CLI sends no `Accept-Language`, which makes every one of
@@ -310,6 +323,12 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::translate_error_messages,
+        ))
+        // The socket goes through `ServeHTTP` too, so its header walk runs; with no peer its
+        // fallback is `""`. See [`crate::client_ip`].
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::client_ip::stamp_client_ip,
         ))
         .with_state(state)
 }
@@ -552,9 +571,10 @@ async fn local_get_role_by_name(
 async fn local_patch_role(
     state: State<AppState>,
     path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    roles::patch_role(state, path, local_session(), request).await
+    roles::patch_role(state, path, local_session(), audit, request).await
 }
 
 /// `getRolesByNames` through `APILocal` (role_local.go:12).
@@ -677,9 +697,9 @@ pub async fn send_over_unix(socket: &Path, request: Request) -> Result<Response,
 
 /// Copy headers, dropping the ones that belong to a single connection.
 ///
-/// The same list as [`crate::proxy`]'s, minus `accept-encoding`: that entry exists there because
-/// `reqwest` applies its own decompression policy, and hyper at this level applies none — so
-/// dropping it would silently deny the client a compressed answer Go was willing to give.
+/// The same list as [`crate::proxy`]'s: `accept-encoding` is forwarded on both legs, since hyper
+/// at this level decodes nothing and dropping it would silently deny the client a compressed
+/// answer Go was willing to give.
 fn forwardable(headers: &axum::http::HeaderMap) -> axum::http::HeaderMap {
     const HOP_BY_HOP: &[&str] = &[
         "connection",

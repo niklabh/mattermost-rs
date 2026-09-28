@@ -1,0 +1,17 @@
+# api-gzip.plan — compression of API answers (D-208): mm_api::gzhttp's streaming wrap, the
+# wrapper in go_global_headers, net/http framing of an untouched answer, and the proxy passing
+# Accept-Encoding through. 2026-09-24. Unit lines replay behaviour_web_static.json (gzhttp and
+# gzhttp_stream); api lines run parity::api_compression on the stack.
+gz-sniff-dropped	crates/mm-api/src/gzhttp.rs	let sniffed = mm_app::link_image::detect_content_type(&head);	let sniffed = "";	unit	gzhttp
+gz-sniff-header-not-set	crates/mm-api/src/gzhttp.rs	            if !parts.headers.contains_key(header::CONTENT_TYPE) {	            if false {	unit	gzhttp
+gz-plain-stream-not-held	crates/mm-api/src/gzhttp.rs	BUFFER_BEFORE_CHUNKING_SIZE + 1).await?;	0).await?;	unit	gzhttp
+gz-compressed-not-held	crates/mm-api/src/gzhttp.rs	while out.len() <= BUFFER_BEFORE_CHUNKING_SIZE {	while out.len() < BUFFER_BEFORE_CHUNKING_SIZE / 4096 {	unit	gzhttp
+gz-stream-drops-output	crates/mm-api/src/gzhttp.rs	if !emitted.is_empty() {	if emitted.is_empty() {	unit	gzhttp
+gz-declared-off-by-one	crates/mm-api/src/gzhttp.rs	        declared >= DEFAULT_MIN_SIZE	        declared > DEFAULT_MIN_SIZE	unit	gzhttp
+mode-not-read-at-start	crates/mm-api/src/lib.rs	api_gzip: app.config().webserver_mode == "gzip",	api_gzip: app.config().webserver_mode != "gzip",	unit	the_gzip_wrapper
+api-wrap-inverted	crates/mm-api/src/lib.rs	    if !state.api_gzip {	    if state.api_gzip {	api	api_compression
+api-framing-skipped	crates/mm-api/src/lib.rs	Ok(response) => gzhttp::net_http_framing(&method, response),	Ok(response) => response,	api	api_compression
+proxy-drops-accept-encoding	crates/mm-api/src/proxy.rs	    "content-length",\n];	    "content-length",\n    "accept-encoding",\n];	api	api_compression
+# Controls: must survive.
+control-swap-header-removals	crates/mm-api/src/gzhttp.rs	    parts.headers.remove(header::CONTENT_LENGTH);\n    parts.headers.remove(header::ACCEPT_RANGES);	    parts.headers.remove(header::ACCEPT_RANGES);\n    parts.headers.remove(header::CONTENT_LENGTH);	unit	gzhttp
+control-swap-no-decoders	crates/mm-api/src/lib.rs	                .no_brotli()\n                .no_deflate()	                .no_deflate()\n                .no_brotli()	api	api_compression

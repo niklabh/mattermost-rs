@@ -1,0 +1,11 @@
+# D-192: the serde(default) guard. Suite lib, MUTATE_PACKAGE=mm-model.
+g_post_default	crates/mm-model/src/post.rs	#[serde(default)]\npub struct Post {	pub struct Post {	lib	serde_default_guard
+g_api_default	crates/mm-api/src/access_control_policies.rs	#[serde(default)]\nstruct ExpressionRequest {	struct ExpressionRequest {	lib	serde_default_guard
+g_app_field_default	crates/mm-app/src/auth.rs	#[serde(rename = "UserId", default)]	#[serde(rename = "UserId")]	lib	serde_default_guard
+g_cfg_test	crates/mm-model/src/serde_default_guard.rs	.any(|word| word == "test")	.any(|word| word == "tests")	lib	serde_default_guard
+g_derive_name	crates/mm-model/src/serde_default_guard.rs	== Some("Deserialize")	== Some("Deserialise")	lib	serde_default_guard
+g_exempt_entry	crates/mm-model/src/serde_default_guard.rs	"mm-app::Entry",	"mm-app::Entries",	lib	serde_default_guard
+g_option_zero_fills	crates/mm-model/src/serde_default_guard.rs	|| (is_option(&field.ty)	|| (!is_option(&field.ty)	lib	serde_default_guard
+g_field_default_key	crates/mm-model/src/serde_default_guard.rs	keys.iter().any(|key| key == "default")\n        ||	keys.iter().any(|key| key == "defaults")\n        ||	lib	serde_default_guard
+control_g_at_start	crates/mm-model/src/serde_default_guard.rs	let mut at_start = true;	let mut at_start = !false;	lib	serde_default_guard
+control_g_message	crates/mm-model/src/serde_default_guard.rs	"only {} Deserialize types found",	"only {} Deserialize types were found",	lib	serde_default_guard

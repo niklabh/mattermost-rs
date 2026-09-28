@@ -21,8 +21,8 @@
 //! # What is not ported yet
 //!
 //! - Most of the plugin API: [`AppPluginApi`] (`crate::plugin_api`) answers the methods Phase 6
-//!   has ported and the typed not-implemented error for the rest, and [`AppPluginDriver`]
-//!   answers not-implemented throughout.
+//!   has ported and the typed not-implemented error for the rest. [`AppPluginDriver`]
+//!   (`crate::plugin_driver`) is the whole database driver.
 //!
 //! Each is a `docs/TECH_DEBT.md` entry. The cluster branches are Go's nil cluster: there is no
 //! cluster here, so a status carries `cluster_id: ""` and no peer statuses are merged.
@@ -48,9 +48,7 @@ pub(crate) const PLUGIN_ID_APPS: &str = "com.mattermost.apps";
 
 pub use crate::plugin_api::AppPluginApi;
 
-/// The database a plugin queries through. Not ported yet (plugin plan Phase 6).
-pub struct AppPluginDriver;
-impl mm_plugin::rpc::Driver for AppPluginDriver {}
+pub use crate::plugin_driver::AppPluginDriver;
 
 /// The environment this server runs its plugins in.
 pub type PluginsEnvironment = Environment<AppPluginApi, AppPluginDriver>;
@@ -66,6 +64,8 @@ pub struct PluginHost {
     lifecycle: tokio::sync::Mutex<()>,
     /// Go's `Channels.pluginCommands`: the slash commands the plugins here registered.
     commands: crate::plugin_commands::PluginCommandRegistry,
+    /// Go's `Channels.guardCache` ([`crate::channel_guards`]); kept only while hosting.
+    guard_cache: crate::channel_guards::GuardCache,
 }
 
 impl std::fmt::Debug for PluginHost {
@@ -95,6 +95,11 @@ impl PluginHost {
     /// empty when this process does not host plugins.
     pub fn commands(&self) -> &crate::plugin_commands::PluginCommandRegistry {
         &self.commands
+    }
+
+    /// The channel-guard cache ([`crate::channel_guards`]).
+    pub fn guard_cache(&self) -> &crate::channel_guards::GuardCache {
+        &self.guard_cache
     }
 
     fn get(&self) -> Option<Arc<PluginsEnvironment>> {
@@ -210,7 +215,7 @@ impl App {
         let app = self.clone();
         let environment = Environment::new(
             Box::new(move |manifest: &Manifest| Arc::new(AppPluginApi::new(app.clone(), manifest))),
-            Arc::new(AppPluginDriver),
+            Arc::new(AppPluginDriver::new(self.clone())),
             PathBuf::from(plugin_dir),
             PathBuf::from(webapp_plugin_dir),
         );
@@ -268,7 +273,7 @@ impl App {
                 .copied()
                 .unwrap_or(false);
             // getPluginStateOverride: the Apps plugin follows its feature flag.
-            if manifest.id == PLUGIN_ID_APPS && !config.feature_flag_apps_enabled {
+            if manifest.id == PLUGIN_ID_APPS && !config.feature_flags.apps_enabled {
                 on = false;
             }
             if on {
@@ -469,12 +474,10 @@ impl App {
 
     async fn publish_plugin_manifest(&self, event: &str, manifest: &Manifest) {
         let mut message = WebSocketEvent::new(event, "", "", "", None, "");
-        match serde_json::to_value(manifest.client_manifest()) {
-            Ok(value) => message.add("manifest", value),
-            Err(err) => {
-                tracing::warn!(error = %err, "Failed to encode a plugin manifest");
-                return;
-            }
+        // A struct in Go (`*model.Manifest`), so its declaration order goes on the wire.
+        if let Err(err) = message.add_struct("manifest", &manifest.client_manifest()) {
+            tracing::warn!(error = %err, "Failed to encode a plugin manifest");
+            return;
         }
         self.publish(message).await;
     }

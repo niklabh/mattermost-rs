@@ -41,7 +41,7 @@
 //!
 //! It lived here as a private `OnceLock` while this module was its only consumer. That day came:
 //! `api4/properties.go` reads the same flag in its registration `if`, so it is now
-//! [`mm_app::config::Config::feature_flag_integrated_boards`] — one env lookup at startup, beside
+//! [`mm_app::config::Config::feature_flags`] — one env lookup at startup, beside
 //! the other four `FeatureFlags` this server has to know about, instead of a second copy of the
 //! `strconv.ParseBool` spellings that could drift from `mm_app::config`'s.
 //!
@@ -289,9 +289,10 @@ pub async fn create_view(
     State(state): State<AppState>,
     Path(channel_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -305,7 +306,7 @@ pub async fn create_view(
     };
     let request = Request::from_parts(parts, axum::body::Body::from(body.clone()));
 
-    serve_create(&state, &channel_id, &session, &body, &connection_id)
+    serve_create(&state, &channel_id, &session, &body, &connection_id, &audit)
         .await
         .finish(state.clone(), request)
         .await
@@ -317,6 +318,7 @@ async fn serve_create(
     session: &AuthenticatedSession,
     body: &[u8],
     connection_id: &str,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Outcome {
     if let Err(err) = require_id(channel_id, "channel_id") {
         return Outcome::Failed(err);
@@ -361,6 +363,8 @@ async fn serve_create(
         return Outcome::Failed(ApiError::from(err));
     }
 
+    // `c.LogAudit("")` on success.
+    audit.log(&state.app, Some(&session.0), "").await;
     encoded("createView", StatusCode::CREATED, &view)
 }
 
@@ -392,7 +396,7 @@ pub async fn get_views_for_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);
@@ -480,7 +484,7 @@ pub async fn get_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     serve_get(&state, &channel_id, &view_id, &session)
@@ -559,9 +563,10 @@ pub async fn update_view(
     State(state): State<AppState>,
     Path((channel_id, view_id)): Path<(String, String)>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -582,6 +587,7 @@ pub async fn update_view(
         &session,
         &body,
         &connection_id,
+        &audit,
     )
     .await
     .finish(state.clone(), request)
@@ -595,6 +601,7 @@ async fn serve_update(
     session: &AuthenticatedSession,
     body: &[u8],
     connection_id: &str,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Outcome {
     if let Err(err) =
         require_id(channel_id, "channel_id").and_then(|()| require_id(view_id, "view_id"))
@@ -651,7 +658,11 @@ async fn serve_update(
         .update_view(view, Some(&patch), connection_id)
         .await
     {
-        Ok(updated) => encoded("updateView", StatusCode::OK, &updated),
+        Ok(updated) => {
+            // `c.LogAudit("")` on success.
+            audit.log(&state.app, Some(&session.0), "").await;
+            encoded("updateView", StatusCode::OK, &updated)
+        }
         Err(err) => Outcome::Failed(ApiError::from(err)),
     }
 }
@@ -673,16 +684,24 @@ pub async fn delete_view(
     State(state): State<AppState>,
     Path((channel_id, view_id)): Path<(String, String)>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
-    serve_delete(&state, &channel_id, &view_id, &session, &connection_id)
-        .await
-        .finish(state.clone(), request)
-        .await
+    serve_delete(
+        &state,
+        &channel_id,
+        &view_id,
+        &session,
+        &connection_id,
+        &audit,
+    )
+    .await
+    .finish(state.clone(), request)
+    .await
 }
 
 async fn serve_delete(
@@ -691,6 +710,7 @@ async fn serve_delete(
     view_id: &str,
     session: &AuthenticatedSession,
     connection_id: &str,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Outcome {
     if let Err(err) =
         require_id(channel_id, "channel_id").and_then(|()| require_id(view_id, "view_id"))
@@ -733,6 +753,8 @@ async fn serve_delete(
         return Outcome::Failed(ApiError::from(err));
     }
 
+    // `c.LogAudit("")` on success.
+    audit.log(&state.app, Some(&session.0), "").await;
     status_ok()
 }
 
@@ -766,9 +788,10 @@ pub async fn update_view_sort_order(
     State(state): State<AppState>,
     Path((channel_id, view_id)): Path<(String, String)>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -789,6 +812,7 @@ pub async fn update_view_sort_order(
         &session,
         &body,
         &connection_id,
+        &audit,
     )
     .await
     .finish(state.clone(), request)
@@ -802,6 +826,7 @@ async fn serve_sort_order(
     session: &AuthenticatedSession,
     body: &[u8],
     connection_id: &str,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Outcome {
     if let Err(err) =
         require_id(channel_id, "channel_id").and_then(|()| require_id(view_id, "view_id"))
@@ -809,7 +834,8 @@ async fn serve_sort_order(
         return Outcome::Failed(err);
     }
 
-    let new_sort_order: i64 = match decode_one_from_json(body) {
+    // `var newSortOrder int64; Decode` (view.go:313): a `null` body leaves it `0`.
+    let new_sort_order: i64 = match mm_model::utils::decode_one_value_from_json(body) {
         Ok(value) => value,
         Err(err) => {
             tracing::debug!(error = %err, "the sort-order body did not decode");
@@ -847,7 +873,11 @@ async fn serve_sort_order(
         .update_view_sort_order(view_id, channel_id, new_sort_order, connection_id)
         .await
     {
-        Ok(views) => encoded("updateViewSortOrder", StatusCode::OK, &views),
+        Ok(views) => {
+            // `c.LogAudit("")` on success.
+            audit.log(&state.app, Some(&session.0), "").await;
+            encoded("updateViewSortOrder", StatusCode::OK, &views)
+        }
         Err(err) => Outcome::Failed(ApiError::from(err)),
     }
 }
@@ -888,7 +918,7 @@ pub async fn get_posts_for_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_integrated_boards {
+    if !state.app.config().feature_flags.integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);

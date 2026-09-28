@@ -10,7 +10,7 @@
 //! written, and the handler forwards the request ([D-411]).
 
 use mm_model::utils::AppError;
-use mm_store::UserStore;
+use mm_store::{TeamStore, UserStore};
 
 use crate::App;
 use crate::image_pipeline::{self, PipelineError};
@@ -33,15 +33,6 @@ impl App {
     ///    `invalidateUserCacheAndPublish`.
     #[tracing::instrument(skip(self, data), fields(bytes = data.len()))]
     pub async fn set_profile_image(&self, user_id: &str, data: &[u8]) -> Result<(), PrepareError> {
-        let error = |id: &str, status: i32| {
-            PrepareError::App(AppError::boxed(
-                "SetProfileImage",
-                id,
-                None,
-                String::new(),
-                status,
-            ))
-        };
         let wrapped = |id: &str, status: i32, err: PipelineError| {
             PrepareError::App(Box::new(
                 AppError::new("SetProfileImage", id, None, String::new(), status).wrap(err),
@@ -78,6 +69,34 @@ impl App {
             }
         }
 
+        self.set_profile_image_from_file(user_id, data).await
+    }
+
+    /// Port of `App.SetProfileImageFromFile` (app/user.go:1118): [`App::set_profile_image`]
+    /// without `checkImageLimits` — `AdjustImage`, the unchanged-bytes short cut, the write,
+    /// `UpdateLastPictureUpdate` and the `user_updated` event. The plugin API's `SetProfileImage`
+    /// reaches it directly, so a plugin's image skips the declared-size check a client's gets;
+    /// the decoder's own resolution guard still applies.
+    pub async fn set_profile_image_from_file(
+        &self,
+        user_id: &str,
+        data: &[u8],
+    ) -> Result<(), PrepareError> {
+        let error = |id: &str, status: i32| {
+            PrepareError::App(AppError::boxed(
+                "SetProfileImage",
+                id,
+                None,
+                String::new(),
+                status,
+            ))
+        };
+        let wrapped = |id: &str, status: i32, err: PipelineError| {
+            PrepareError::App(Box::new(
+                AppError::new("SetProfileImage", id, None, String::new(), status).wrap(err),
+            ))
+        };
+        let max_res = self.config().file_max_image_resolution;
         let owned = data.to_vec(); // moved to the blocking pool
         let adjusted = tokio::task::spawn_blocking(move || adjust_image(&owned, max_res))
             .await
@@ -132,6 +151,76 @@ impl App {
         Ok(())
     }
 
+    /// Port of `App.SetTeamIconFromFile` (app/team.go:2373): the image through the same
+    /// decode, upright and `FillCenter(128, 128)` as a profile picture, written as
+    /// `teams/<id>/teamIcon.png`; `LastTeamIconUpdate` stamped, and `update_team` sent with the
+    /// team as the caller fetched it and only that field changed. No unchanged-bytes short cut,
+    /// unlike the profile picture. The REST route's `checkImageLimits` and storage check sit in
+    /// `SetTeamIconFromMultiPartFile`, above this; the plugin API calls this directly.
+    pub async fn set_team_icon_from_file(
+        &self,
+        team: &mm_model::team::Team,
+        data: &[u8],
+    ) -> Result<(), PrepareError> {
+        let error = |id: &str, status: i32| {
+            PrepareError::App(AppError::boxed(
+                "SetTeamIcon",
+                id,
+                None,
+                String::new(),
+                status,
+            ))
+        };
+        let wrapped = |id: &str, status: i32, err: PipelineError| {
+            PrepareError::App(Box::new(
+                AppError::new("SetTeamIcon", id, None, String::new(), status).wrap(err),
+            ))
+        };
+        let max_res = self.config().file_max_image_resolution;
+        let owned = data.to_vec(); // moved to the blocking pool
+        let adjusted = tokio::task::spawn_blocking(move || adjust_image(&owned, max_res))
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "team icon processing panicked");
+                error("api.team.set_team_icon.encode.app_error", 500)
+            })?;
+        let png = match adjusted {
+            Ok(png) => png,
+            Err(Adjust::Decode(err)) => {
+                return Err(wrapped("api.team.set_team_icon.decode.app_error", 400, err));
+            }
+            Err(Adjust::Encode(err)) => {
+                return Err(wrapped("api.team.set_team_icon.encode.app_error", 500, err));
+            }
+            Err(Adjust::Unreproducible(why)) => return Err(PrepareError::Unreproducible(why)),
+        };
+
+        let path = format!("teams/{}/teamIcon.png", team.id);
+        if let Err(err) = self.write_file(&png, &path).await {
+            tracing::error!(error = ?err, "writing the team icon failed");
+            return Err(error("api.team.set_team_icon.write_file.app_error", 500));
+        }
+
+        let now = mm_model::utils::get_millis();
+        if let Err(err) = self
+            .store()
+            .team()
+            .update_last_team_icon_update(&team.id, now)
+            .await
+        {
+            tracing::warn!(error = %err, "Error with updating the team icon's time");
+            return Err(error("api.team.team_icon.update.app_error", 400));
+        }
+        let mut team = team.clone(); // the event carries the caller's team with one field set
+        team.last_team_icon_update = now;
+        self.send_team_event(
+            &team,
+            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,
+        )
+        .await
+        .map_err(PrepareError::App)
+    }
+
     /// Port of `App.invalidateUserCacheAndPublish` (app/user.go:2912): purge Go's copy of the
     /// user, re-read it, and broadcast one `user_updated` carrying the member-sanitised profile
     /// (`SanitizeProfile(options, false)`) to everyone.
@@ -153,10 +242,11 @@ impl App {
             None,
             "",
         );
-        message.add(
-            "user",
-            serde_json::to_value(&user).unwrap_or(serde_json::Value::Null),
-        );
+        if let Err(err) = message.add_struct("user", &user) {
+            // Go marshals at write time and skips the frame; nothing is worth publishing.
+            tracing::warn!(error = %err, "Error in encoding websocket message");
+            return;
+        }
         self.publish(message).await;
     }
 }

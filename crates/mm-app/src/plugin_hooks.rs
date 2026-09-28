@@ -1049,27 +1049,18 @@ impl App {
     /// Port of `resolveGuards` (guarded_hooks.go:37): the plugin ids claiming this channel,
     /// sorted, plus the fail-closed refusal when the channel has guards the plugin system cannot
     /// run. A channel with no guards answers `(vec![], None)`, and both phases below then behave
-    /// exactly like a plain `RunMultiHook` — which is every channel on any server here, because
-    /// `RegisterChannelGuard` is one of the API methods Phase 6 still owes.
+    /// exactly like a plain `RunMultiHook`.
     ///
-    /// Go reads a cache loaded at start-up; this reads the table
-    /// ([`mm_store::channel_guard_store`]), which is the same answer without a reload path
-    /// nothing in this process can trigger. A store failure is "no guards", the state Go's cache
-    /// is left in when its own load fails (`app/channel_guards.go:30`) — not a refusal, which
-    /// would turn a database blip into a 503 on every post.
+    /// The guards come from [`App::guards_for_channel`]: Go's cache while this process hosts the
+    /// plugins, the table otherwise ([`crate::channel_guards`]). A store failure is "no guards",
+    /// the state Go's cache is left in when its own load fails (`app/channel_guards.go:30`) — not
+    /// a refusal, which would turn a database blip into a 503 on every post.
     async fn resolve_guards(
         &self,
         channel_id: &str,
         caller: &str,
     ) -> (Vec<String>, Option<Box<AppError>>) {
-        use mm_store::channel_guard_store::ChannelGuardStore as _;
-
-        let guards = match self
-            .store()
-            .channel_guard()
-            .get_for_channel(channel_id)
-            .await
-        {
+        let guards = match self.guards_for_channel(channel_id).await {
             Ok(guards) => guards,
             Err(err) => {
                 tracing::warn!(error = %err, channel_id, "reading the channel guards failed");
@@ -2941,3 +2932,118 @@ mod scheduled_post_wire_tests {
         assert_eq!(back.metadata, sent.metadata);
     }
 }
+
+/// The websocket hooks (app/platform/web_conn.go): `OnWebSocketConnect` when a connection is made,
+/// `WebSocketMessageHasBeenPosted` for every message a client sends on it, `OnWebSocketDisconnect`
+/// when it ends. Each connection hands its messages to the hook one at a time, in order, as Go's
+/// `pluginPostedConsumer` goroutine does.
+impl App {
+    /// `OnWebSocketConnect` (web_conn.go:275), spawned at the end of `NewWebConn` — for every
+    /// connection, an unauthenticated one included (with an empty user id), under the id it was
+    /// made with.
+    pub fn on_web_socket_connect(&self, connection_id: &str, user_id: &str) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let (connection_id, user_id) = (connection_id.to_owned(), user_id.to_owned());
+        spawn_multi_hook(environment, hook_id::ON_WEB_SOCKET_CONNECT, move |hooks| {
+            let args = wire_plugin::Z_OnWebSocketConnectArgs {
+                a: connection_id.clone(),
+                b: user_id.clone(),
+            };
+            async move {
+                hooks.on_web_socket_connect(args).await;
+            }
+        });
+    }
+
+    /// `OnWebSocketDisconnect` (web_conn.go:425), spawned after the connection left the hub.
+    pub fn on_web_socket_disconnect(&self, connection_id: &str, user_id: &str) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let (connection_id, user_id) = (connection_id.to_owned(), user_id.to_owned());
+        spawn_multi_hook(
+            environment,
+            hook_id::ON_WEB_SOCKET_DISCONNECT,
+            move |hooks| {
+                let args = wire_plugin::Z_OnWebSocketDisconnectArgs {
+                    a: connection_id.clone(),
+                    b: user_id.clone(),
+                };
+                async move {
+                    hooks.on_web_socket_disconnect(args).await;
+                }
+            },
+        );
+    }
+
+    /// `WebSocketMessageHasBeenPosted` (web_conn.go:288) for one message, awaited: the caller is
+    /// the connection's own consumer, which delivers the next message only after this one.
+    pub async fn web_socket_message_has_been_posted(
+        &self,
+        connection_id: String,
+        user_id: String,
+        request: wire_model::WebSocketRequest,
+    ) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        environment
+            .run_multi_plugin_hook(
+                hook_id::WEB_SOCKET_MESSAGE_HAS_BEEN_POSTED,
+                |hooks, _manifest| {
+                    let args = wire_plugin::Z_WebSocketMessageHasBeenPostedArgs {
+                        a: connection_id.clone(),
+                        b: user_id.clone(),
+                        c: Some(Box::new(request.clone())),
+                    };
+                    async move {
+                        hooks.web_socket_message_has_been_posted(args).await;
+                        true
+                    }
+                },
+            )
+            .await;
+    }
+}
+
+/// `req.Clone()` and what `readPump` adds to it (web_conn.go:496-510): the sequence, action and
+/// data as msgpack carries them (the session, locale and translate function are `msgpack:"-"`,
+/// so they come back zero), then the session's **id** alone, and the connection's
+/// `remote_addr` and `x_forwarded_for` added to the data — which becomes an empty map first when
+/// the client sent none.
+pub fn web_socket_request_for_plugins(
+    request: &mm_model::websocket_request::WebSocketRequest,
+    session_id: &str,
+    remote_addr: &str,
+    x_forwarded_for: &str,
+) -> wire_model::WebSocketRequest {
+    let mut data: std::collections::HashMap<String, Option<gobwire::Interface>> = request
+        .data
+        .iter()
+        .flatten()
+        .map(|(key, value)| (key.clone(), json_to_interface(value)))
+        .collect();
+    data.insert(
+        "remote_addr".to_owned(),
+        Some(gobwire::Interface::string(remote_addr)),
+    );
+    data.insert(
+        "x_forwarded_for".to_owned(),
+        Some(gobwire::Interface::string(x_forwarded_for)),
+    );
+    wire_model::WebSocketRequest {
+        seq: request.seq,
+        action: request.action.clone(),
+        data,
+        session: wire_model::Session {
+            id: session_id.to_owned(),
+            ..wire_model::Session::default()
+        },
+        locale: String::new(),
+    }
+}
+
+/// `model.WebSocketRequest` as the websocket hook carries it, for a caller without `mm-plugin`.
+pub type PluginWebSocketRequest = wire_model::WebSocketRequest;

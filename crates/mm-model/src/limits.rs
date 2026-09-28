@@ -231,7 +231,7 @@ mod go_parity {
         assert_eq!(singles, 7, "one single-field probe per field");
     }
 
-    /// [D-040]'s reach is **wider** for a camelCase tag than for a snake_case one, and the reason
+    /// Go's key fold's reach is **wider** for a camelCase tag than for a snake_case one, and the reason
     /// is worth stating: the Go field name `MaxUsersLimit` is itself a case-variant of the tag
     /// `maxUsersLimit`, so Go accepts both. A snake_case tag admits no PascalCase spelling at all.
     ///
@@ -243,35 +243,25 @@ mod go_parity {
         let cases = oracle["key_casing"].as_array().unwrap();
         assert_eq!(cases.len(), 7, "the casing corpus changed size");
 
-        let (mut divergent, mut agreed) = (0, 0);
+        let mut serde_alone_differs = 0;
         for case in cases {
             let name = case["name"].as_str().unwrap();
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let decoded: ServerLimits =
-                serde_json::from_str(doc).unwrap_or_else(|e| panic!("{name}: {e}"));
-
-            let ours = decoded.max_users_limit != 0;
+            // Through the body decoder, which folds keys as Go does ([D-040]).
+            let decoded: ServerLimits = crate::utils::decode_one_from_json(doc.as_bytes())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
             let theirs = case["populated"].as_bool().unwrap();
+            assert_eq!(decoded.max_users_limit != 0, theirs, "{name}: {doc}");
 
-            if name == "declared_tag" {
-                assert!(ours && theirs, "the declared tag must work on both sides");
-                agreed += 1;
-            } else if theirs {
-                assert!(
-                    !ours,
-                    "{name}: we accepted a spelling [D-040] says we reject"
-                );
-                divergent += 1;
-            } else {
-                assert!(!ours, "{name}");
-                agreed += 1;
+            let plain: ServerLimits = serde_json::from_str(doc).unwrap();
+            if (plain.max_users_limit != 0) != theirs {
+                serde_alone_differs += 1;
             }
         }
-
-        assert_eq!(divergent, 4, "the [D-040] spellings changed count");
-        assert_eq!(agreed, 3, "the tag, plus snake_case and kebab_case");
+        // The premise: four spellings Go folds that serde's derive alone ignores.
+        assert_eq!(serde_alone_differs, 4, "the folded spellings changed count");
 
         // Named explicitly, because it is the one a port would trip over rather than a
         // theoretical case-variant.
@@ -291,22 +281,24 @@ mod go_parity {
         let cases = oracle["decode"].as_array().unwrap();
         assert_eq!(cases.len(), 13, "the decode corpus changed size");
 
-        // Go accepts `null` into a scalar and leaves the zero value; we reject ([D-057]). A
-        // repeated struct field takes the last value in Go and errors here ([D-071]).
-        const DIVERGENT: [&str; 2] = ["null_int", "duplicate_key"];
+        // Two rows serde's derive alone refuses and Go accepts: `null` into a scalar ([D-057]) and
+        // a repeated key ([D-071]). The body decoder takes both as Go does.
+        const SERDE_ALONE_REFUSES: [&str; 2] = ["null_int", "duplicate_key"];
 
         for case in cases {
             let name = case["name"].as_str().unwrap();
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<ServerLimits>(doc);
+            let got = crate::utils::decode_one_from_json::<ServerLimits>(doc.as_bytes());
             let go_ok = case["ok"].as_bool().unwrap();
 
-            if DIVERGENT.contains(&name) {
+            if SERDE_ALONE_REFUSES.contains(&name) {
                 assert!(go_ok, "{name}: Go used to accept it");
-                assert!(got.is_err(), "{name}: expected the documented divergence");
-                continue;
+                assert!(
+                    serde_json::from_str::<ServerLimits>(doc).is_err(),
+                    "{name}: premise"
+                );
             }
 
             assert_eq!(got.is_ok(), go_ok, "{name}: {doc}");

@@ -16,8 +16,6 @@
 //!
 //! # What is not here
 //!
-//! - `user_typing` calls `ExtendSessionExpiryIfNeeded` first. Not ported on any route ([D-214]);
-//!   it is a no-op on the parity stack, where `ExtendSessionLengthWithActivity` is off.
 //! - `posted_notify_ack` counts notification metrics. This server builds no metrics interface,
 //!   which is Go's `notificationMetricsDisabled` arm — the counters are skipped on both.
 
@@ -226,7 +224,10 @@ async fn user_typing(
     request: &WebSocketRequest,
     session: &Session,
 ) -> HandlerResult {
-    // `ExtendSessionExpiryIfNeeded` first — not ported ([D-214]).
+    // `api.App.ExtendSessionExpiryIfNeeded(…, &req.Session)` first — before the busy check and
+    // before any validation, so even a refused request slides the session. The **app** method,
+    // not the context one: there is no HTTP response to carry cookies, so none are sent.
+    state.app.extend_session_expiry_if_needed(session).await;
 
     // "this is considered a non-critical service and will be disabled when server busy."
     if crate::system::server_is_busy() {

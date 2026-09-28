@@ -567,22 +567,17 @@ pub(crate) async fn decode_full_channel_search(
             return Err(ApiError::invalid_param("channel_search"));
         }
     };
-    let decoded: Option<serde_json::Value> = match mm_model::utils::decode_one_from_json(&bytes) {
-        Ok(decoded) => decoded,
+    // `var channelSearch *model.ChannelSearch`: a decode error and the nil `null` leaves are the
+    // same 400.
+    match mm_model::utils::decode_one_from_json::<Option<mm_model::channel_search::ChannelSearch>>(
+        &bytes,
+    ) {
+        Ok(Some(search)) => Ok(search),
+        Ok(None) => Err(ApiError::invalid_param("channel_search")),
         Err(err) => {
             tracing::debug!(error = %err, "channel search body did not decode");
-            return Err(ApiError::invalid_param("channel_search"));
+            Err(ApiError::invalid_param("channel_search"))
         }
-    };
-    match decoded {
-        Some(value @ serde_json::Value::Object(_)) => serde_json::from_value::<
-            mm_model::channel_search::ChannelSearch,
-        >(value)
-        .map_err(|err| {
-            tracing::debug!(error = %err, "channel search body has the wrong field types");
-            ApiError::invalid_param("channel_search")
-        }),
-        _ => Err(ApiError::invalid_param("channel_search")),
     }
 }
 
@@ -656,21 +651,14 @@ async fn decode_channel_search(request: Request) -> Result<ChannelSearch, ApiErr
             return Err(ApiError::invalid_param("channel_search"));
         }
     };
-    let decoded: Option<serde_json::Value> = match mm_model::utils::decode_one_from_json(&bytes) {
-        Ok(decoded) => decoded,
+    // `var props *model.ChannelSearch`: a decode error and a `null` body are the same 400.
+    match mm_model::utils::decode_one_from_json::<Option<ChannelSearch>>(&bytes) {
+        Ok(Some(search)) => Ok(search),
+        Ok(None) => Err(ApiError::invalid_param("channel_search")),
         Err(err) => {
             tracing::debug!(error = %err, "channel search body did not decode");
-            return Err(ApiError::invalid_param("channel_search"));
+            Err(ApiError::invalid_param("channel_search"))
         }
-    };
-    match decoded {
-        Some(value @ serde_json::Value::Object(_)) => {
-            serde_json::from_value::<ChannelSearch>(value).map_err(|err| {
-                tracing::debug!(error = %err, "channel search body has the wrong field types");
-                ApiError::invalid_param("channel_search")
-            })
-        }
-        _ => Err(ApiError::invalid_param("channel_search")),
     }
 }
 
@@ -3222,8 +3210,8 @@ pub async fn get_recommended_channels_for_team(
 /// # The route exists only while `FeatureFlags.ManagedChannelCategories` is on
 ///
 /// `InitChannel` registers it inside `if …FeatureFlags.ManagedChannelCategories` (api4/
-/// channel.go:71), and the flag defaults to **false** (feature_flags.go:202) and is
-/// environment-only (see [`mm_app::config::Config::feature_flag_integrated_boards`]). With it off
+/// channel.go:71), and the flag defaults to **false** (feature_flags.go:202) (see
+/// [`mm_app::config::Config::feature_flags`]). With it off
 /// gorilla has never heard of the path and answers its own 404 `api.context.404.app_error`,
 /// *before* any session check. [`managed_categories_flag_or_forward`] reproduces that by
 /// forwarding ahead of the session extractor, so an unauthenticated request gets Go's 404 and
@@ -3296,7 +3284,7 @@ pub(crate) async fn managed_categories_flag_or_forward(
     request: Request,
     next: axum::middleware::Next,
 ) -> Response {
-    if !state.app.config().feature_flag_managed_channel_categories {
+    if !state.app.config().feature_flags.managed_channel_categories {
         return proxy::forward_to_go(State(state), request).await;
     }
     next.run(request).await
@@ -3605,7 +3593,10 @@ fn view_response(
 ///    to say "focus loss or initial view" and must not be rejected.
 /// 5. Each non-empty id is checked against [`reject_board_channel_by_id`], again `channel_id`
 ///    first.
-/// 6. `App.ViewChannel`, then `UpdateLastActivityAtIfNeeded`.
+/// 6. `App.ViewChannel`, then `UpdateLastActivityAtIfNeeded`, then `ExtendSessionExpiryIfNeeded`
+///    — the sliding-expiry write and its `Set-Cookie` headers ([`crate::session_expiry`]). This
+///    is the request every client makes on every channel switch, so it is the one that keeps a
+///    long session alive when `ExtendSessionLengthWithActivity` is on.
 ///
 /// # What a bad `channel_id` is *not*
 ///
@@ -3613,13 +3604,6 @@ fn view_response(
 /// the caller is not in contributes no row to the join, so it is simply absent from
 /// `last_viewed_at_times` — a **200**, not a 403 or a 404.
 ///
-/// # `ExtendSessionExpiryIfNeeded` is not ported
-///
-/// Go calls it after `UpdateLastActivityAtIfNeeded` (channel.go:2052). It is a no-op unless
-/// `ServiceSettings.ExtendSessionLengthWithActivity` is on, and that setting defaults to
-/// `!isUpdate` — false for every persisted configuration document (see [D-088]'s note). When it
-/// *is* on it rewrites `Sessions.ExpiresAt` and re-attaches the session cookies, neither of which
-/// this port does anywhere yet. [D-214].
 #[tracing::instrument(skip_all, fields(user_id = %user_id, channels))]
 pub async fn view_channel(
     State(state): State<AppState>,
@@ -3657,7 +3641,8 @@ async fn serve_view_channel(
         )));
     }
 
-    let bytes = read_body(request, "viewChannel").await?;
+    let (parts, body) = request.into_parts();
+    let bytes = read_body(Request::new(body), "viewChannel").await?;
     // `json.NewDecoder(r.Body).Decode(&view)` into a **value**, not a pointer. Two consequences,
     // and both need the `Value` round-trip rather than a direct `from_slice`:
     //
@@ -3668,24 +3653,13 @@ async fn serve_view_channel(
     //   so `["x","y",true]` would decode to a populated view and answer 200. Same trap
     //   `search_channels_for_team` documents.
     //
-    // The two decoding divergences already measured on this type stand and are not re-litigated
-    // here: Go accepts `null` into an individual scalar where serde rejects the whole document
-    // ([D-057]), and Go matches field names case-insensitively ([D-040]).
-    let decoded: Option<serde_json::Value> = mm_model::utils::decode_one_from_json(&bytes)
-        .map_err(|err| {
+    // A `null` member, a folded key or a repeated one decode as Go decodes them ([D-057], [D-040],
+    // [D-071]), through the shared body decoder.
+    let view: mm_model::channel_view::ChannelView =
+        mm_model::utils::decode_one_value_from_json(&bytes).map_err(|err| {
             tracing::debug!(error = %err, "channel view body did not decode");
             ApiError::invalid_param("channel_view")
         })?;
-    let view: mm_model::channel_view::ChannelView = match decoded {
-        None => mm_model::channel_view::ChannelView::default(),
-        Some(value @ serde_json::Value::Object(_)) => {
-            serde_json::from_value(value).map_err(|err| {
-                tracing::debug!(error = %err, "channel view body has the wrong field types");
-                ApiError::invalid_param("channel_view")
-            })?
-        }
-        Some(_) => return Err(ApiError::invalid_param("channel_view")),
-    };
     tracing::Span::current().record(
         "channels",
         !view.channel_id.is_empty() as usize + !view.prev_channel_id.is_empty() as usize,
@@ -3725,8 +3699,11 @@ async fn serve_view_channel(
         .app
         .update_last_activity_at_if_needed(&session.0)
         .await;
+    let cookies =
+        crate::session_expiry::extend_session_expiry_if_needed(state, &parts.headers, &session.0)
+            .await;
 
-    view_response(times, "viewChannel")
+    view_response(times, "viewChannel").map(|response| cookies.apply(response))
 }
 
 /// Port of `readMultipleChannels` (api4/channel.go:2066), reached as
@@ -3829,7 +3806,8 @@ fn require_mark_all_as_read(state: &AppState, where_: &'static str) -> Result<()
     if state
         .app
         .config()
-        .feature_flag_enable_shift_escape_to_mark_all_read
+        .feature_flags
+        .enable_shift_escape_to_mark_all_read
     {
         return Ok(());
     }

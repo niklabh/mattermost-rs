@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH dd AS (\n                SELECT userid, channelid, rootid\n                  FROM drafts\n                 WHERE createat > $1 OR (createat = $1 AND userid > $2)\n                 ORDER BY createat, userid\n                 LIMIT 100\n            )\n            DELETE FROM drafts d\n             USING dd\n             WHERE d.userid = dd.userid\n               AND d.channelid = dd.channelid\n               AND d.rootid = dd.rootid\n               AND (d.rootid IN (SELECT id FROM posts WHERE deleteat <> 0)\n                    OR NOT EXISTS (SELECT 1 FROM posts WHERE posts.id = d.rootid))\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9f08a2cf235c100100903669e1ebae9b2b34df4c71f2bfb6e69998638fc2479c"
+}

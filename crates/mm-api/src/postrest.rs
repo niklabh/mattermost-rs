@@ -179,7 +179,7 @@ pub async fn set_post_reminder(
         Ok(read) => read,
         Err(err) => return err.into_response(),
     };
-    let reminder: PostReminder = match serde_json::from_slice(&bytes) {
+    let reminder: PostReminder = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(reminder) => reminder,
         Err(err) => {
             tracing::debug!(error = %err, "reminder body did not decode");
@@ -290,7 +290,7 @@ pub async fn move_thread(
         Ok(license) => license.is_some(),
         Err(err) => return ApiError::from(err).into_response(),
     };
-    if !state.app.config().feature_flag_move_threads_enabled || !licensed {
+    if !state.app.config().feature_flags.move_threads_enabled || !licensed {
         return app_error("moveThread", "api.post.move_thread.disabled.app_error", 501)
             .into_response();
     }
@@ -315,7 +315,7 @@ pub async fn rewrite_message(
         Ok(read) => read,
         Err(err) => return err.into_response(),
     };
-    let req: RewriteRequest = match serde_json::from_slice(&bytes) {
+    let req: RewriteRequest = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(req) => req,
         Err(err) => {
             tracing::debug!(error = %err, "rewrite body did not decode");
@@ -380,7 +380,7 @@ pub async fn reveal_post(
     }
     let connection_id = header_value(headers, CONNECTION_ID_HEADER).to_owned();
 
-    if !state.app.config().feature_flag_burn_on_read {
+    if !state.app.config().feature_flags.burn_on_read {
         return app_error("revealPost", "api.post.reveal_post.disabled.app_error", 501)
             .into_response();
     }
@@ -543,7 +543,7 @@ pub async fn get_posts_for_reporting(
         Ok(read) => read,
         Err(err) => return err.into_response(),
     };
-    let req: ReportPostRequest = match serde_json::from_slice(&bytes) {
+    let req: ReportPostRequest = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(req) => req,
         Err(err) => {
             tracing::debug!(error = %err, "reporting body did not decode");
@@ -697,8 +697,10 @@ pub async fn do_post_action(
     let action_request: DoPostActionRequest = if bytes.iter().all(u8::is_ascii_whitespace) {
         DoPostActionRequest::default()
     } else {
-        match serde_json::from_slice(&bytes) {
-            Ok(req) => req,
+        // A second `Decode` must be `EOF`, which is `json.Unmarshal`'s whole-input rule; the target
+        // is a value, so `null` is the zero request.
+        match mm_model::utils::unmarshal_from_json::<Option<DoPostActionRequest>>(&bytes) {
+            Ok(req) => req.unwrap_or_default(),
             Err(err) => {
                 tracing::debug!(error = %err, "action body did not decode");
                 return ApiError::invalid_param("action_request").into_response();
@@ -772,7 +774,7 @@ pub async fn open_dialog(
         Ok(read) => read,
         Err(err) => return err.into_response(),
     };
-    let dialog: OpenDialogRequest = match serde_json::from_slice(&bytes) {
+    let dialog: OpenDialogRequest = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(dialog) => dialog,
         Err(err) => {
             tracing::debug!(error = %err, "dialog body did not decode");
@@ -857,7 +859,8 @@ pub async fn submit_dialog(
         Ok(read) => read,
         Err(err) => return err.into_response(),
     };
-    let mut submit: SubmitDialogRequest = match serde_json::from_slice(&bytes) {
+    let mut submit: SubmitDialogRequest = match mm_model::utils::decode_one_value_from_json(&bytes)
+    {
         Ok(submit) => submit,
         Err(err) => {
             tracing::debug!(error = %err, "dialog body did not decode");
@@ -890,7 +893,7 @@ pub async fn lookup_dialog(
         Ok(read) => read,
         Err(err) => return err.into_response(),
     };
-    let lookup: SubmitDialogRequest = match serde_json::from_slice(&bytes) {
+    let lookup: SubmitDialogRequest = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(lookup) => lookup,
         Err(err) => {
             tracing::debug!(error = %err, "dialog body did not decode");
@@ -920,7 +923,8 @@ pub async fn execute_dialog_action(
         Ok(read) => read,
         Err(err) => return err.into_response(),
     };
-    let req: ExecuteDialogActionRequest = match serde_json::from_slice(&bytes) {
+    let req: ExecuteDialogActionRequest = match mm_model::utils::decode_one_value_from_json(&bytes)
+    {
         Ok(req) => req,
         Err(err) => {
             tracing::debug!(error = %err, "dialog action body did not decode");

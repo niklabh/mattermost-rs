@@ -327,6 +327,10 @@ async fn every_manualtest_answer_matches_go() {
             ("MM_SERVICESETTINGS_ENABLELOCALMODE", "false"),
             ("MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD", "true"),
             ("MM_GO_UPSTREAM", &go),
+            // The oracle runs no jobs or schedulers (`scripts/go-edit-limit.sh`), and both
+            // settings are in the configuration hash `X-Version-Id` carries.
+            ("MM_JOBSETTINGS_RUNJOBS", "false"),
+            ("MM_JOBSETTINGS_RUNSCHEDULER", "false"),
         ],
     )
     .await

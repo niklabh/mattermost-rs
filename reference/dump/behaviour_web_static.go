@@ -200,6 +200,102 @@ func gzhttpAll() ([]map[string]any, error) {
 	return rows, nil
 }
 
+// gzhttpStreamCase is the API handlers' shape: a handler that may write its body in several
+// `Write` calls (`http.ServeContent` copies a file 32 KiB at a time; an encoder writes as it
+// goes), may set no Content-Type at all, and may declare a length it streams. `mm_api::gzhttp`
+// sees the body as a stream, so these rows pin what the one-write corpus above cannot: the
+// buffering up to `MinSize`, the content-type sniff, and `net/http`'s 2048-byte framing rule
+// applied to what the compressor emits across many writes.
+type gzhttpStreamCase struct {
+	Name           string `json:"name"`
+	AcceptEncoding string `json:"accept_encoding"`
+	ContentType    string `json:"content_type"` // "": the handler sets none
+	DeclaredLength int    `json:"declared_length"`
+	BodyKind       string `json:"body_kind"` // text | noise | jpeg
+	BodyLength     int    `json:"body_length"`
+	WriteSize      int    `json:"write_size"` // bytes per Write; 0: one Write
+}
+
+func gzhttpStreamCorpus() []gzhttpStreamCase {
+	const js = "application/json"
+	return []gzhttpStreamCase{
+		{"json_below_min_size", "gzip", js, 0, "text", 600, 0},
+		{"json_one_write_zstd", "gzip, deflate, br, zstd", js, 0, "text", 5000, 0},
+		{"json_many_small_writes", "gzip", js, 0, "text", 5000, 100},
+		{"json_no_accept_encoding_streamed", "", js, 0, "text", 5000, 700},
+		{"declared_file_compresses_to_a_length", "gzip", "text/plain; charset=utf-8", 50000, "text", 50000, 4096},
+		{"undeclared_stream_compresses_to_a_length", "gzip", "text/plain; charset=utf-8", 0, "text", 50000, 4096},
+		{"declared_noise_compresses_to_chunks", "gzip", "application/octet-stream", 200000, "noise", 200000, 4096},
+		{"declared_jpeg_is_plain_with_its_length", "gzip", "image/jpeg", 200000, "noise", 200000, 4096},
+		{"declared_below_min_size_streamed", "gzip", "text/plain; charset=utf-8", 800, "text", 800, 100},
+		{"undeclared_plain_stream_totals_a_length", "gzip", "image/jpeg", 0, "noise", 1500, 100},
+		{"undeclared_plain_stream_is_chunked", "gzip", "image/jpeg", 0, "noise", 5000, 700},
+		{"no_type_text_is_sniffed_and_compressed", "gzip", "", 0, "text", 5000, 0},
+		{"no_type_jpeg_is_sniffed_and_left_alone", "gzip", "", 0, "jpeg", 5000, 0},
+		{"no_type_below_min_size_is_sniffed_at_close", "gzip", "", 0, "text", 500, 0},
+		{"no_type_declared_is_sniffed_on_first_write", "gzip", "", 5000, "jpeg", 5000, 1000},
+		{"no_type_streamed_zstd", "zstd", "", 0, "text", 5000, 300},
+		{"empty_json_body", "gzip", js, 0, "text", 0, 0},
+	}
+}
+
+// noise is n deterministic, incompressible bytes: the top byte of a 64-bit LCG (Knuth's MMIX
+// constants). `mm_api::gzhttp`'s tests generate the same sequence.
+func noise(n int) []byte {
+	x := uint64(0x9E3779B97F4A7C15)
+	out := make([]byte, n)
+	for i := range out {
+		x = x*6364136223846793005 + 1442695040888963407
+		out[i] = byte(x >> 56)
+	}
+	return out
+}
+
+func streamPayload(kind string, n int) []byte {
+	switch kind {
+	case "noise":
+		return noise(n)
+	case "jpeg":
+		out := noise(n)
+		copy(out, []byte{0xFF, 0xD8, 0xFF, 0xE0})
+		return out
+	default:
+		return body(n)
+	}
+}
+
+func gzhttpStreamAll() ([]map[string]any, error) {
+	var rows []map[string]any
+	for _, c := range gzhttpStreamCorpus() {
+		c := c
+		payload := streamPayload(c.BodyKind, c.BodyLength)
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if c.ContentType != "" {
+				w.Header().Set("Content-Type", c.ContentType)
+			}
+			if c.DeclaredLength > 0 {
+				w.Header().Set("Content-Length", strconv.Itoa(c.DeclaredLength))
+			}
+			w.WriteHeader(200)
+			if c.WriteSize == 0 {
+				w.Write(payload)
+				return
+			}
+			for rest := payload; len(rest) > 0; {
+				n := min(c.WriteSize, len(rest))
+				w.Write(rest[:n])
+				rest = rest[n:]
+			}
+		})
+		resp, raw, err := serveOnce(gzhttp.GzipHandler(inner), "GET", c.AcceptEncoding)
+		if err != nil {
+			return nil, fmt.Errorf("gzhttp stream case %s: %w", c.Name, err)
+		}
+		rows = append(rows, map[string]any{"case": c, "response": record(resp, raw, payload)})
+	}
+	return rows, nil
+}
+
 func framingAll() ([]map[string]any, error) {
 	var rows []map[string]any
 	for _, n := range []int{0, 1, 26, 2047, 2048, 2049, 5000} {
@@ -296,6 +392,10 @@ func writeWebStaticBehaviourFixture(outDir string) error {
 	if err != nil {
 		return err
 	}
+	gzStream, err := gzhttpStreamAll()
+	if err != nil {
+		return err
+	}
 	framing, err := framingAll()
 	if err != nil {
 		return err
@@ -318,6 +418,7 @@ func writeWebStaticBehaviourFixture(outDir string) error {
 
 	out := map[string]any{
 		"gzhttp":               gz,
+		"gzhttp_stream":        gzStream,
 		"framing":              framing,
 		"desktop_app_version":  desktop,
 		"client_compatibility": compat,

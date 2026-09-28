@@ -84,31 +84,54 @@ pub const SCHEDULED_POST_MAX_TIME_GAP: i64 = -5000;
 /// Port of `model.ScheduledPost` (scheduled_post.go:31).
 ///
 /// `draft` stands in for Go's anonymous field. [`Deref`] reproduces the method and field
-/// promotion; `Serialize` is hand-written so the embedded keys come first. See the module docs.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-#[serde(default)]
+/// promotion; `Serialize` is hand-written so the embedded keys come first, and `Deserialize`
+/// decodes `Draft` and [`ScheduledPostOwn`] from the same object so both get Go's decoding
+/// rules ([D-1240]). See the module docs.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ScheduledPost {
     /// Go's embedded `Draft`. Its keys are inlined into this object on the wire.
-    #[serde(flatten)]
     pub draft: Draft,
-
-    #[serde(rename = "id")]
     pub id: String,
-
-    #[serde(rename = "scheduled_at")]
     pub scheduled_at: i64,
-
-    #[serde(rename = "processed_at")]
     pub processed_at: i64,
-
-    #[serde(rename = "error_code")]
     pub error_code: String,
-
-    #[serde(rename = "repeat_type")]
     pub repeat_type: String,
-
-    #[serde(rename = "repeat_timezone")]
     pub repeat_timezone: String,
+}
+
+/// [`ScheduledPost`]'s own fields — the half of the object that is not `Draft`'s.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct ScheduledPostOwn {
+    #[serde(rename = "id")]
+    id: String,
+    #[serde(rename = "scheduled_at")]
+    scheduled_at: i64,
+    #[serde(rename = "processed_at")]
+    processed_at: i64,
+    #[serde(rename = "error_code")]
+    error_code: String,
+    #[serde(rename = "repeat_type")]
+    repeat_type: String,
+    #[serde(rename = "repeat_timezone")]
+    repeat_timezone: String,
+}
+
+impl<'de> Deserialize<'de> for ScheduledPost {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let document = crate::go_decode::embedded_document(d)?;
+        let draft: Draft = crate::go_decode::embedded_part(&document)?;
+        let own: ScheduledPostOwn = crate::go_decode::embedded_part(&document)?;
+        Ok(ScheduledPost {
+            draft,
+            id: own.id,
+            scheduled_at: own.scheduled_at,
+            processed_at: own.processed_at,
+            error_code: own.error_code,
+            repeat_type: own.repeat_type,
+            repeat_timezone: own.repeat_timezone,
+        })
+    }
 }
 
 impl Deref for ScheduledPost {
@@ -539,7 +562,8 @@ mod go_parity {
         .unwrap()
     }
 
-    /// The one document Go accepts and we reject: `null` into a scalar. See [D-057].
+    /// The one document Go accepts and serde's derive alone rejects: `null` into a scalar
+    /// ([D-057]), decoded through the body decoder below.
     const NULL_SCALAR_ONLY: &str = "null_scalars";
 
     #[test]
@@ -623,13 +647,12 @@ mod go_parity {
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
             assert!(case["err"].is_null(), "{name}: Go failed to decode");
 
-            if name == NULL_SCALAR_ONLY {
-                continue;
-            }
-
             let decoded: ScheduledPost = match case["in"].as_str().unwrap() {
                 "" => ScheduledPost::default(),
-                doc => serde_json::from_str(doc).unwrap_or_else(|e| panic!("{name}: {e}")),
+                // Through the body decoder, Go's rules: the `null` row is [D-057]'s, which serde's
+                // derive alone refuses and `createSchedulePost` reads the way Go does.
+                doc => crate::utils::decode_one_from_json(doc.as_bytes())
+                    .unwrap_or_else(|e| panic!("{name}: {e}")),
             };
 
             // Byte-for-byte: this is what pins the embedded half coming first.
@@ -660,7 +683,18 @@ mod go_parity {
             );
             checked += 1;
         }
-        assert_eq!(checked, cases.len() - 1, "every case but the null one");
+        assert_eq!(checked, cases.len(), "every case, the null one included");
+        // `ScheduledPost`'s own `Deserialize` applies Go's rules ([D-1240]), so a plain
+        // `serde_json` decode of the null row agrees with Go too.
+        let null_row = cases
+            .iter()
+            .find(|c| c["name"] == NULL_SCALAR_ONLY)
+            .expect(NULL_SCALAR_ONLY);
+        let plain: ScheduledPost = serde_json::from_str(null_row["in"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            go_json_marshal(&plain).unwrap(),
+            null_row["out"].as_str().unwrap()
+        );
     }
 
     /// Rebuilds a validation case, restoring the clock-relative `scheduled_at` the fixture

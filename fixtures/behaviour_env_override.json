@@ -1,0 +1,2516 @@
+{
+    "env_override": [
+        {
+            "env": [],
+            "name": "nothing set",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS",
+                    "alpha beta"
+                ]
+            ],
+            "name": "slice splits on a space",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [
+                        "alpha",
+                        "beta"
+                    ],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS",
+                    "alpha,beta"
+                ]
+            ],
+            "name": "slice never splits on a comma",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [
+                        "alpha,beta"
+                    ],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS",
+                    ""
+                ]
+            ],
+            "name": "slice from an empty variable is one empty name",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [
+                        ""
+                    ],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS",
+                    " alpha  beta "
+                ]
+            ],
+            "name": "slice keeps empty pieces between doubled spaces",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [
+                        "",
+                        "alpha",
+                        "",
+                        "beta",
+                        ""
+                    ],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS",
+                    "alpha\tbeta"
+                ]
+            ],
+            "name": "slice does not split on a tab",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [
+                        "alpha\tbeta"
+                    ],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER",
+                    "X-Real-IP X-Forwarded-For"
+                ]
+            ],
+            "name": "proxy header list splits on a space",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": [
+                        "X-Real-IP",
+                        "X-Forwarded-For"
+                    ]
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER",
+                    ""
+                ]
+            ],
+            "name": "proxy header list from an empty variable",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": [
+                        ""
+                    ]
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES",
+                    ""
+                ]
+            ],
+            "name": "signature key files from an empty variable",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": [
+                        ""
+                    ]
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES",
+                    "/a.gpg /b.gpg"
+                ]
+            ],
+            "name": "signature key files split on a space",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": [
+                        "/a.gpg",
+                        "/b.gpg"
+                    ]
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "mm_teamsettings_experimentaldefaultchannels",
+                    "lower"
+                ]
+            ],
+            "name": "a lower-case variable is upper-cased first",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [
+                        "lower"
+                    ],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "Mm_TeamSettings_ExperimentalDefaultChannels",
+                    "mixed"
+                ]
+            ],
+            "name": "a mixed-case variable is upper-cased first",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [
+                        "mixed"
+                    ],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_SITEURL_ANYTHING",
+                    "http://suffix.example.com"
+                ]
+            ],
+            "name": "a leaf ignores leftover key parts",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "http://suffix.example.com",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS__SITEURL",
+                    "http://nope.example.com"
+                ]
+            ],
+            "name": "a doubled underscore names no field",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_SITEURL",
+                    "http://env.example.com"
+                ]
+            ],
+            "name": "the site url is a plain string",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "http://env.example.com",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
+                    "0"
+                ]
+            ],
+            "name": "bool accepts 0",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": false,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
+                    "F"
+                ]
+            ],
+            "name": "bool accepts F",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": false,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
+                    "FALSE"
+                ]
+            ],
+            "name": "bool accepts FALSE",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": false,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
+                    "no"
+                ]
+            ],
+            "name": "bool rejects no",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
+                    ""
+                ]
+            ],
+            "name": "bool rejects an empty value",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
+                    "false "
+                ]
+            ],
+            "name": "bool rejects a padded value",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
+                    "fAlSe"
+                ]
+            ],
+            "name": "bool rejects fAlSe",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    "42"
+                ]
+            ],
+            "name": "int parses",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": 42,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    "+42"
+                ]
+            ],
+            "name": "int accepts a plus sign",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": 42,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    "-3"
+                ]
+            ],
+            "name": "int accepts a minus sign",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -3,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    "0x10"
+                ]
+            ],
+            "name": "int rejects hex",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    "1_000"
+                ]
+            ],
+            "name": "int rejects an underscore",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    " 42"
+                ]
+            ],
+            "name": "int rejects a padded value",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    "4.0"
+                ]
+            ],
+            "name": "int rejects a float",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    ""
+                ]
+            ],
+            "name": "int rejects an empty value",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    "9223372036854775808"
+                ]
+            ],
+            "name": "int rejects an overflow",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_TEAMSETTINGS_MAXCHANNELSPERTEAM",
+                    "5000"
+                ]
+            ],
+            "name": "int64 parses",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 5000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_TEAMSETTINGS_MAXCHANNELSPERTEAM",
+                    "9223372036854775807"
+                ]
+            ],
+            "name": "int64 takes the maximum",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 9223372036854775807
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_TEAMSETTINGS_MAXCHANNELSPERTEAM",
+                    "9223372036854775808"
+                ]
+            ],
+            "name": "int64 rejects an overflow",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":{\"Enable\":true}}"
+                ]
+            ],
+            "name": "states replace the whole map",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "x": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":{\"enable\":true},\"y\":{\"ENABLE\":true}}"
+                ]
+            ],
+            "name": "states match the field name case-insensitively",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "x": {
+                            "Enable": true
+                        },
+                        "y": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":null,\"y\":{\"Enable\":true}}"
+                ]
+            ],
+            "name": "states keep a null entry",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "x": null,
+                        "y": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{}"
+                ]
+            ],
+            "name": "states: an empty object",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {},
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "null"
+                ]
+            ],
+            "name": "states: a null map",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": null,
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":{\"Enable\":null}}"
+                ]
+            ],
+            "name": "states: a null Enable is false",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "x": {
+                            "Enable": false
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":{\"Enable\":true,\"Other\":[1]}}"
+                ]
+            ],
+            "name": "states: unknown keys are ignored",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "x": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":{\"Enable\":true},\"x\":{\"Enable\":false}}"
+                ]
+            ],
+            "name": "states: the last duplicate wins",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "x": {
+                            "Enable": false
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":{\"Enable\":true,\"enable\":false}}"
+                ]
+            ],
+            "name": "states: the last fold-equal key wins",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "x": {
+                            "Enable": false
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":{\"Enable\":true,\"enable\":null}}"
+                ]
+            ],
+            "name": "states: a later null Enable keeps the earlier value",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "x": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"\":{\"Enable\":true}}"
+                ]
+            ],
+            "name": "states: an empty id is kept",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":{\"Enable\":\"true\"},\"y\":{\"Enable\":true}}"
+                ]
+            ],
+            "name": "states: a string Enable is an error",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":1}"
+                ]
+            ],
+            "name": "states: a number entry is an error",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "[{\"Enable\":true}]"
+                ]
+            ],
+            "name": "states: an array is an error",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "x"
+                ]
+            ],
+            "name": "states: not json is an error",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    "{\"x\":{\"Enable\":true}} {}"
+                ]
+            ],
+            "name": "states: trailing data is an error",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    ""
+                ]
+            ],
+            "name": "states: an empty value is an error",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINSTATES",
+                    " {\"x\":{\"Enable\":true}}\n"
+                ]
+            ],
+            "name": "states: surrounding whitespace is fine",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "x": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINS",
+                    "{\"p\":{\"k\":\"v\",\"n\":1.5}}"
+                ]
+            ],
+            "name": "plugins replace the whole map",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {
+                        "p": {
+                            "k": "v",
+                            "n": 1.5
+                        }
+                    },
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINS",
+                    "{\"p\":null}"
+                ]
+            ],
+            "name": "plugins keep a null entry",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {
+                        "p": null
+                    },
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINS",
+                    "{\"p\":1}"
+                ]
+            ],
+            "name": "plugins: a scalar entry is an error",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_PLUGINSETTINGS_PLUGINS_ANYTHING",
+                    "{\"q\":{}}"
+                ]
+            ],
+            "name": "plugins: a leftover key part is ignored",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {
+                        "q": {}
+                    },
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_FEATUREFLAGS_BURNONREAD",
+                    "false"
+                ]
+            ],
+            "name": "a bool feature flag",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": false,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_FEATUREFLAGS_BURNONREAD",
+                    "on"
+                ]
+            ],
+            "name": "a bool feature flag rejects on",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_FEATUREFLAGS_TESTFEATURE",
+                    "some value"
+                ]
+            ],
+            "name": "a string feature flag",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "some value"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": true,
+                    "GoroutineHealthThreshold": -1,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        },
+        {
+            "env": [
+                [
+                    "MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS",
+                    "a b"
+                ],
+                [
+                    "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
+                    "f"
+                ],
+                [
+                    "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                    "7"
+                ]
+            ],
+            "name": "independent variables compose",
+            "want": {
+                "FeatureFlags": {
+                    "BurnOnRead": true,
+                    "TestFeature": "off"
+                },
+                "PluginSettings": {
+                    "PluginStates": {
+                        "com.mattermost.calls": {
+                            "Enable": true
+                        },
+                        "com.mattermost.nps": {
+                            "Enable": true
+                        },
+                        "mattermost-ai": {
+                            "Enable": true
+                        },
+                        "playbooks": {
+                            "Enable": true
+                        }
+                    },
+                    "Plugins": {},
+                    "SignaturePublicKeyFiles": []
+                },
+                "ServiceSettings": {
+                    "EnableCustomEmoji": false,
+                    "GoroutineHealthThreshold": 7,
+                    "SiteURL": "",
+                    "TrustedProxyIPHeader": []
+                },
+                "TeamSettings": {
+                    "ExperimentalDefaultChannels": [
+                        "a",
+                        "b"
+                    ],
+                    "MaxChannelsPerTeam": 2000
+                }
+            }
+        }
+    ]
+}

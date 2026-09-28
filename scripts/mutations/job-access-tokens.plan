@@ -1,0 +1,15 @@
+# job-access-tokens.plan — D-804 cleanup_expired_access_tokens and notify_expiring_access_tokens, 2026-09-25.
+# The Rust half runs in-process (do_job with the stored config and the stack's i18n).
+inactive-deleted	crates/mm-store/src/user_access_token_store.rs	               AND expiresat <= $1\n               AND isactive = true\n             ORDER BY expiresat ASC	               AND expiresat <= $1\n             ORDER BY expiresat ASC	api	cleanup_expired_access_tokens_runs_like_go
+never-expiring-deleted	crates/mm-store/src/user_access_token_store.rs	             WHERE expiresat > 0\n               AND expiresat <= $1	             WHERE expiresat >= 0\n               AND expiresat <= $1	api	cleanup_expired_access_tokens_runs_like_go
+sessions-kept	crates/mm-store/src/user_access_token_store.rs	WHERE token IN (SELECT token FROM useraccesstokens WHERE id = ANY($1))",	WHERE token IN (SELECT token FROM useraccesstokens WHERE id = ANY($1)) AND false",	api	cleanup_expired_access_tokens_runs_like_go
+owner-not-told	crates/mm-app/src/access_token_expiry.rs	            self.notify_expired_access_tokens_deleted(&expired).await;\n	            let _ = &expired;\n	api	cleanup_expired_access_tokens_runs_like_go
+deactivated-warned	crates/mm-store/src/user_access_token_store.rs	               AND users.deleteat = 0\n	               AND true\n	api	notify_expiring_access_tokens_runs_like_go
+final-as-days	crates/mm-app/src/access_token_expiry.rs	if bucket <= 1 {	if bucket < 1 {	api	notify_expiring_access_tokens_runs_like_go
+not-stamped	crates/mm-app/src/access_token_expiry.rs	.update_last_notified_at(&token.id, now)	.update_last_notified_at(&token.id, 0)	api	notify_expiring_access_tokens_runs_like_go
+unnamed-kept-empty	crates/mm-app/src/access_token_expiry.rs	if token.description.is_empty() {	if false {	api	notify_expiring_access_tokens_runs_like_go
+bucket-boundary-exclusive	crates/mm-app/src/access_token_expiry.rs	remaining <= days * 	remaining < days * 	unit	access_token_expiry
+warned-boundary-exclusive	crates/mm-app/src/access_token_expiry.rs	at >= token.expires_at	at > token.expires_at	unit	access_token_expiry
+# no-op controls
+control-annotate-now	crates/mm-app/src/access_token_expiry.rs	let now = mm_model::utils::get_millis();	let now: i64 = mm_model::utils::get_millis();	api	notify_expiring_access_tokens_runs_like_go
+control-to-owned	crates/mm-app/src/access_token_expiry.rs	let ids: Vec<String> = expired.iter().map(|t| t.id.clone()).collect();	let ids: Vec<String> = expired.iter().map(|t| t.id.to_owned()).collect();	api	cleanup_expired_access_tokens_runs_like_go

@@ -785,10 +785,11 @@ impl App {
             Some(omit.clone()),
             "",
         );
-        admin_message.add(
-            "user",
-            serde_json::to_value(&admin_copy).unwrap_or(serde_json::Value::Null),
-        );
+        if let Err(err) = admin_message.add_struct("user", &admin_copy) {
+            // Go marshals at write time and skips the frame; nothing is worth publishing.
+            tracing::warn!(error = %err, "Error in encoding websocket message");
+            return;
+        }
         let admin_message = {
             let mut broadcast = admin_message.get_broadcast().cloned().unwrap_or_default();
             broadcast.contains_sensitive_data = true;
@@ -806,10 +807,10 @@ impl App {
             Some(omit),
             "",
         );
-        message.add(
-            "user",
-            serde_json::to_value(&member_copy).unwrap_or(serde_json::Value::Null),
-        );
+        if let Err(err) = message.add_struct("user", &member_copy) {
+            tracing::warn!(error = %err, "Error in encoding websocket message");
+            return;
+        }
         let message = {
             let mut broadcast = message.get_broadcast().cloned().unwrap_or_default();
             broadcast.contains_sanitized_data = true;
@@ -830,10 +831,10 @@ impl App {
             None,
             "",
         );
-        own_message.add(
-            "user",
-            serde_json::to_value(&own_copy).unwrap_or(serde_json::Value::Null),
-        );
+        if let Err(err) = own_message.add_struct("user", &own_copy) {
+            tracing::warn!(error = %err, "Error in encoding websocket message");
+            return;
+        }
         self.publish(own_message).await;
     }
 
@@ -892,9 +893,7 @@ impl App {
     ///
     /// # Not reproduced
     ///
-    /// `UpdateDefaultProfileImage` on a
-    /// username change with no custom picture — needs the image pipeline; the consequence is a
-    /// stale initials avatar, recorded rather than guessed at. `InvalidateCacheForUser`,
+    /// `InvalidateCacheForUser`,
     /// `onUserProfileChange` and the auto-translation locale cache are all in-process caches this
     /// server does not have.
     #[tracing::instrument(skip_all, fields(user_id = %user.id, notify = send_notifications))]
@@ -983,7 +982,22 @@ impl App {
             .await
             .map_err(|err| update_user_error(err, &user.id))?;
 
-        let new_user = update.new;
+        let mut new_user = update.new;
+
+        // "When a username is updated and the profile is still using a default profile picture,
+        // generate a new one based on their username" — `LastPictureUpdate <= 0` is a generated
+        // (negative) or never-set (zero) picture, never an upload. Both failures only logged.
+        if new_user.username != update.old.username && new_user.last_picture_update <= 0 {
+            if let Err(err) = self.update_default_profile_image(&new_user).await {
+                tracing::warn!(error = ?err, "Error with updating default profile image");
+            }
+            match self.get_user(&user.id).await {
+                Ok(fresh) => new_user = fresh,
+                Err(err) => {
+                    tracing::warn!(error = %err, "Error when retrieving user after profile picture update, avatar may fail to update automatically on client applications.");
+                }
+            }
+        }
 
         if send_notifications {
             // `newEmail != ""` is Go's own signal that the address changed even though the row
@@ -1038,7 +1052,6 @@ impl App {
         // `newUser.Sanitize(map[string]bool{})` — an empty map, not nil: every option lookup is
         // false, so this is the credential scrub only. The store already did it; Go does it
         // again and so does this.
-        let mut new_user = new_user;
         new_user.sanitize(&std::collections::HashMap::new());
         Ok(new_user)
     }
@@ -1181,11 +1194,14 @@ fn get_user_error(err: StoreError) -> Box<AppError> {
             String::new(),
             404,
         ),
+        // `app.user.get_by_username.app_error`, not `app.user.get.app_error` (app/user.go:551):
+        // `GetUser` borrows the by-username id for every failure but a miss. Unreachable until
+        // [D-331]'s audit found a row that fails `SqlUserStore.Get` — a NULL `timezone`.
         other => {
             tracing::error!(error = %other, "user lookup failed");
             AppError::boxed(
                 "GetUser",
-                "app.user.get.app_error",
+                "app.user.get_by_username.app_error",
                 None,
                 String::new(),
                 500,
@@ -1268,6 +1284,10 @@ impl App {
     /// every account on a stock server. A restricted caller — a guest, in practice — sees a user
     /// who is a current member of one of its permitted teams, **or** a member of one of its
     /// channels; the team test runs first and each list is skipped when empty.
+    ///
+    /// A **stock guest's team list is always empty** — `team_guest` holds only `view_team` — so
+    /// the team half runs only where `team_user`/`team_guest` permissions were edited; the parity
+    /// suite (`parity::view_restricted_creates`) reaches the channel half alone.
     pub async fn user_can_see_other_user(
         &self,
         user_id: &str,
@@ -1337,51 +1357,55 @@ pub(crate) fn profile_image_path(user_id: &str) -> String {
 }
 
 impl App {
-    /// Port of `Server.GetProfileImage` (app/server.go:1885), **narrowed to its one reproducible
-    /// branch**.
+    /// Port of `Server.GetProfileImage` (app/server.go:1885): the stored picture, or the generated
+    /// default, and whether the read failed.
     ///
-    /// Go's function has three outcomes and only the middle one is ours:
-    ///
-    /// | condition | Go's answer | here |
+    /// | condition | answer | `read_failed` |
     /// |---|---|---|
-    /// | `FileSettings.DriverName == ""` | a generated default avatar | forwarded |
-    /// | the stored `users/<id>/profile.png` reads | those bytes, `readFailed = false` | **served** |
-    /// | the read fails | a generated default avatar, `readFailed = true`, and a *write* when `LastPictureUpdate == 0` | forwarded |
+    /// | `FileSettings.DriverName == ""` | the generated default avatar | `false` |
+    /// | `users/<id>/profile.png` reads | those bytes | `false` |
+    /// | the read fails | the generated default avatar, **written** there first when `LastPictureUpdate == 0` | `true` |
     ///
-    /// # Why the default avatar is not ported
-    ///
-    /// `users.GetDefaultProfileImage` rasterises the user's initials with a TTF font through
-    /// `golang/freetype`, and the answer is a PNG whose every pixel depends on that rasteriser's
-    /// hinting and anti-aliasing. There is no way to match it byte for byte short of embedding
-    /// the same font *and* the same rasteriser, and a near-match is worse than a forward: the
-    /// image is cached by the client for a day under an etag we would have minted.
-    ///
-    /// This is also why `GET /users/{user_id}/image/default`, which is *only* that path, is not
-    /// migrated at all. See [D-204].
-    ///
-    /// In practice the served branch is the common one: every user gets a `profile.png` written
-    /// at account creation by `SetDefaultProfileImage`, so the fallback fires for accounts
-    /// created before that behaviour or whose file has been removed from under the server.
+    /// The default avatar is [`App::get_default_profile_image`] (`gofont`, byte-exact — D-204).
+    /// A storage driver this port does not implement is the one thing still answered with
+    /// [`crate::post::PrepareError::Unreproducible`], by the file layer, before anything is read.
     pub async fn get_profile_image(
         &self,
-        user_id: &str,
-    ) -> Result<Vec<u8>, crate::post::PrepareError> {
+        user: &mm_model::user::User,
+    ) -> Result<(Vec<u8>, bool), crate::post::PrepareError> {
         use crate::post::PrepareError;
 
         if self.config().file_driver_name.is_empty() {
-            return Err(PrepareError::Unreproducible(
-                "a driverless configuration serves a generated default avatar",
-            ));
+            return Ok((self.get_default_profile_image(user).await?, false));
         }
 
-        self.read_file(&profile_image_path(user_id))
-            .await
-            .map_err(|err| match err {
-                PrepareError::App(_) => PrepareError::Unreproducible(
-                    "no stored profile image, so Go generates a default avatar and may write it",
-                ),
-                unreproducible => unreproducible,
-            })
+        let path = profile_image_path(&user.id);
+        match self.read_file(&path).await {
+            Ok(data) => Ok((data, false)),
+            Err(PrepareError::App(_)) => {
+                let image = self.get_default_profile_image(user).await?;
+                if user.last_picture_update == 0 {
+                    self.write_file(&image, &path).await?;
+                }
+                Ok((image, true))
+            }
+            Err(unreproducible) => Err(unreproducible),
+        }
+    }
+
+    /// Port of `App.SetDefaultProfileImage` (app/user.go:1047): the generated avatar written by
+    /// [`App::update_default_profile_image`], then — unless re-reading the user fails, which is
+    /// logged and still a success — one `user_updated` carrying the sanitised profile.
+    pub async fn set_default_profile_image(
+        &self,
+        user: &mm_model::user::User,
+    ) -> Result<(), crate::post::PrepareError> {
+        if let Err(err) = self.update_default_profile_image(user).await {
+            tracing::error!(user_id = %user.id, error = ?err, "Failed to update default profile image for user");
+            return Err(err);
+        }
+        self.invalidate_user_cache_and_publish(&user.id).await;
+        Ok(())
     }
 
     /// Port of `App.IsProfileImageLockedForUser` (app/user.go:1465).
@@ -1590,7 +1614,7 @@ mod tests {
             source: sqlx::Error::PoolClosed,
         });
         assert_eq!(err.status_code, 500);
-        assert_eq!(err.id, "app.user.get.app_error");
+        assert_eq!(err.id, "app.user.get_by_username.app_error");
     }
 
     /// `GetUsersByIds` has a single error branch with its own id — not `GetUser`'s pair and

@@ -90,9 +90,8 @@ pub struct PingParams {
 ///
 /// # `TestFeatureFlag` is a key that appears, not a value that changes
 ///
-/// Present only when `FeatureFlags.TestFeature != "off"` (system.go:346). Go strips the
-/// `FeatureFlags` section before persisting the config, so the environment is its only source and
-/// the default is `"off"` — see [`mm_app::config::Config::feature_flag_test_feature`].
+/// Present only when `FeatureFlags.TestFeature != "off"` (system.go:346). The default is
+/// `"off"` and on this stack only the environment moves it — see [`mm_app::config::Config::feature_flags`].
 ///
 /// # Wire format: `model.ToJSON`, so no trailing newline, and sorted keys
 ///
@@ -158,10 +157,10 @@ pub(crate) async fn ping_answer(
         "IosMinVersion".to_owned(),
         Value::from(config.ios_min_version.as_str()),
     );
-    if config.feature_flag_test_feature != "off" {
+    if config.feature_flags.test_feature != "off" {
         body.insert(
             "TestFeatureFlag".to_owned(),
-            Value::from(config.feature_flag_test_feature.as_str()),
+            Value::from(config.feature_flags.test_feature.as_str()),
         );
     }
     // `if deviceID := r.FormValue("device_id"); deviceID != ""` — an **empty** value is not a
@@ -399,7 +398,11 @@ pub async fn complete_onboarding(
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .unwrap_or_default();
-    let parsed = serde_json::from_slice::<Value>(&bytes);
+    // `CompleteOnboardingRequestFromReader` is `Decode` into a `*CompleteOnboardingRequest`: any
+    // decode error is the 400, and `null` is the nil pointer the handler then dereferences.
+    let parsed = mm_model::utils::decode_one_from_json::<
+        Option<mm_model::onboarding::CompleteOnboardingRequest>,
+    >(&bytes);
     let forward = |state: AppState, why: &'static str| async move {
         tracing::Span::current().record("forwarded", true);
         tracing::debug!(reason = why, "handing the onboarding completion to Go");
@@ -407,14 +410,9 @@ pub async fn complete_onboarding(
         proxy::forward_to_go(State(state), request).await
     };
     let onboarding = match parsed {
-        Ok(Value::Null) => return forward(state, "a nil request Go dereferences").await,
-        Ok(value @ Value::Object(_)) => {
-            match serde_json::from_value::<mm_model::onboarding::CompleteOnboardingRequest>(value) {
-                Ok(onboarding) => onboarding,
-                Err(_) => return forward(state, "a body Go decodes partially").await,
-            }
-        }
-        _ => {
+        Ok(None) => return forward(state, "a nil request Go dereferences").await,
+        Ok(Some(onboarding)) => onboarding,
+        Err(_) => {
             return ApiError::from(AppError::new(
                 "completeOnboarding",
                 "app.system.complete_onboarding_request.app_error",
@@ -463,7 +461,10 @@ pub async fn complete_onboarding(
 pub async fn get_onboarding(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
+    // `c.LogAudit("attempt")` before the permission check, on a `GET`; no `"success"` row.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
     if !state
         .app
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)

@@ -1,0 +1,15 @@
+# D-401 persistent-notification arm, D-551, the post_persistent_notifications job.
+author-not-exempt	crates/mm-app/src/post_persistent_notification.rs	        if logged_in_user_id == post.user_id {	        if false && logged_in_user_id == post.user_id {	api	persistent_notifications
+not-mentioned-resolves	crates/mm-app/src/post_persistent_notification.rs	        if !mentioned.load(std::sync::atomic::Ordering::Relaxed) {	        if mentioned.load(std::sync::atomic::Ordering::Relaxed) {	api	persistent_notifications
+ack-never-resolves	crates/mm-app/src/post_acknowledgement.rs	        self.resolve_persistent_notification(&post, user_id).await?;	        let _ = user_id;	api	persistent_notifications
+reply-never-resolves	crates/mm-app/src/post_create.rs	                self.resolve_persistent_notification(root, &prepared.user_id)	                self.resolve_persistent_notification(root, &root.user_id)	api	persistent_notifications
+min-recipients-off	crates/mm-app/src/post_persistent_notification.rs	                if count == 0 {	                if count == 1000 {	api	persistent_notifications
+max-recipients-inclusive	crates/mm-app/src/post_persistent_notification.rs	                if count > max_recipients {	                if count >= max_recipients {	api	persistent_notifications
+dnd-notified	crates/mm-app/src/post_persistent_notification.rs	                if status.status != STATUS_DND && status.status != STATUS_OUT_OF_OFFICE {	                if status.status != STATUS_OUT_OF_OFFICE {	api	persistent_notifications
+archived-channel-visited	crates/mm-app/src/post_persistent_notification.rs	            .filter(|channel| channel.delete_at == 0)	            .filter(|channel| channel.delete_at >= 0)	api	persistent_notifications
+interval-in-seconds	crates/mm-app/src/post_persistent_notification.rs	        let max_time = get_millis() - settings.interval_minutes * 60 * 1000;	        let max_time = get_millis() - settings.interval_minutes * 60;	api	persistent_notifications
+expired-kept	crates/mm-app/src/post_persistent_notification.rs	            .delete_expired_persistent_notifications(max_count)	            .delete_expired_persistent_notifications(i16::MAX)	api	persistent_notifications
+push-never	crates/mm-app/src/post_persistent_notification.rs	                if Self::should_send_push_notification(user, props, true, &status, post, is_gm) {	                if false && Self::should_send_push_notification(user, props, true, &status, post, is_gm) {	api	persistent_notifications
+# Controls: must survive.
+control-gm-flipped-operands	crates/mm-app/src/post_persistent_notification.rs	            let is_gm = channel.channel_type == CHANNEL_TYPE_GROUP;	            let is_gm = CHANNEL_TYPE_GROUP == channel.channel_type;	api	persistent_notifications
+control-clone-to-owned	crates/mm-app/src/post_persistent_notification.rs	                serde_json::Value::String(channel.name.clone()),	                serde_json::Value::String(channel.name.to_string()),	api	persistent_notifications

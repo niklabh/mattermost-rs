@@ -1,0 +1,25 @@
+[package]
+name = "gopq"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+# A port of github.com/lib/pq's driver connection (MIT; LICENSE). It contains no Mattermost code and
+# must never depend on an `mm-*` crate.
+license = "MIT"
+repository.workspace = true
+description = "Byte-exact port of lib/pq's database/sql/driver connection: what a Go program's Postgres driver sends and answers"
+keywords = ["postgres", "postgresql", "driver", "go", "libpq"]
+categories = ["database"]
+readme = "README.md"
+include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE*"]
+
+[dependencies]
+tokio.workspace = true
+thiserror.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+pbkdf2.workspace = true
+base64.workspace = true
+rand.workspace = true
+md-5.workspace = true
+form_urlencoded.workspace = true

@@ -34,10 +34,10 @@
 //!
 //! Every branch that needs machinery this server does not have is refused as
 //! [`MemberWrite::Forward`] and the handler hands the whole request to Go, so the answer is Go's
-//! own. The reasons are enumerated on each function; the recurring ones are group-constrained
-//! channels (the group store's `FilterNonGroupChannelMembers`), attribute-based access control,
-//! shared channels, guest sessions, `post_root_id` (a `ThreadMemberships` write) and a channel
-//! carrying a `default_category_name` (a `SidebarChannels` write).
+//! own. The reasons are enumerated on each function; the recurring ones are attribute-based
+//! access control, shared channels (on removal only while Go's shared-channel service runs),
+//! guest sessions, `post_root_id` (a `ThreadMemberships` write) and a channel carrying a
+//! `default_category_name` (a `SidebarChannels` write).
 
 use mm_model::channel::Channel;
 use mm_model::channel_member::{ChannelMember, get_default_channel_notify_props};
@@ -148,6 +148,28 @@ pub struct ChannelMemberOpts {
     pub user_requestor_id: String,
     pub post_root_id: String,
     pub skip_team_member_integrity_check: bool,
+}
+
+/// `api.channel.add_members.user_denied` at 400, naming the users no linked group vouches for —
+/// the refusal `addUserToChannel`, `addChannelMember` and `localAddChannelMember` share, each
+/// with its own `where`.
+pub fn user_denied(where_: &str, non_members: Vec<String>) -> Box<AppError> {
+    let params = std::collections::HashMap::from([(
+        "UserIDs".to_owned(),
+        serde_json::Value::Array(
+            non_members
+                .into_iter()
+                .map(serde_json::Value::String)
+                .collect(),
+        ),
+    )]);
+    AppError::boxed(
+        where_,
+        "api.channel.add_members.user_denied",
+        Some(params),
+        String::new(),
+        400,
+    )
 }
 
 impl App {
@@ -563,6 +585,55 @@ impl App {
         self.publish(event).await;
     }
 
+    /// Port of `app.App.setChannelsMuted` (app/channel.go:4032) — how muting a sidebar category
+    /// reaches the channels in it.
+    ///
+    /// Reads `user_id`'s memberships in `channel_ids`, keeps only those whose muted state differs
+    /// from `muted` ([`members_to_mute`]), writes them in one
+    /// [`update_multiple_members`](mm_store::channel_store::update_multiple_members) and publishes
+    /// one `channel_member_updated` per written member, addressed to the user alone.
+    ///
+    /// - **Nothing to change is `Ok(vec![])` with no write and no event** — Go's `(nil, nil)`, so
+    ///   `LastUpdateAt` does not move on a member already in the asked state.
+    /// - A channel id the user is not a member of is silently absent from the read, not an error.
+    /// - The write is **every column**, not a notify-props merge: the member read here is written
+    ///   back whole with `mark_unread` flipped.
+    /// - Go also calls `invalidateCacheForChannelMembersNotifyProps` per channel. This server has no
+    ///   notify-props cache to invalidate; a Go process sharing the database keeps its own until
+    ///   its TTL, as it does for every other member write made here.
+    #[tracing::instrument(skip(self, channel_ids), fields(user_id = %user_id, muted, asked = channel_ids.len()))]
+    pub async fn set_channels_muted(
+        &self,
+        channel_ids: &[String],
+        user_id: &str,
+        muted: bool,
+    ) -> AppResult<Vec<ChannelMember>> {
+        let members = self
+            .store()
+            .channel()
+            .get_members_by_channel_ids(channel_ids, user_id)
+            .await
+            .map_err(set_channels_muted_read_error)?;
+
+        let to_update = members_to_mute(members, muted);
+        if to_update.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let updated = self
+            .store()
+            .channel()
+            .update_multiple_members(to_update)
+            .await
+            .map_err(set_channels_muted_write_error)?;
+
+        for member in &updated {
+            self.send_update_channel_member_event(member).await;
+        }
+
+        Ok(updated)
+    }
+
     /// Port of `app.App.AddChannelMember` (app/channel.go:2004).
     ///
     /// # An existing member is returned untouched, before anything else
@@ -689,9 +760,14 @@ impl App {
     /// for that user. Both carry `user_id` and `team_id` in `data`. Publishing only the first
     /// leaves the joining client waiting for an event it never gets.
     ///
+    /// # A group-constrained channel admits only whom its groups vouch for
+    ///
+    /// After the already-a-member shortcut, `FilterNonGroupChannelMembers` on the one user: a user
+    /// in no linked group (and not a bot) is 400 `api.channel.add_members.user_denied`, and a
+    /// failure of the filter itself is a 500 `api.channel.add_user_to_channel.type.app_error`.
+    ///
     /// # What is forwarded
     ///
-    /// - a **group-constrained** channel (`FilterNonGroupChannelMembers`),
     /// - a **private** channel under attribute-based access control,
     /// - a **shared** channel (`NotifyMembershipChanged`),
     /// - a channel with a **`default_category_name`** (`addChannelToDefaultCategory` writes
@@ -837,10 +913,25 @@ impl App {
             }
         }
 
+        // `FilterNonGroupChannelMembers` on the one user: a user no linked group vouches for is
+        // refused, and either failure of the filter is this function's own 500.
         if channel.is_group_constrained() {
-            return Ok(MemberWrite::Forward(
-                "FilterNonGroupChannelMembers needs the group syncable store",
-            ));
+            let non_members = self
+                .filter_non_group_channel_members(std::slice::from_ref(&user.id), channel)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "the group filter failed");
+                    AppError::boxed(
+                        "addUserToChannel",
+                        "api.channel.add_user_to_channel.type.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                })?;
+            if !non_members.is_empty() {
+                return Err(user_denied("addUserToChannel", non_members));
+            }
         }
 
         if channel.channel_type == mm_model::channel::CHANNEL_TYPE_PRIVATE
@@ -939,14 +1030,33 @@ impl App {
         Ok(MemberWrite::Done(saved))
     }
 
-    /// Port of `app.App.RemoveUserFromChannel` (app/channel.go:3113) and the
-    /// `removeUserFromChannel` (:2999) it wraps.
+    /// Port of the inner `app.App.removeUserFromChannel` (app/channel.go:2999): everything
+    /// [`App::remove_user_from_channel`] does **except** the leave or removal post — the
+    /// membership, the history row, a guest's team eviction, the two `user_removed` events.
+    /// Called on its own by the team-membership sweep a channel move runs
+    /// (`RemoveUsersFromChannelNotMemberOfTeam`), which is why a member swept off a moved channel
+    /// gets no "removed" post. Returns the user it loaded so the wrapper can write that post
+    /// without a second read.
     ///
     /// # Town Square is not leavable, unless you are a guest
     ///
     /// `channel.Name == "town-square"` and the user is not a guest → `api.channel.remove.default`
     /// at 400. A guest *may* be removed from the default channel, because that is how a guest
     /// leaves a team.
+    ///
+    /// # A group-constrained channel refuses a member its groups still vouch for
+    ///
+    /// Somebody else removing a non-bot from a group-constrained channel runs
+    /// [`App::filter_non_group_channel_members`] on that one user; an **empty** answer — a linked
+    /// group still holds them — is 400 `api.channel.remove_members.denied`. The REST routes refuse
+    /// the same case earlier with their own id, so this branch is reached by a channel move's
+    /// `force` sweep.
+    ///
+    /// # A guest's last channel on the team takes them off the team
+    ///
+    /// After the membership is gone, a guest with no other channel on the team (space channels
+    /// counted separately, since `GetChannelMembersForUser` cannot see them) is removed from it:
+    /// see [`App::remove_guest_without_channels_from_team`].
     ///
     /// # Two `user_removed` events with **different** payload keys
     ///
@@ -957,16 +1067,12 @@ impl App {
     ///
     /// # What is forwarded
     ///
-    /// - a **guest** being removed, whose last channel membership evicts them from the team
-    ///   (`teamService.RemoveTeamMember`, a `TeamMembers` write plus its own posts and events),
-    /// - a **group-constrained** channel when somebody else is doing the removing,
-    /// - a **shared** channel.
-    /// Port of the inner `app.App.removeUserFromChannel` (app/channel.go:2999): everything
-    /// [`App::remove_user_from_channel`] does **except** the leave or removal post — the
-    /// membership, the history row, the two `user_removed` events. Called on its own by the
-    /// team-membership sweep a channel move runs (`RemoveUsersFromChannelNotMemberOfTeam`),
-    /// which is why a member swept off a moved channel gets no "removed" post. Returns the user
-    /// it loaded so the wrapper can write that post without a second read.
+    /// Only a **shared** channel while Go's shared-channel sync service is running (see
+    /// [`App::shared_channel_service_running`]): `NotifyMembershipChanged` queues a sync task in
+    /// that service, inside the Go process, and nothing here can reach it. Decided before any
+    /// write, so Go does the whole removal. With the service off — every unlicensed server, and
+    /// a licensed one without `EnableSharedChannels` — Go's `if scs != nil` skips the call and a
+    /// shared channel is removed here like any other ([D-1170]).
     #[tracing::instrument(skip(self, channel), fields(channel_id = %channel.id, user_id = %user_id_to_remove))]
     pub(crate) async fn remove_user_from_channel_inner(
         &self,
@@ -997,22 +1103,37 @@ impl App {
             ));
         }
 
+        // Only somebody else's removal is screened, and a bot never is: leaving a group-synced
+        // channel yourself is always allowed. The one user asked about is refused when the
+        // filter finds **no** non-member — that is, when a linked group still vouches for them —
+        // and the params carry that empty list, so Go's sentence ends in a literal `[]`.
         if channel.is_group_constrained() && user_id_to_remove != remover_user_id && !user.is_bot {
-            return Ok(MemberWrite::Forward(
-                "FilterNonGroupChannelMembers needs the group syncable store",
-            ));
-        }
-
-        if is_guest {
-            return Ok(MemberWrite::Forward(
-                "a guest's last channel evicts them from the team, which is a TeamMembers write",
-            ));
-        }
-
-        if channel.is_shared() {
-            return Ok(MemberWrite::Forward(
-                "a shared channel's membership change has to reach the remote cluster",
-            ));
+            let non_members = self
+                .filter_non_group_channel_members(&[user_id_to_remove.to_owned()], channel)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "the group filter failed");
+                    AppError::boxed(
+                        "removeUserFromChannel",
+                        "api.channel.remove_user_from_channel.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                })?;
+            if non_members.is_empty() {
+                let params = std::collections::HashMap::from([(
+                    "UserIDs".to_owned(),
+                    serde_json::Value::Array(Vec::new()),
+                )]);
+                return Err(AppError::boxed(
+                    "removeUserFromChannel",
+                    "api.channel.remove_members.denied",
+                    Some(params),
+                    String::new(),
+                    400,
+                ));
+            }
         }
 
         // Go loads the member here only to hand it to the `UserHasLeftChannel` plugin hook, but
@@ -1022,6 +1143,27 @@ impl App {
         let member = self
             .get_channel_member(&channel.id, user_id_to_remove)
             .await?;
+
+        // The last thing Go does is `NotifyMembershipChanged`; with the service running that is
+        // Go's own state, so the whole removal is handed over here, before the first write. A
+        // licence that cannot be read is handed over too: Go holds its licence in memory and
+        // would not fail on it.
+        if channel.is_shared() {
+            match self.shared_channel_service_running().await {
+                Ok(false) => {}
+                Ok(true) => {
+                    return Ok(MemberWrite::Forward(
+                        "NotifyMembershipChanged queues a sync task on Go's shared-channel service",
+                    ));
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "the licence could not be read; Go decides");
+                    return Ok(MemberWrite::Forward(
+                        "whether the shared-channel service runs needs the licence",
+                    ));
+                }
+            }
+        }
 
         self.remove_channel_membership(user_id_to_remove, &channel.id)
             .await?;
@@ -1040,6 +1182,16 @@ impl App {
                     500,
                 )
             })?;
+
+        if is_guest {
+            self.remove_guest_without_channels_from_team(
+                &channel.team_id,
+                user_id_to_remove,
+                remover_user_id,
+                hook_ctx,
+            )
+            .await?;
+        }
 
         // `InvalidateChannelCacheForUser` (channel.go:3069): the leaver's connections stop
         // hearing the channel, its own leave post included.
@@ -1087,6 +1239,83 @@ impl App {
         Ok(MemberWrite::Done(user))
     }
 
+    /// The guest arm of `removeUserFromChannel` (app/channel.go:3036-3066): a guest who has just
+    /// left their last channel on `team_id` is taken off the team.
+    ///
+    /// # "Last channel" is two reads, and the second is the one a reader drops
+    ///
+    /// `GetChannelMembersForUser` excludes space backing channels, so an empty answer is followed
+    /// by `GetTeamSpaceChannelsForUser`; a guest still in a space stays on the team. Either read
+    /// failing fails the removal — the first with its own 500, the second with
+    /// `app.channel.get_channels.get.app_error` — **after** the channel membership is already
+    /// gone, as in Go.
+    ///
+    /// # Every failure of the eviction itself is the same 400
+    ///
+    /// `GetTeamMember`'s 404 or 500 and `RemoveTeamMember`'s write failure are all replaced by
+    /// `api.team.remove_user_from_team.missing.app_error` at **400**; only
+    /// `postProcessTeamMemberLeave`'s own errors pass through. There is no team-leave post: that
+    /// belongs to `LeaveTeam`, which this does not call. The `leave_team` events, the sidebar and
+    /// preference clean-up and the `UserHasLeftTeam` hook are [`App::leave_team`]'s own two
+    /// steps, shared rather than repeated.
+    async fn remove_guest_without_channels_from_team(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        remover_user_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+    ) -> AppResult<()> {
+        if !self
+            .get_channel_members_for_user(team_id, user_id)
+            .await?
+            .is_empty()
+        {
+            return Ok(());
+        }
+
+        let spaces = self
+            .store()
+            .channel()
+            .get_team_space_channels_for_user(team_id, user_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "space channel listing failed");
+                AppError::boxed(
+                    "removeUserFromChannel",
+                    "app.channel.get_channels.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        if !spaces.0.is_empty() {
+            return Ok(());
+        }
+
+        let not_on_team = |err: Box<AppError>| {
+            tracing::debug!(error = %err, "the guest's team membership could not be removed");
+            AppError::boxed(
+                "removeUserFromChannel",
+                "api.team.remove_user_from_team.missing.app_error",
+                None,
+                String::new(),
+                400,
+            )
+        };
+        let mut member = self
+            .get_team_member(team_id, user_id)
+            .await
+            .map_err(not_on_team)?;
+        self.remove_team_member(&mut member)
+            .await
+            .map_err(not_on_team)?;
+        self.post_process_team_member_leave(&member, remover_user_id, hook_ctx)
+            .await
+    }
+
+    /// Port of `app.App.RemoveUserFromChannel` (app/channel.go:3113): the inner
+    /// [`App::remove_user_from_channel_inner`], then the leave post for a self-removal or the
+    /// removal post for anyone else's. Forwards exactly when the inner function does.
     #[tracing::instrument(skip(self, channel), fields(channel_id = %channel.id, user_id = %user_id_to_remove))]
     pub async fn remove_user_from_channel(
         &self,
@@ -1138,8 +1367,8 @@ impl App {
     /// here before answering and its failure is likewise only logged; the hooks and the
     /// `posted` event are the same, and neither server promises their timing against the
     /// answer. The post is skipped for town-square with
-    /// `ExperimentalEnableDefaultChannelLeaveJoinMessages` off — reachable only by a guest, whose
-    /// removal is forwarded before this point.
+    /// `ExperimentalEnableDefaultChannelLeaveJoinMessages` off — reachable only by a guest, the
+    /// one user the inner removal lets out of town-square.
     #[tracing::instrument(skip(self, hook_ctx), fields(channel_id = %channel_id, user_id = %user_id))]
     pub async fn leave_channel(
         &self,
@@ -1905,9 +2134,235 @@ fn add_remove_message_error(where_: &'static str, cause: &AppError) -> Box<AppEr
     )
 }
 
+/// The filter in `setChannelsMuted` (app/channel.go:4044): every member whose
+/// `IsChannelMuted()` differs from `muted`, with the mute flipped.
+///
+/// [`ChannelMember::set_channel_muted`] is a toggle that ignores its argument, exactly as Go's
+/// is; it acts as a setter here only because the filter has already dropped every member in the
+/// asked state. The order of `members` is kept.
+#[must_use]
+pub fn members_to_mute(members: Vec<ChannelMember>, muted: bool) -> Vec<ChannelMember> {
+    members
+        .into_iter()
+        .filter(|member| member.is_channel_muted() != muted)
+        .map(|mut member| {
+            member.set_channel_muted(muted);
+            member
+        })
+        .collect()
+}
+
+/// `setChannelsMuted`'s answer to a failed `GetMembersByChannelIds` (app/channel.go:4034): an
+/// `*AppError` passes through, anything else is a 500 under `get_member.app_error`.
+fn set_channels_muted_read_error(err: mm_store::StoreError) -> Box<AppError> {
+    match err {
+        mm_store::StoreError::Invalid { app_error, .. } => app_error,
+        other => {
+            tracing::error!(error = %other, "reading the memberships to mute failed");
+            AppError::boxed(
+                "setChannelsMuted",
+                "app.channel.get_member.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        }
+    }
+}
+
+/// `setChannelsMuted`'s answer to a failed `UpdateMultipleMembers` (app/channel.go:4061): an
+/// `*AppError` (an invalid member) passes through, `ErrNotFound` is a **404** under
+/// `MissingChannelMemberError`, anything else a 500 under `get_member.app_error` — Go reuses the
+/// read's id for the write.
+fn set_channels_muted_write_error(err: mm_store::StoreError) -> Box<AppError> {
+    match err {
+        mm_store::StoreError::Invalid { app_error, .. } => app_error,
+        mm_store::StoreError::NotFound { .. } => AppError::boxed(
+            "setChannelsMuted",
+            "app.channel.get_member.missing.app_error",
+            None,
+            String::new(),
+            404,
+        ),
+        other => {
+            tracing::error!(error = %other, "writing the muted memberships failed");
+            AppError::boxed(
+                "setChannelsMuted",
+                "app.channel.get_member.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn member_with(channel_id: &str, mark_unread: Option<&str>) -> ChannelMember {
+        ChannelMember {
+            channel_id: channel_id.to_owned(),
+            user_id: "u".to_owned(),
+            notify_props: Some(
+                mark_unread
+                    .map(|value| StringMap::from([("mark_unread".to_owned(), value.to_owned())]))
+                    .unwrap_or_default(),
+            ),
+            ..ChannelMember::default()
+        }
+    }
+
+    fn mark_unread(member: &ChannelMember) -> Option<&str> {
+        member
+            .notify_props
+            .as_ref()
+            .and_then(|props| props.get("mark_unread"))
+            .map(String::as_str)
+    }
+
+    /// Muting keeps only the members not already muted — `all`, an absent key and an unknown
+    /// value all read as unmuted — sets each to `mention`, and keeps the read order.
+    #[test]
+    fn muting_flips_only_the_unmuted_members_in_order() {
+        let members = vec![
+            member_with("a", Some("all")),
+            member_with("b", Some("mention")),
+            member_with("c", None),
+            member_with("d", Some("Mention")),
+        ];
+        let out = members_to_mute(members, true);
+        let got: Vec<(&str, Option<&str>)> = out
+            .iter()
+            .map(|m| (m.channel_id.as_str(), mark_unread(m)))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("a", Some("mention")),
+                ("c", Some("mention")),
+                ("d", Some("mention")),
+            ]
+        );
+    }
+
+    /// Unmuting keeps only the muted members and sets them to `all`; a member that reads as
+    /// unmuted is not written, whatever its stored value.
+    #[test]
+    fn unmuting_flips_only_the_muted_members() {
+        let members = vec![
+            member_with("a", Some("all")),
+            member_with("b", Some("mention")),
+            member_with("c", None),
+            member_with("e", Some("mention")),
+        ];
+        let out = members_to_mute(members, false);
+        let got: Vec<(&str, Option<&str>)> = out
+            .iter()
+            .map(|m| (m.channel_id.as_str(), mark_unread(m)))
+            .collect();
+        assert_eq!(got, vec![("b", Some("all")), ("e", Some("all"))]);
+    }
+
+    /// Everything already in the asked state is an empty list — the `(nil, nil)` that skips the
+    /// write and every event.
+    #[test]
+    fn nothing_to_change_is_empty() {
+        assert!(members_to_mute(vec![member_with("a", Some("mention"))], true).is_empty());
+        assert!(members_to_mute(vec![member_with("a", Some("all"))], false).is_empty());
+        assert!(members_to_mute(Vec::new(), true).is_empty());
+    }
+
+    /// Only `mark_unread` changes; every other notify prop is kept.
+    #[test]
+    fn muting_touches_no_other_prop() {
+        let mut member = member_with("a", Some("all"));
+        if let Some(props) = member.notify_props.as_mut() {
+            props.insert("desktop".to_owned(), "mention".to_owned());
+        }
+        let out = members_to_mute(vec![member], true);
+        let props = out[0].notify_props.as_ref().expect("props");
+        assert_eq!(props.get("desktop").map(String::as_str), Some("mention"));
+        assert_eq!(props.len(), 2);
+    }
+
+    fn invalid() -> mm_store::StoreError {
+        mm_store::StoreError::Invalid {
+            entity: "ChannelMember",
+            app_error: AppError::boxed(
+                "ChannelMember.IsValid",
+                "model.channel_member.is_valid.notify_level.app_error",
+                None,
+                "",
+                400,
+            ),
+        }
+    }
+
+    fn not_found() -> mm_store::StoreError {
+        mm_store::StoreError::NotFound {
+            entity: "ChannelMember",
+            criteria: String::new(),
+        }
+    }
+
+    fn db() -> mm_store::StoreError {
+        mm_store::StoreError::Db {
+            context: String::new(),
+            source: sqlx::Error::RowNotFound,
+        }
+    }
+
+    fn triple(err: &AppError) -> (&str, &str, i32) {
+        (err.where_.as_str(), err.id.as_str(), err.status_code)
+    }
+
+    /// The read passes an `*AppError` through and makes everything else — a not-found included,
+    /// because Go's read switch has no `ErrNotFound` arm — a 500.
+    #[test]
+    fn the_read_errors_are_gos() {
+        assert_eq!(
+            triple(&set_channels_muted_read_error(invalid())),
+            (
+                "ChannelMember.IsValid",
+                "model.channel_member.is_valid.notify_level.app_error",
+                400
+            )
+        );
+        for err in [not_found(), db()] {
+            assert_eq!(
+                triple(&set_channels_muted_read_error(err)),
+                ("setChannelsMuted", "app.channel.get_member.app_error", 500)
+            );
+        }
+    }
+
+    /// The write passes an `*AppError` through, makes a not-found a 404 under
+    /// `MissingChannelMemberError`, and everything else a 500 under the read's id.
+    #[test]
+    fn the_write_errors_are_gos() {
+        assert_eq!(
+            triple(&set_channels_muted_write_error(invalid())),
+            (
+                "ChannelMember.IsValid",
+                "model.channel_member.is_valid.notify_level.app_error",
+                400
+            )
+        );
+        assert_eq!(
+            triple(&set_channels_muted_write_error(not_found())),
+            (
+                "setChannelsMuted",
+                "app.channel.get_member.missing.app_error",
+                404
+            )
+        );
+        assert_eq!(
+            triple(&set_channels_muted_write_error(db())),
+            ("setChannelsMuted", "app.channel.get_member.app_error", 500)
+        );
+    }
 
     #[test]
     fn the_patch_refusals_are_the_stores_in_its_order() {

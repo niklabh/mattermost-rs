@@ -1,0 +1,15 @@
+# Mutation plan for D-1211: basicSecurityChecks' 414 on the API router and the local socket.
+#
+#   MUTATE_PACKAGE=mm-api scripts/mutate-batch.sh scripts/mutations/url-length.plan
+
+len-at-limit-refused	crates/mm-api/src/serve_http.rs	i64::try_from(length).unwrap_or(i64::MAX) > max	i64::try_from(length).unwrap_or(i64::MAX) >= max	api	url_length
+len-path-only	crates/mm-api/src/serve_http.rs	let length = request.uri().to_string().len();	let length = request.uri().path().len();	api	url_length
+vary-never	crates/mm-api/src/serve_http.rs	    if gzip {\n        response\n            .headers_mut()	    if false && gzip {\n        response\n            .headers_mut()	api	url_length
+dressed-by-global-headers	crates/mm-api/src/serve_http.rs	    response\n        .extensions_mut()\n        .insert(crate::web_static::WebOwnHeaders);\n    response\n}	    response\n}	api	url_length
+gorilla-first-skipped	crates/mm-api/src/serve_http.rs	    if !gorilla_matched(&params) {\n        return next.run(request).await;\n    }	    if false && !gorilla_matched(&params) {\n        return next.run(request).await;\n    }	api	url_length
+local-unchecked	crates/mm-api/src/serve_http.rs	    if gorilla_matched(&params) && uri_too_long(	    if false && gorilla_matched(&params) && uri_too_long(	api	url_length
+config-document-ignored	crates/mm-app/src/config.rs	            maximum_url_length: service\n                .maximum_url_length\n                .unwrap_or(default.maximum_url_length),	            maximum_url_length: default.maximum_url_length,	unit	config::
+
+# ---- controls
+url-control-try-from	crates/mm-api/src/serve_http.rs	i64::try_from(length).unwrap_or(i64::MAX) > max	max < i64::try_from(length).unwrap_or(i64::MAX)	api	url_length
+url-control-where	crates/mm-api/src/serve_http.rs	        "basicSecurityChecks",\n        "basic_security_check.url.too_long_error",	        "basicSecurityChecks ",\n        "basic_security_check.url.too_long_error",	api	url_length

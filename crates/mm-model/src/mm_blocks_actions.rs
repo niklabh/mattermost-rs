@@ -81,7 +81,7 @@ pub fn mm_blocks_context_map(context_string: &str) -> Option<StringInterface> {
         return None;
     }
     if let Ok(serde_json::Value::Object(m)) =
-        serde_json::from_str::<serde_json::Value>(context_string)
+        crate::utils::unmarshal_from_json::<serde_json::Value>(context_string.as_bytes())
     {
         return Some(m);
     }

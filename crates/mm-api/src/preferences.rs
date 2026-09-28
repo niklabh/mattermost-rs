@@ -80,6 +80,19 @@ enum PreferenceRead<'a> {
     CategoryAndName(&'a str, &'a str),
 }
 
+/// `var preferences model.Preferences; model.StructFromJSONLimited(r.Body, &preferences)`
+/// (preference.go:104): one value off the body, trailing bytes ignored. `null` leaves the slice nil
+/// and a `null` element is a zero `Preference`; the caller's `len == 0` check answers the first
+/// by the same parameter name. A decode failure is `SetInvalidParamWithErr("preferences")`.
+fn decode_preferences(bytes: &[u8]) -> Result<Vec<Preference>, ApiError> {
+    let decoded: Vec<Option<Preference>> = mm_model::utils::decode_one_value_from_json(bytes)
+        .map_err(|err| {
+            tracing::debug!(error = %err, "preferences body did not decode");
+            ApiError::invalid_param("preferences")
+        })?;
+    Ok(decoded.into_iter().map(Option::unwrap_or_default).collect())
+}
+
 /// Go's `c.RequireUserId().RequireCategory().RequirePreferenceName()` chain, as one call so the
 /// **order** is testable in-process: `params` is not on the wire and the message is untranslated
 /// ([D-092]), so a swapped order survives every cross-server test — the same reasoning as
@@ -353,11 +366,7 @@ async fn update_preferences_checked(
         )));
     }
 
-    let preferences: Vec<Preference> = serde_json::from_slice(bytes).map_err(|err| {
-        // Go answers `SetInvalidParamWithErr("preferences", ...)` for a body that will not decode.
-        tracing::debug!(error = %err, "preferences body did not decode");
-        ApiError::invalid_param("preferences")
-    })?;
+    let preferences = decode_preferences(bytes)?;
 
     // `len(preferences) == 0 || len(preferences) > maxUpdatePreferences` (preference.go:109).
     // Both bounds are Go's, and the empty case is an error rather than a no-op.
@@ -483,12 +492,9 @@ pub async fn delete_preferences(
         }
     };
 
-    let preferences: Vec<mm_model::preference::Preference> = match serde_json::from_slice(&bytes) {
+    let preferences = match decode_preferences(&bytes) {
         Ok(preferences) => preferences,
-        Err(err) => {
-            tracing::debug!(error = %err, "preferences body did not decode");
-            return ApiError::invalid_param("preferences").into_response();
-        }
+        Err(err) => return err.into_response(),
     };
 
     if preferences.is_empty() || preferences.len() > MAX_UPDATE_PREFERENCES {

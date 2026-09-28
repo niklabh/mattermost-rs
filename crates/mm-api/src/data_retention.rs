@@ -166,12 +166,13 @@ async fn answer(
 fn decode(body: Body, bytes: &[u8]) -> Result<(), ApiError> {
     match body {
         Body::None => Ok(()),
-        // Every field of `RetentionPolicyWithTeamAndChannelIDs` is optional to Go's decoder, so
-        // only malformed JSON fails. `serde_json::Value` is exactly that test and does not need
-        // the model type ported for a route that never reads it.
-        Body::Policy => serde_json::from_slice::<serde_json::Value>(bytes)
-            .map(|_| ())
-            .map_err(|_| ApiError::invalid_param("policy")),
+        // `var policy model.RetentionPolicyWithTeamAndChannelIDs; Decode` (data_retention.go:122):
+        // a value, so `null` decodes and an array, a scalar or a mistyped field does not.
+        Body::Policy => mm_model::utils::decode_one_value_from_json::<
+            mm_model::data_retention_policy::RetentionPolicyWithTeamAndChannelIDs,
+        >(bytes)
+        .map(|_| ())
+        .map_err(|_| ApiError::invalid_param("policy")),
         Body::IdList => sorted_array_from_json(bytes).map(|_| ()).map_err(|_| {
             ApiError::from(AppError::new(
                 "dataRetention",

@@ -182,6 +182,76 @@ pub trait PropertyStore {
         &self,
         values: Vec<PropertyValue>,
     ) -> impl std::future::Future<Output = Result<Vec<PropertyValue>, StoreError>> + Send;
+    fn search_values_raw(
+        &self,
+        opts: &PropertyValueSearchOpts,
+    ) -> impl std::future::Future<Output = Result<Vec<RawPropertyValue>, StoreError>> + Send;
+
+    fn upsert_values_raw(
+        &self,
+        values: Vec<PropertyValue>,
+    ) -> impl std::future::Future<Output = Result<Vec<RawPropertyValue>, StoreError>> + Send;
+
+    fn get_group_by_id(
+        &self,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<PropertyGroup, StoreError>> + Send;
+
+    fn register_group(
+        &self,
+        group: PropertyGroup,
+    ) -> impl std::future::Future<Output = Result<PropertyGroup, StoreError>> + Send;
+
+    fn get_field_by_name(
+        &self,
+        group_id: &str,
+        target_id: &str,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<PropertyField, StoreError>> + Send;
+
+    fn count_fields_for_target(
+        &self,
+        group_id: &str,
+        target_type: &str,
+        target_id: &str,
+        include_deleted: bool,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    fn create_value(
+        &self,
+        value: PropertyValue,
+    ) -> impl std::future::Future<Output = Result<PropertyValue, StoreError>> + Send;
+
+    fn get_value_raw(
+        &self,
+        group_id: &str,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<RawPropertyValue, StoreError>> + Send;
+
+    fn get_many_values_raw(
+        &self,
+        group_id: &str,
+        ids: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<RawPropertyValue>, StoreError>> + Send;
+
+    fn update_values(
+        &self,
+        group_id: &str,
+        values: Vec<PropertyValue>,
+    ) -> impl std::future::Future<Output = Result<Vec<PropertyValue>, StoreError>> + Send;
+
+    fn delete_value(
+        &self,
+        group_id: &str,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    fn delete_values_for_target(
+        &self,
+        group_id: &str,
+        target_type: &str,
+        target_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -272,7 +342,7 @@ impl PropertyStore for SqlPropertyStore {
                    COALESCE(updatedby, '')              AS "updatedby!"
               FROM propertyfields
              WHERE id = $1
-               AND groupid = $2
+               AND ($2 = '' OR groupid = $2)
             "#,
             id,
             group_id
@@ -384,7 +454,7 @@ impl PropertyStore for SqlPropertyStore {
                    COALESCE(updatedby, '')              AS "updatedby!"
               FROM propertyfields
              WHERE id = ANY($1)
-               AND groupid = $2
+               AND ($2 = '' OR groupid = $2)
             "#,
             ids,
             group_id
@@ -541,6 +611,18 @@ impl PropertyStore for SqlPropertyStore {
         &self,
         opts: &PropertyValueSearchOpts,
     ) -> Result<Vec<PropertyValue>, StoreError> {
+        Ok(self
+            .search_values_raw(opts)
+            .await?
+            .into_iter()
+            .map(|raw| raw.value)
+            .collect())
+    }
+
+    async fn search_values_raw(
+        &self,
+        opts: &PropertyValueSearchOpts,
+    ) -> Result<Vec<RawPropertyValue>, StoreError> {
         opts.is_valid().map_err(|_| StoreError::Argument {
             entity: "PropertyValue",
             detail: "opts is invalid",
@@ -566,7 +648,7 @@ impl PropertyStore for SqlPropertyStore {
                    targettype                           AS "targettype!",
                    groupid                              AS "groupid!",
                    fieldid                              AS "fieldid!",
-                   value                                AS "value!",
+                   value::text                          AS "value!",
                    createat                             AS "createat!",
                    updateat                             AS "updateat!",
                    deleteat                             AS "deleteat!",
@@ -611,22 +693,21 @@ impl PropertyStore for SqlPropertyStore {
         })?;
 
         tracing::Span::current().record("found", rows.len());
-        Ok(rows
-            .into_iter()
-            .map(|row| PropertyValue {
-                id: row.id,
-                target_id: row.targetid,
-                target_type: row.targettype,
-                group_id: row.groupid,
-                field_id: row.fieldid,
-                value: row.value,
-                create_at: row.createat,
-                update_at: row.updateat,
-                delete_at: row.deleteat,
-                created_by: row.createdby,
-                updated_by: row.updatedby,
+        rows.into_iter()
+            .map(|row| {
+                raw_value(
+                    row.id,
+                    row.targetid,
+                    row.targettype,
+                    row.groupid,
+                    row.fieldid,
+                    row.value,
+                    [row.createat, row.updateat, row.deleteat],
+                    row.createdby,
+                    row.updatedby,
+                )
             })
-            .collect())
+            .collect()
     }
 
     /// # `DeleteAt = 0`, not "exists"
@@ -1239,6 +1320,18 @@ impl PropertyStore for SqlPropertyStore {
         &self,
         values: Vec<PropertyValue>,
     ) -> Result<Vec<PropertyValue>, StoreError> {
+        Ok(self
+            .upsert_values_raw(values)
+            .await?
+            .into_iter()
+            .map(|raw| raw.value)
+            .collect())
+    }
+
+    async fn upsert_values_raw(
+        &self,
+        values: Vec<PropertyValue>,
+    ) -> Result<Vec<RawPropertyValue>, StoreError> {
         if values.is_empty() {
             return Ok(Vec::new());
         }
@@ -1273,7 +1366,7 @@ impl PropertyStore for SqlPropertyStore {
                           targettype              AS "targettype!",
                           groupid                 AS "groupid!",
                           fieldid                 AS "fieldid!",
-                          value                   AS "value!",
+                          value::text             AS "value!",
                           createat                AS "createat!",
                           updateat                AS "updateat!",
                           deleteat                AS "deleteat!",
@@ -1299,19 +1392,17 @@ impl PropertyStore for SqlPropertyStore {
                 source,
             })?;
 
-            upserted.push(PropertyValue {
-                id: row.id,
-                target_id: row.targetid,
-                target_type: row.targettype,
-                group_id: row.groupid,
-                field_id: row.fieldid,
-                value: row.value,
-                create_at: row.createat,
-                update_at: row.updateat,
-                delete_at: row.deleteat,
-                created_by: row.createdby,
-                updated_by: row.updatedby,
-            });
+            upserted.push(raw_value(
+                row.id,
+                row.targetid,
+                row.targettype,
+                row.groupid,
+                row.fieldid,
+                row.value,
+                [row.createat, row.updateat, row.deleteat],
+                row.createdby,
+                row.updatedby,
+            )?);
         }
 
         transaction
@@ -1323,6 +1414,475 @@ impl PropertyStore for SqlPropertyStore {
             })?;
         Ok(upserted)
     }
+
+    /// Port of `SqlPropertyGroupStore.GetByID` (property_group_store.go:93): every failure is
+    /// a not-found, as `Get`'s is.
+    #[tracing::instrument(skip_all, fields(id = %id))]
+    async fn get_group_by_id(&self, id: &str) -> Result<PropertyGroup, StoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT id                       AS "id!",
+                   name                     AS "name!",
+                   version::bigint          AS "version!",
+                   schemaversion::bigint    AS "schemaversion!"
+              FROM propertygroups
+             WHERE id = $1
+            "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .unwrap_or_else(|source| {
+            tracing::error!(error = %source, "the PropertyGroups lookup by id failed");
+            None
+        })
+        .ok_or_else(|| StoreError::NotFound {
+            entity: "PropertyGroup",
+            criteria: format!("Id={id}"),
+        })?;
+        Ok(PropertyGroup {
+            id: row.id,
+            name: row.name,
+            version: row.version,
+            schema_version: row.schemaversion,
+        })
+    }
+
+    /// Port of `SqlPropertyGroupStore.Register` (property_group_store.go:24): `PreSave`,
+    /// `IsValid`, an insert that does nothing on a name conflict, and — when it did nothing —
+    /// the existing group read back by name, whatever its version.
+    #[tracing::instrument(skip_all, fields(name = %group.name))]
+    async fn register_group(&self, mut group: PropertyGroup) -> Result<PropertyGroup, StoreError> {
+        group.pre_save();
+        group.is_valid().map_err(|app_error| StoreError::Invalid {
+            entity: "PropertyGroup",
+            app_error,
+        })?;
+        let inserted = sqlx::query!(
+            r#"
+            INSERT INTO propertygroups (id, name, version, schemaversion)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (name) DO NOTHING
+            "#,
+            group.id,
+            group.name,
+            i32::try_from(group.version).unwrap_or(i32::MAX),
+            i32::try_from(group.schema_version).unwrap_or(i32::MAX),
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_group_register_insert".to_owned(),
+            source,
+        })?;
+        if inserted.rows_affected() == 0 {
+            return self.get_group(&group.name).await;
+        }
+        Ok(group)
+    }
+
+    /// Port of `SqlPropertyFieldStore.GetFieldByName` (property_field_store.go:87): group, target,
+    /// name, live — any object type, so with two object types sharing a name the row is
+    /// whichever Postgres returns first, as Go's unordered `Get` takes it.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, name = %name))]
+    async fn get_field_by_name(
+        &self,
+        group_id: &str,
+        target_id: &str,
+        name: &str,
+    ) -> Result<PropertyField, StoreError> {
+        let row = sqlx::query_as!(
+            PropertyFieldRow,
+            r#"
+            SELECT id                                   AS "id!",
+                   groupid                              AS "groupid!",
+                   name                                 AS "name!",
+                   COALESCE(type::text, '')             AS "type_text!",
+                   attrs                                AS "attrs?",
+                   COALESCE(targetid, '')               AS "targetid!",
+                   COALESCE(targettype, '')             AS "targettype!",
+                   objecttype                           AS "objecttype!",
+                   protected                            AS "protected!",
+                   permissionfield::text                AS "permissionfield?",
+                   permissionvalues::text               AS "permissionvalues?",
+                   permissionoptions::text              AS "permissionoptions?",
+                   linkedfieldid                        AS "linkedfieldid?",
+                   createat                             AS "createat!",
+                   updateat                             AS "updateat!",
+                   deleteat                             AS "deleteat!",
+                   COALESCE(createdby, '')              AS "createdby!",
+                   COALESCE(updatedby, '')              AS "updatedby!"
+              FROM propertyfields
+             WHERE groupid = $1
+               AND targetid = $2
+               AND name = $3
+               AND deleteat = 0
+             LIMIT 1
+            "#,
+            group_id,
+            target_id,
+            name,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_field_get_by_name_select".to_owned(),
+            source,
+        })?
+        .ok_or_else(|| StoreError::NotFound {
+            entity: "PropertyField",
+            criteria: name.to_owned(),
+        })?;
+        row.into_field()
+    }
+
+    /// Port of `SqlPropertyFieldStore.CountForTarget` (property_field_store.go:174).
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, count))]
+    async fn count_fields_for_target(
+        &self,
+        group_id: &str,
+        target_type: &str,
+        target_id: &str,
+        include_deleted: bool,
+    ) -> Result<i64, StoreError> {
+        sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(id) AS "count!"
+              FROM propertyfields
+             WHERE groupid = $1
+               AND targettype = $2
+               AND targetid = $3
+               AND ($4::bool OR deleteat = 0)
+            "#,
+            group_id,
+            target_type,
+            target_id,
+            include_deleted,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count property fields for target".to_owned(),
+            source,
+        })
+    }
+
+    /// Port of `SqlPropertyValueStore.Create` (property_value_store.go:33): an id already set is
+    /// `ErrInvalidInput`; then `PreSave`, `IsValid` and the insert. The value handed back is the
+    /// one given, as Go's is.
+    #[tracing::instrument(skip_all, fields(field_id = %value.field_id))]
+    async fn create_value(&self, mut value: PropertyValue) -> Result<PropertyValue, StoreError> {
+        if !value.id.is_empty() {
+            return Err(StoreError::InvalidInput {
+                entity: "PropertyValue",
+                field: "id",
+                value: value.id.clone(),
+            });
+        }
+        value.pre_save();
+        value.is_valid().map_err(|app_error| StoreError::Invalid {
+            entity: "PropertyValue",
+            app_error,
+        })?;
+        sqlx::query!(
+            r#"
+            INSERT INTO propertyvalues
+                (id, targetid, targettype, groupid, fieldid, value,
+                 createat, updateat, deleteat, createdby, updatedby)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
+            "#,
+            value.id,
+            value.target_id,
+            value.target_type,
+            value.group_id,
+            value.field_id,
+            value.value,
+            value.create_at,
+            value.update_at,
+            value.delete_at,
+            value.created_by,
+            value.updated_by,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_value_create_insert".to_owned(),
+            source,
+        })?;
+        Ok(value)
+    }
+
+    /// Port of `SqlPropertyValueStore.Get` (property_value_store.go:100): no `DeleteAt` filter,
+    /// and the group only when one is given.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, id = %id))]
+    async fn get_value_raw(
+        &self,
+        group_id: &str,
+        id: &str,
+    ) -> Result<RawPropertyValue, StoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT id                                   AS "id!",
+                   targetid                             AS "targetid!",
+                   targettype                           AS "targettype!",
+                   groupid                              AS "groupid!",
+                   fieldid                              AS "fieldid!",
+                   value::text                          AS "value!",
+                   createat                             AS "createat!",
+                   updateat                             AS "updateat!",
+                   deleteat                             AS "deleteat!",
+                   COALESCE(createdby, '')              AS "createdby!",
+                   COALESCE(updatedby, '')              AS "updatedby!"
+              FROM propertyvalues
+             WHERE id = $1
+               AND ($2 = '' OR groupid = $2)
+            "#,
+            id,
+            group_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_value_get_select".to_owned(),
+            source,
+        })?
+        .ok_or_else(|| StoreError::NotFound {
+            entity: "PropertyValue",
+            criteria: id.to_owned(),
+        })?;
+        raw_value(
+            row.id,
+            row.targetid,
+            row.targettype,
+            row.groupid,
+            row.fieldid,
+            row.value,
+            [row.createat, row.updateat, row.deleteat],
+            row.createdby,
+            row.updatedby,
+        )
+    }
+
+    /// Port of `SqlPropertyValueStore.GetMany` (property_value_store.go:118) without the
+    /// cardinality check, which the caller makes (`ErrResultsMismatch`). In no promised order.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, wanted = ids.len()))]
+    async fn get_many_values_raw(
+        &self,
+        group_id: &str,
+        ids: &[String],
+    ) -> Result<Vec<RawPropertyValue>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT id                                   AS "id!",
+                   targetid                             AS "targetid!",
+                   targettype                           AS "targettype!",
+                   groupid                              AS "groupid!",
+                   fieldid                              AS "fieldid!",
+                   value::text                          AS "value!",
+                   createat                             AS "createat!",
+                   updateat                             AS "updateat!",
+                   deleteat                             AS "deleteat!",
+                   COALESCE(createdby, '')              AS "createdby!",
+                   COALESCE(updatedby, '')              AS "updatedby!"
+              FROM propertyvalues
+             WHERE id = ANY($1)
+               AND ($2 = '' OR groupid = $2)
+            "#,
+            ids,
+            group_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_value_get_many_query".to_owned(),
+            source,
+        })?;
+        rows.into_iter()
+            .map(|row| {
+                raw_value(
+                    row.id,
+                    row.targetid,
+                    row.targettype,
+                    row.groupid,
+                    row.fieldid,
+                    row.value,
+                    [row.createat, row.updateat, row.deleteat],
+                    row.createdby,
+                    row.updatedby,
+                )
+            })
+            .collect()
+    }
+
+    /// Port of `SqlPropertyValueStore.Update` (property_value_store.go:214): one `UpdateAt` for
+    /// the batch, `IsValid` on each, and one statement setting `Value`, `DeleteAt` and
+    /// `UpdatedBy` per id (the `CASE` Go builds, as an `unnest` join here), scoped to the group
+    /// when one is given. Fewer rows than values is an error; the values handed back are the
+    /// ones given.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, values = values.len()))]
+    async fn update_values(
+        &self,
+        group_id: &str,
+        mut values: Vec<PropertyValue>,
+    ) -> Result<Vec<PropertyValue>, StoreError> {
+        if values.is_empty() {
+            return Ok(Vec::new());
+        }
+        let update_time = mm_model::utils::get_millis();
+        for value in &mut values {
+            value.update_at = update_time;
+            value.is_valid().map_err(|app_error| StoreError::Invalid {
+                entity: "PropertyValue",
+                app_error,
+            })?;
+        }
+        let ids: Vec<String> = values.iter().map(|v| v.id.clone()).collect();
+        let texts: Vec<String> = values.iter().map(|v| v.value.to_string()).collect();
+        let delete_ats: Vec<i64> = values.iter().map(|v| v.delete_at).collect();
+        let updated_bys: Vec<String> = values.iter().map(|v| v.updated_by.clone()).collect();
+        let result = sqlx::query!(
+            r#"
+            UPDATE propertyvalues AS p
+               SET value = v.value::jsonb,
+                   deleteat = v.deleteat,
+                   updateat = $5,
+                   updatedby = v.updatedby
+              FROM unnest($1::text[], $2::text[], $3::bigint[], $4::text[])
+                   AS v(id, value, deleteat, updatedby)
+             WHERE p.id = v.id
+               AND ($6 = '' OR p.groupid = $6)
+            "#,
+            &ids,
+            &texts,
+            &delete_ats,
+            &updated_bys,
+            update_time,
+            group_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_value_update_exec".to_owned(),
+            source,
+        })?;
+        if result.rows_affected() != values.len() as u64 {
+            return Err(StoreError::Argument {
+                entity: "PropertyValue",
+                detail: "failed to update, some property values were not found",
+            });
+        }
+        Ok(values)
+    }
+
+    /// Port of `SqlPropertyValueStore.Delete` (property_value_store.go:343): a soft delete, the
+    /// group only when given, and zero rows a not-found.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, id = %id))]
+    async fn delete_value(&self, group_id: &str, id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE propertyvalues
+               SET deleteat = $1
+             WHERE id = $2
+               AND ($3 = '' OR groupid = $3)
+            "#,
+            mm_model::utils::get_millis(),
+            id,
+            group_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete property value with id: {id}"),
+            source,
+        })?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound {
+                entity: "PropertyValue",
+                criteria: id.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Port of `SqlPropertyValueStore.DeleteForTarget` (property_value_store.go:386): a **hard**
+    /// delete, unlike every other value delete, refused when the type or the id is empty.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, target_id = %target_id))]
+    async fn delete_values_for_target(
+        &self,
+        group_id: &str,
+        target_type: &str,
+        target_id: &str,
+    ) -> Result<(), StoreError> {
+        if target_type.is_empty() || target_id.is_empty() {
+            return Err(StoreError::InvalidInput {
+                entity: "PropertyValue",
+                field: "target",
+                value: "type or id empty".to_owned(),
+            });
+        }
+        sqlx::query!(
+            r#"
+            DELETE FROM propertyvalues
+             WHERE targettype = $1
+               AND targetid = $2
+               AND ($3 = '' OR groupid = $3)
+            "#,
+            target_type,
+            target_id,
+            group_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_value_delete_for_target_exec".to_owned(),
+            source,
+        })?;
+        Ok(())
+    }
+}
+
+/// A property value with the `Value` column's text as Postgres renders `jsonb` — the bytes Go's
+/// `json.RawMessage` holds after a read, which a plugin receives verbatim over gob.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawPropertyValue {
+    pub value: PropertyValue,
+    pub raw: String,
+}
+
+/// One `PropertyValues` row, its value both parsed and as text.
+#[allow(clippy::too_many_arguments)] // the row's columns
+fn raw_value(
+    id: String,
+    target_id: String,
+    target_type: String,
+    group_id: String,
+    field_id: String,
+    text: String,
+    [create_at, update_at, delete_at]: [i64; 3],
+    created_by: String,
+    updated_by: String,
+) -> Result<RawPropertyValue, StoreError> {
+    let value = serde_json::from_str(&text).map_err(|source| StoreError::Decode {
+        entity: "PropertyValue",
+        column: "Value",
+        source,
+    })?;
+    Ok(RawPropertyValue {
+        value: PropertyValue {
+            id,
+            target_id,
+            target_type,
+            group_id,
+            field_id,
+            value,
+            create_at,
+            update_at,
+            delete_at,
+            created_by,
+            updated_by,
+        },
+        raw: text,
+    })
 }
 
 /// What Go's `StringInterface.Value()` writes: the attrs map marshalled by `encoding/json`, in

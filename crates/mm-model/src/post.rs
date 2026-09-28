@@ -266,7 +266,8 @@ fn error(
 /// The container carries `#[serde(default)]` because Go's `encoding/json` leaves an absent field
 /// at its zero value, and inbound posts are **always** partial — a client creating a post sends
 /// `channel_id` and `message` and nothing else. Without it serde rejects a document the Go
-/// server accepts. See [D-043] for the other types in the crate that still need this.
+/// server accepts. Every other `Deserialize` struct now does the same ([D-043], [D-192]), held by
+/// `serde_default_guard`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Post {
@@ -910,7 +911,9 @@ impl Post {
             );
             strip_nil_elements(&mut element, "actions");
             strip_nil_elements(&mut element, "fields");
-            if let Ok(decoded) = serde_json::from_value::<MessageAttachment>(element) {
+            // Marshal then `json.Unmarshal` in Go (post.go:1211): the `null` and repeated-key
+            // rules as well as the fold.
+            if let Ok(decoded) = crate::utils::from_value_go::<MessageAttachment>(&element) {
                 ret.push(decoded);
             }
         }
@@ -2587,10 +2590,11 @@ mod attachments_go_parity {
     }
 
     /// [D-033]: Go keeps a nil option inside an action, so the attachment survives with
-    /// `"options":[null]`. `Vec<PostActionOptions>` cannot hold that, so the decode fails and we
-    /// drop the whole attachment — one attachment fewer than Go, not merely one option fewer.
+    /// `"options":[null]`. The decode now takes Go's rules, so the attachment survives here too —
+    /// the count agrees — but `Vec<PostActionOptions>` cannot hold a nil, so the slot is a zero
+    /// option where Go's is nil. That residue is [D-033]'s.
     #[test]
-    fn a_nil_action_option_drops_the_attachment_where_go_keeps_it() {
+    fn a_nil_action_option_keeps_the_attachment_as_go_does() {
         for name in ["action_option_null", "action_option_null_then_real"] {
             let case = cases("attachments")
                 .into_iter()
@@ -2602,7 +2606,14 @@ mod attachments_go_parity {
                 s(&case, "attachments").contains("\"options\":[null"),
                 "{name}: Go kept the nil option"
             );
-            assert!(post_from(&case, "post").attachments().is_empty(), "{name}");
+            let got = post_from(&case, "post").attachments();
+            assert_eq!(got.len(), 1, "{name}");
+            let options = &got[0].actions[0].options;
+            assert_eq!(
+                options[0],
+                crate::integration_action::PostActionOptions::default(),
+                "{name}: a zero option, not a nil"
+            );
         }
     }
 

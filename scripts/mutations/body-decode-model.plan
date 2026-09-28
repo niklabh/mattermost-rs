@@ -1,0 +1,10 @@
+# D-941: the body decoders. lib suites need MUTATE_PACKAGE (mm-model rows first, then mm-api).
+u_array_rule	crates/mm-model/src/go_decode.rs	        if self.is_struct {\n            return Err(de::Error::custom(ARRAY_INTO_STRUCT));	        if false {\n            return Err(de::Error::custom(ARRAY_INTO_STRUCT));	lib	body_decode_go_parity
+u_duplicate_buffer	crates/mm-model/src/go_decode.rs	        if !self.is_struct {\n            return self.inner.visit_map(StrictMap(map));	        if true {\n            return self.inner.visit_map(StrictMap(map));	lib	body_decode_go_parity
+u_struct_flag	crates/mm-model/src/go_decode.rs	.deserialize_struct(name, fields, StrictVisitor::structure(visitor))	.deserialize_struct(name, fields, StrictVisitor::any(visitor))	lib	body_decode_go_parity
+u_nested_value_seed	crates/mm-model/src/go_decode.rs	        self.0.next_value_seed(StrictSeed(seed))	        self.0.next_value_seed(seed)	lib	body_decode_go_parity
+u_value_null	crates/mm-model/src/utils.rs	    Ok(decode_one_from_json::<Option<T>>(data)?.unwrap_or_default())	    decode_one_from_json::<T>(data)	lib	body_decode_go_parity
+u_unmarshal_end	crates/mm-model/src/utils.rs	    deserializer.end()?;\n    Ok(value)	    Ok(value)	lib	body_decode_go_parity
+u_surrogate	crates/mm-model/src/utils.rs	    let data = replace_lone_surrogates(data);\n    let mut deserializer = serde_json::Deserializer::from_slice(&data);\n    T::deserialize(crate::go_decode::Strict(&mut deserializer))\n}	    let mut deserializer = serde_json::Deserializer::from_slice(data);\n    T::deserialize(crate::go_decode::Strict(&mut deserializer))\n}	lib	body_decode_go_parity
+u_map_bool_default	crates/mm-model/src/utils.rs	value.as_bool().unwrap_or(false)	value.as_bool().unwrap_or(true)	lib	body_decode_go_parity
+control_u_members_type	crates/mm-model/src/go_decode.rs	        let mut members = serde_json::Map::new();	        let mut members: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();	lib	body_decode_go_parity

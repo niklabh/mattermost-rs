@@ -138,8 +138,9 @@ fn require_command_id(command_id: &str) -> Result<(), ApiError> {
 /// The body every write but `moveCommand` reads: a whole `model.Command`.
 ///
 /// Go is `json.NewDecoder(r.Body).Decode(&cmd)`, whose failure is
-/// `SetInvalidParamWithErr("command")` — the body-param 400. `serde_json::from_slice` is stricter
-/// than `Decode` about trailing bytes after the object; nothing a client sends reaches that.
+/// `SetInvalidParamWithErr("command")` — the body-param 400. A value, so `null` is the zero command
+/// (which `createCommand` then refuses on its empty team's permission) and trailing bytes are
+/// ignored.
 async fn command_from_body(request: Request, parameter: &str) -> Result<Command, ApiError> {
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
@@ -148,7 +149,7 @@ async fn command_from_body(request: Request, parameter: &str) -> Result<Command,
             return Err(ApiError::invalid_param(parameter));
         }
     };
-    serde_json::from_slice(&bytes).map_err(|err| {
+    mm_model::utils::decode_one_value_from_json(&bytes).map_err(|err| {
         tracing::debug!(error = %err, "command body did not decode");
         ApiError::invalid_param(parameter)
     })
@@ -161,10 +162,14 @@ async fn command_from_body(request: Request, parameter: &str) -> Result<Command,
 /// the 404, and "neither the creator nor a holder of `manage_others_slash_commands`" is a 403.
 /// Collapsing them would either leak a command's existence or hide a refusal a client must be
 /// able to tell from a miss.
+///
+/// Both rungs write Go's `"fail - inappropriate permissions"` row before refusing; every caller
+/// has already written its `"attempt"`.
 async fn refuse_unless_the_caller_may_manage(
     state: &AppState,
     session: &AuthenticatedSession,
     command: &Command,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Option<Response> {
     if !state
         .app
@@ -175,6 +180,9 @@ async fn refuse_unless_the_caller_may_manage(
         )
         .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return Some(command_not_found().into_response());
     }
 
@@ -188,6 +196,9 @@ async fn refuse_unless_the_caller_may_manage(
             )
             .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return Some(permission_error(
             session,
             &PERMISSION_MANAGE_OTHERS_SLASH_COMMANDS,
@@ -196,6 +207,9 @@ async fn refuse_unless_the_caller_may_manage(
 
     None
 }
+
+/// The `ExtraInfo` of every permission refusal `LogAudit` records in command.go.
+const FAIL_PERMISSIONS: &str = "fail - inappropriate permissions";
 
 /// Port of `getCommand` (command.go:321) — `GET /api/v4/commands/{command_id}`.
 ///
@@ -380,12 +394,14 @@ async fn list_commands_inner(
 pub async fn create_command(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     let mut command = match command_from_body(request, "command").await {
         Ok(command) => command,
         Err(err) => return err.into_response(),
     };
+    audit.log(&state.app, Some(&session.0), "attempt").await;
     tracing::Span::current().record("team_id", &command.team_id);
     tracing::Span::current().record("trigger", &command.trigger);
 
@@ -412,6 +428,9 @@ pub async fn create_command(
             )
             .await
         {
+            audit
+                .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+                .await;
             return permission_error(&session, &PERMISSION_MANAGE_OTHERS_SLASH_COMMANDS);
         }
 
@@ -425,10 +444,13 @@ pub async fn create_command(
     command.creator_id = user_id;
 
     match state.app.create_command(command).await {
-        Ok(created) => match encoded(StatusCode::CREATED, &created, "createCommand") {
-            Ok(response) => response,
-            Err(err) => err.into_response(),
-        },
+        Ok(created) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            match encoded(StatusCode::CREATED, &created, "createCommand") {
+                Ok(response) => response,
+                Err(err) => err.into_response(),
+            }
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -453,6 +475,7 @@ pub async fn update_command(
     State(state): State<AppState>,
     Path(command_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     if let Err(err) = require_command_id(&command_id) {
@@ -466,6 +489,7 @@ pub async fn update_command(
     if command.id != command_id {
         return ApiError::invalid_param("command").into_response();
     }
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let Ok(old_command) = state.app.get_command(&command_id).await else {
         return command_not_found().into_response();
@@ -482,16 +506,20 @@ pub async fn update_command(
         .into_response();
     }
 
-    if let Some(refusal) = refuse_unless_the_caller_may_manage(&state, &session, &old_command).await
+    if let Some(refusal) =
+        refuse_unless_the_caller_may_manage(&state, &session, &old_command, &audit).await
     {
         return refusal;
     }
 
     match state.app.update_command(&old_command, command).await {
-        Ok(updated) => match encoded_ok(&updated, "updateCommand") {
-            Ok(response) => response,
-            Err(err) => err.into_response(),
-        },
+        Ok(updated) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            match encoded_ok(&updated, "updateCommand") {
+                Ok(response) => response,
+                Err(err) => err.into_response(),
+            }
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -506,21 +534,29 @@ pub async fn delete_command(
     State(state): State<AppState>,
     Path(command_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     if let Err(err) = require_command_id(&command_id) {
         return err.into_response();
     }
+    // `"attempt"` precedes the fetch here, so an unknown command still leaves a row.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let Ok(command) = state.app.get_command(&command_id).await else {
         return command_not_found().into_response();
     };
 
-    if let Some(refusal) = refuse_unless_the_caller_may_manage(&state, &session, &command).await {
+    if let Some(refusal) =
+        refuse_unless_the_caller_may_manage(&state, &session, &command, &audit).await
+    {
         return refusal;
     }
 
     match state.app.delete_command(&command.id).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -545,6 +581,7 @@ pub async fn move_command(
     State(state): State<AppState>,
     Path(command_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     if let Err(err) = require_command_id(&command_id) {
@@ -559,7 +596,8 @@ pub async fn move_command(
         }
     };
     // `SetInvalidParamWithErr("team_id")` — the *field*, not the type, names this one.
-    let move_request: CommandMoveRequest = match serde_json::from_slice(&bytes) {
+    let move_request: CommandMoveRequest = match mm_model::utils::decode_one_value_from_json(&bytes)
+    {
         Ok(move_request) => move_request,
         Err(err) => {
             tracing::debug!(error = %err, "move request body did not decode");
@@ -567,6 +605,7 @@ pub async fn move_command(
         }
     };
     tracing::Span::current().record("team_id", &move_request.team_id);
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let new_team = match state.app.get_team(&move_request.team_id).await {
         Ok(team) => team,
@@ -582,6 +621,9 @@ pub async fn move_command(
         )
         .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return permission_error(&session, &PERMISSION_MANAGE_OWN_SLASH_COMMANDS);
     }
 
@@ -589,7 +631,9 @@ pub async fn move_command(
         return command_not_found().into_response();
     };
 
-    if let Some(refusal) = refuse_unless_the_caller_may_manage(&state, &session, &command).await {
+    if let Some(refusal) =
+        refuse_unless_the_caller_may_manage(&state, &session, &command, &audit).await
+    {
         return refusal;
     }
 
@@ -602,6 +646,13 @@ pub async fn move_command(
         )
         .await
     {
+        audit
+            .log(
+                &state.app,
+                Some(&session.0),
+                "fail - command creator does not have permission to new team",
+            )
+            .await;
         return ApiError::from(AppError::new(
             "moveCommand",
             "api.command.move_command.creator_no_permission.app_error",
@@ -613,7 +664,10 @@ pub async fn move_command(
     }
 
     match state.app.move_command(&new_team.id, command).await {
-        Ok(_moved) => status_ok(),
+        Ok(_moved) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -631,16 +685,20 @@ pub async fn regen_command_token(
     State(state): State<AppState>,
     Path(command_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     if let Err(err) = require_command_id(&command_id) {
         return err.into_response();
     }
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let Ok(command) = state.app.get_command(&command_id).await else {
         return command_not_found().into_response();
     };
 
-    if let Some(refusal) = refuse_unless_the_caller_may_manage(&state, &session, &command).await {
+    if let Some(refusal) =
+        refuse_unless_the_caller_may_manage(&state, &session, &command, &audit).await
+    {
         return refusal;
     }
 
@@ -648,6 +706,7 @@ pub async fn regen_command_token(
         Ok(regenerated) => regenerated,
         Err(err) => return ApiError::from(err).into_response(),
     };
+    audit.log(&state.app, Some(&session.0), "success").await;
 
     // `model.MapToJSON(map[string]string{"token": …})` — a single-key map, so there is no key
     // order to reproduce, and the token is base32 so the HTML escaping cannot bite.
@@ -791,12 +850,8 @@ pub async fn list_autocomplete_commands(
         return crate::proxy::forward_to_go(State(state), request).await;
     }
     match state.app.list_autocomplete_commands(&team_id).await {
-        Ok(Some(commands)) => encoded_ok(&commands, "listAutocompleteCommands")
+        Ok(commands) => encoded_ok(&commands, "listAutocompleteCommands")
             .unwrap_or_else(IntoResponse::into_response),
-        Ok(None) => {
-            tracing::Span::current().record("forwarded", true);
-            crate::proxy::forward_to_go(State(state), request).await
-        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -841,11 +896,7 @@ pub async fn list_command_autocomplete_suggestions(
         return crate::proxy::forward_to_go(State(state), request).await;
     }
     let mut commands = match state.app.list_autocomplete_commands(&team_id).await {
-        Ok(Some(commands)) => commands,
-        Ok(None) => {
-            tracing::Span::current().record("forwarded", true);
-            return crate::proxy::forward_to_go(State(state), request).await;
-        }
+        Ok(commands) => commands,
         Err(err) => return ApiError::from(err).into_response(),
     };
 
@@ -1131,7 +1182,9 @@ async fn serve_execute(
             mm_app::plugin_commands::ExecuteOutcome::NotPlugin => {}
         }
     }
-    if go_may_have_plugins() {
+    // Under the Rust plugin host Go runs no plugins (docs/PLUGIN_PLAN.md, D6), and this process's
+    // were tried above.
+    if go_plugin_commands_possible(state) {
         return Ok(Execute::Forward);
     }
 
@@ -1141,10 +1194,50 @@ async fn serve_execute(
         .await?
     {
         mm_app::command_provider::CommandDispatch::NotFound(err) => Err(ApiError::from(err)),
+        mm_app::command_provider::CommandDispatch::BuiltIn if trigger == "join" => {
+            serve_join(state, session, parts, args).await
+        }
         mm_app::command_provider::CommandDispatch::Custom
-        | mm_app::command_provider::CommandDispatch::BuiltIn
-        | mm_app::command_provider::CommandDispatch::Undecidable => Ok(Execute::Forward),
+        | mm_app::command_provider::CommandDispatch::BuiltIn => Ok(Execute::Forward),
     }
+}
+
+/// `tryExecuteBuiltInCommand` for `/join` (`mm_app::command_join`), then `HandleCommandResponse`
+/// with `builtIn` true. The message is what follows the first Unicode space of the command, as
+/// `ExecuteCommand` splits it. A branch `JoinChannel` hands to Go forwards the whole command;
+/// nothing is written before that decision.
+async fn serve_join(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    parts: &axum::http::request::Parts,
+    mut args: mm_model::command_args::CommandArgs,
+) -> Result<Execute, ApiError> {
+    args.user_id.clone_from(&session.0.user_id);
+    args.site_url = site_url_header(state, &parts.headers).await;
+    let message = args
+        .command
+        .char_indices()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(i, c)| args.command[i + c.len_utf8()..].to_owned())
+        .unwrap_or_default();
+    let ctx = crate::plugin_context::hook_context(parts, Some(&session.0));
+    let Some(mut response) = state.app.do_join_command(&ctx, &args, &message).await else {
+        return Ok(Execute::Forward);
+    };
+    let command = mm_model::command::Command {
+        trigger: "join".to_owned(),
+        ..mm_model::command::Command::default()
+    };
+    state
+        .app
+        .handle_command_response(&ctx, &session.0, &command, &args, &mut response, true)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Execute::Answer(encoded(
+        StatusCode::OK,
+        &response,
+        "executeCommand",
+    )?))
 }
 
 #[cfg(test)]

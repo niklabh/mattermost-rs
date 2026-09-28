@@ -226,7 +226,7 @@ pub async fn update_user_status(
             return ApiError::invalid_param("status").into_response();
         }
     };
-    let submitted: Status = match serde_json::from_slice(&bytes) {
+    let submitted: Status = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(status) => status,
         Err(err) => {
             tracing::debug!(error = %err, "status body did not decode");
@@ -320,7 +320,10 @@ pub async fn update_user_custom_status(
         return custom_status_disabled("updateUserCustomStatus").into_response();
     }
 
-    let decoded: Option<mm_model::custom_status::CustomStatus> = serde_json::from_slice(&body).ok();
+    // `var customStatus model.CustomStatus; Decode` (status.go:145): `null` is the zero status,
+    // which the emptiness check below refuses by the same name.
+    let decoded: Option<mm_model::custom_status::CustomStatus> =
+        mm_model::utils::decode_one_value_from_json(&body).ok();
     let Some(mut custom_status) = decoded.filter(|cs| {
         !(cs.emoji.is_empty() && cs.text.is_empty()) && cs.are_duration_and_expiration_time_valid()
     }) else {
@@ -416,7 +419,9 @@ pub async fn remove_user_recent_custom_status(
         return custom_status_disabled("removeUserRecentCustomStatus").into_response();
     }
 
-    let Ok(status) = serde_json::from_slice::<mm_model::custom_status::CustomStatus>(&body) else {
+    let Ok(status) =
+        mm_model::utils::decode_one_value_from_json::<mm_model::custom_status::CustomStatus>(&body)
+    else {
         return ApiError::invalid_param("recent_custom_status").into_response();
     };
 

@@ -46,15 +46,9 @@ pub async fn push_notification_ack(
         .unwrap_or_default();
 
     // `Decode(&ack)` into a struct value: `null` decodes to nothing, an object to the fields —
-    // a mistyped one an error — and anything else is an error.
-    let decoded = match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(serde_json::Value::Null) => Ok(PushNotificationAck::default()),
-        Ok(value @ serde_json::Value::Object(_)) => {
-            serde_json::from_value::<PushNotificationAck>(value).map_err(|err| err.to_string())
-        }
-        Ok(_) => Err("not an object".to_owned()),
-        Err(err) => Err(err.to_string()),
-    };
+    // a mistyped one an error — trailing bytes are ignored, and anything else is an error.
+    let decoded = mm_model::utils::decode_one_value_from_json::<PushNotificationAck>(&bytes)
+        .map_err(|err| err.to_string());
     if let Err(details) = decoded {
         return ApiError::from(AppError::new(
             "pushNotificationAck",

@@ -108,7 +108,7 @@ impl App {
     /// `board:linked_properties` prop — which is what the handler marshals at 201.
     #[tracing::instrument(skip_all, fields(team_id = %channel.team_id, channel_type = %channel.channel_type, channel_id))]
     pub async fn create_board_channel(&self, channel: &mut Channel) -> AppResult<()> {
-        if !self.config().feature_flag_integrated_boards {
+        if !self.config().feature_flags.integrated_boards {
             return Err(AppError::boxed(
                 WHERE,
                 "app.channel.create_board_channel.boards_not_enabled.app_error",

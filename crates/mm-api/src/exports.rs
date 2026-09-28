@@ -373,14 +373,11 @@ pub(crate) async fn download_export_inner(
 /// Port of `generatePresignURLExport` (api4/export.go:87), reached as
 /// `POST /api/v4/exports/{export_name}/presign-url`.
 ///
-/// **Always a 500 on this deployment**, and at the first of three gates:
-/// `FeatureFlags.EnableExportDirectDownload` is `false` and unconfigurable on a Team Edition
-/// server. See [`mm_app::App::generate_presign_url_for_export`] for the two behind it, one of
-/// which a local file backend could never pass.
-///
-/// Ported rather than left to the proxy because "this route always refuses, and here is exactly
-/// which refusal" is a thing worth pinning: the id carries Go's `eport` typo, and a client
-/// matching on it must see the same string from either server.
+/// A 500 at one of three gates on any deployment this server can answer —
+/// `FeatureFlags.EnableExportDirectDownload` (off by default), `FileSettings.DedicatedExportStore`,
+/// and a link-generating export backend; see [`mm_app::App::generate_presign_url_for_export`].
+/// Past all three the export backend is S3 or Azure and the request forwards. The ids carry Go's
+/// `eport` typo, and a client matching on one must see the same string from either server.
 #[tracing::instrument(skip_all, fields(export_name = %export_name))]
 pub async fn generate_presign_url_export(
     State(state): State<AppState>,

@@ -1,0 +1,1176 @@
+{
+    "get_ip_address": [
+        {
+            "headers": [],
+            "name": "no trusted headers, v4 peer",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 54321,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:54321",
+            "trusted": [],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "no trusted headers ignores XFF",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [],
+            "name": "v6 peer",
+            "peer_ip": "2001:db8::7",
+            "peer_port": 443,
+            "raw_remote_addr": "",
+            "remote_addr": "[2001:db8::7]:443",
+            "trusted": [],
+            "want": "2001:db8::7"
+        },
+        {
+            "headers": [],
+            "name": "loopback v6 peer",
+            "peer_ip": "::1",
+            "peer_port": 80,
+            "raw_remote_addr": "",
+            "remote_addr": "[::1]:80",
+            "trusted": [],
+            "want": "::1"
+        },
+        {
+            "headers": [],
+            "name": "v4-mapped peer prints as v4",
+            "peer_ip": "::ffff:10.1.2.3",
+            "peer_port": 80,
+            "raw_remote_addr": "",
+            "remote_addr": "10.1.2.3:80",
+            "trusted": [],
+            "want": "10.1.2.3"
+        },
+        {
+            "headers": [],
+            "name": "unix socket remote addr",
+            "peer_ip": "",
+            "peer_port": 0,
+            "raw_remote_addr": "@",
+            "remote_addr": "@",
+            "trusted": [],
+            "want": ""
+        },
+        {
+            "headers": [],
+            "name": "no remote addr",
+            "peer_ip": "",
+            "peer_port": 0,
+            "raw_remote_addr": "",
+            "remote_addr": "",
+            "trusted": [],
+            "want": ""
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "unix socket, header still walked",
+            "peer_ip": "",
+            "peer_port": 0,
+            "raw_remote_addr": "@",
+            "remote_addr": "@",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "xff single",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4, 5.6.7.8"
+                ]
+            ],
+            "name": "xff list takes the first",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4,5.6.7.8"
+                ]
+            ],
+            "name": "xff list without spaces",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4 , 5.6.7.8"
+                ]
+            ],
+            "name": "xff first element padded",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "garbage, 1.2.3.4"
+                ]
+            ],
+            "name": "xff first garbage, second good",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "unknown"
+                ]
+            ],
+            "name": "xff unknown",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    ",1.2.3.4"
+                ]
+            ],
+            "name": "xff leading comma",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    ""
+                ]
+            ],
+            "name": "xff empty value",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [],
+            "name": "xff absent",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4 5.6.7.8"
+                ]
+            ],
+            "name": "xff space separated",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4:8080"
+                ]
+            ],
+            "name": "xff with port",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    " 1.2.3.4"
+                ]
+            ],
+            "name": "xff leading nbsp is trimmed",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4 ,x"
+                ]
+            ],
+            "name": "xff trailing nbsp before comma",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4, é"
+                ]
+            ],
+            "name": "xff non-ascii after the first element",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4"
+                ],
+                [
+                    "X-Forwarded-For",
+                    "5.6.7.8"
+                ]
+            ],
+            "name": "repeated xff line reads the first",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "bad"
+                ],
+                [
+                    "X-Forwarded-For",
+                    "5.6.7.8"
+                ]
+            ],
+            "name": "repeated xff line, first bad",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "configured name lower case",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "x-forwarded-for"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-FORWARDED-FOR",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "wire name upper case",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "x_real_ip",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "configured name with underscores",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X_Real_Ip"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "configured name empty",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                ""
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "configured name with a space",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For "
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "Forwarded",
+                    "for=1.2.3.4"
+                ]
+            ],
+            "name": "forwarded header syntax is not an address",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "Forwarded"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "5.6.7.8"
+                ],
+                [
+                    "X-Real-IP",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "real ip wins over xff",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Real-IP",
+                "X-Forwarded-For"
+            ],
+            "want": "1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "5.6.7.8"
+                ]
+            ],
+            "name": "real ip absent, xff used",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Real-IP",
+                "X-Forwarded-For"
+            ],
+            "want": "5.6.7.8"
+        },
+        {
+            "headers": [
+                [
+                    "X-Real-IP",
+                    "nope"
+                ],
+                [
+                    "X-Forwarded-For",
+                    "5.6.7.8"
+                ]
+            ],
+            "name": "real ip bad, xff used",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Real-IP",
+                "X-Forwarded-For"
+            ],
+            "want": "5.6.7.8"
+        },
+        {
+            "headers": [
+                [
+                    "X-Real-IP",
+                    "nope"
+                ]
+            ],
+            "name": "real ip bad, xff absent",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Real-IP",
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Real-IP",
+                    "nope"
+                ],
+                [
+                    "X-Forwarded-For",
+                    "also-nope"
+                ]
+            ],
+            "name": "both bad",
+            "peer_ip": "2001:db8::9",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "[2001:db8::9]:1",
+            "trusted": [
+                "X-Real-IP",
+                "X-Forwarded-For"
+            ],
+            "want": "2001:db8::9"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "5.6.7.8"
+                ],
+                [
+                    "X-Real-IP",
+                    "1.2.3.4"
+                ]
+            ],
+            "name": "xff first reverses the winner",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For",
+                "X-Real-IP"
+            ],
+            "want": "5.6.7.8"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "bad"
+                ]
+            ],
+            "name": "same header configured twice",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For",
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "2001:db8::1"
+                ]
+            ],
+            "name": "v6 address",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "2001:db8::1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "2001:DB8::1"
+                ]
+            ],
+            "name": "v6 upper case kept as written",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "2001:DB8::1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "2001:0db8:0000:0000:0000:0000:0000:0001"
+                ]
+            ],
+            "name": "v6 uncompressed kept as written",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "2001:0db8:0000:0000:0000:0000:0000:0001"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "[2001:db8::1]"
+                ]
+            ],
+            "name": "v6 bracketed",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "[2001:db8::1]:443"
+                ]
+            ],
+            "name": "v6 bracketed with port",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "fe80::1%eth0"
+                ]
+            ],
+            "name": "v6 with zone",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "::ffff:1.2.3.4"
+                ]
+            ],
+            "name": "v4-mapped v6",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "::ffff:1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "::FFFF:1.2.3.4"
+                ]
+            ],
+            "name": "v4-mapped v6 upper case",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "::FFFF:1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "::1.2.3.4"
+                ]
+            ],
+            "name": "v4-compatible v6",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "::1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1:2:3:4:5:6:1.2.3.4"
+                ]
+            ],
+            "name": "v6 with embedded v4 tail",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1:2:3:4:5:6:1.2.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "::ffff:01.2.3.4"
+                ]
+            ],
+            "name": "v6 embedded v4 leading zero",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "::"
+                ]
+            ],
+            "name": "v6 unspecified",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "::"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1::2::3"
+                ]
+            ],
+            "name": "v6 two double colons",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1:2:3:4:5:6:7:8:9"
+                ]
+            ],
+            "name": "v6 nine groups",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1:2:3:4:5:6:7::8"
+                ]
+            ],
+            "name": "v6 eight groups with double colon",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1:2:3:4:5:6::7"
+                ]
+            ],
+            "name": "v6 seven groups with double colon",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1:2:3:4:5:6::7"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "fffff::1"
+                ]
+            ],
+            "name": "v6 five hex digits",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "0001::1"
+                ]
+            ],
+            "name": "v6 leading zeros in a group",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "0001::1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1::"
+                ]
+            ],
+            "name": "v6 trailing single colon",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1::"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    ":1::2"
+                ]
+            ],
+            "name": "v6 leading single colon",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "0.0.0.0"
+                ]
+            ],
+            "name": "v4 unspecified",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "0.0.0.0"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "255.255.255.255"
+                ]
+            ],
+            "name": "v4 broadcast",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "255.255.255.255"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.256"
+                ]
+            ],
+            "name": "v4 octet 256",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3"
+                ]
+            ],
+            "name": "v4 three octets",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4.5"
+                ]
+            ],
+            "name": "v4 five octets",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "01.2.3.4"
+                ]
+            ],
+            "name": "v4 leading zero",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.0.3.4"
+                ]
+            ],
+            "name": "v4 zero octet",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "1.0.3.4"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.4."
+                ]
+            ],
+            "name": "v4 trailing dot",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "0x1.2.3.4"
+                ]
+            ],
+            "name": "v4 hex",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "+1.2.3.4"
+                ]
+            ],
+            "name": "v4 plus sign",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "1.2.3.0004"
+                ]
+            ],
+            "name": "v4 long octet",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "16909060"
+                ]
+            ],
+            "name": "integer",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        },
+        {
+            "headers": [
+                [
+                    "X-Forwarded-For",
+                    "localhost"
+                ]
+            ],
+            "name": "hostname",
+            "peer_ip": "10.0.0.1",
+            "peer_port": 1,
+            "raw_remote_addr": "",
+            "remote_addr": "10.0.0.1:1",
+            "trusted": [
+                "X-Forwarded-For"
+            ],
+            "want": "10.0.0.1"
+        }
+    ]
+}

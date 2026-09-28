@@ -466,6 +466,34 @@ async fn the_local_channel_writes_match_over_the_socket() {
         latest_post(&rust_socket_, &mine).await,
     );
     assert_same_notice(&go_removed, &rs_removed, "the removal notice");
+    // `c.LogAudit` on the socket too: no session and no peer, so the row is its path and text.
+    if let Some(pool) = common::fixture_pool().await {
+        for channel in [&theirs, &mine] {
+            let path = format!("/api/v4/channels/{channel}/members/{}", plain.id);
+            let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+                "SELECT extrainfo, userid, sessionid, ipaddress FROM audits WHERE action = $1",
+            )
+            .bind(&path)
+            .fetch_all(&pool)
+            .await
+            .expect("the audit rows");
+            let name: String = sqlx::query_scalar("SELECT name FROM channels WHERE id = $1")
+                .bind(channel)
+                .fetch_one(&pool)
+                .await
+                .expect("the channel");
+            assert_eq!(
+                rows,
+                [(
+                    format!("name={name} user_id={}", plain.id),
+                    String::new(),
+                    String::new(),
+                    String::new()
+                )],
+                "{path}"
+            );
+        }
+    }
     assert_eq!(go_removed["type"], "system_remove_from_channel");
     let system_bot = go_removed["user_id"]
         .as_str()
@@ -534,6 +562,49 @@ async fn the_local_channel_writes_match_over_the_socket() {
     let ((_, go_list), (_, rs_list)) = both("GET", &path).await;
     assert_eq!(go_list, rs_list, "{path}: both twins moved");
     assert!(String::from_utf8_lossy(&rs_list).contains(&mine));
+    // `c.LogAudit` twice on the socket too: a local session has no user or session id and the
+    // socket no peer address, so each row is its path and its text alone.
+    if let Some(pool) = common::fixture_pool().await {
+        for channel in [&theirs, &mine] {
+            let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+                "SELECT extrainfo, userid, sessionid, ipaddress FROM audits \
+                 WHERE action = $1 ORDER BY extrainfo",
+            )
+            .bind(format!("/api/v4/channels/{channel}/move"))
+            .fetch_all(&pool)
+            .await
+            .expect("the audit rows");
+            let name: String = sqlx::query_scalar("SELECT name FROM channels WHERE id = $1")
+                .bind(channel)
+                .fetch_one(&pool)
+                .await
+                .expect("the channel");
+            let team: String = sqlx::query_scalar("SELECT name FROM teams WHERE id = $1")
+                .bind(&other_team)
+                .fetch_one(&pool)
+                .await
+                .expect("the team");
+            let empty = String::new();
+            assert_eq!(
+                rows,
+                [
+                    (
+                        format!("channel={name}"),
+                        empty.clone(),
+                        empty.clone(),
+                        empty.clone()
+                    ),
+                    (
+                        format!("team={team}"),
+                        empty.clone(),
+                        empty.clone(),
+                        empty.clone()
+                    ),
+                ],
+                "{channel}: the local move's audit rows"
+            );
+        }
+    }
 
     // ---- localDeletePost: a soft delete of the join notice, then a permanent one of the
     // privacy notice; neither needs a permission and `DeleteBy` is nobody.

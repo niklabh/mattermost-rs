@@ -252,11 +252,57 @@ pub fn cleanup_desktop_tokens_scheduler() -> PeriodicScheduler {
     )
 }
 
+/// Port of `jobs/product_notices/scheduler.go`: a `PeriodicScheduler` whose `NextScheduleTime`
+/// is overridden to `time.Now()` plus `AnnouncementSettings.NoticesFetchFrequency` seconds —
+/// **no jitter**, unlike the base scheduler — enabled while either notice switch is on.
+pub struct ProductNoticesScheduler;
+
+impl Scheduler for ProductNoticesScheduler {
+    fn job_type(&self) -> &'static str {
+        mm_model::job::JOB_TYPE_PRODUCT_NOTICES
+    }
+
+    fn enabled(&self, config: &Config) -> bool {
+        config.admin_notices_enabled || config.user_notices_enabled
+    }
+
+    fn next_schedule_time(
+        &self,
+        config: &Config,
+        _now: DateTime<Local>,
+        _pending_jobs: bool,
+        _last_successful_job: Option<&Job>,
+    ) -> Option<DateTime<Local>> {
+        Local::now().checked_add_signed(chrono::Duration::seconds(config.notices_fetch_frequency))
+    }
+}
+
+/// Port of `notify_admin.MakeInstallPluginScheduler` (install_plugin_scheduler.go:16) for
+/// `install_plugin_notify_admin`: every twenty-four hours (plus the base jitter), always enabled
+/// for this type.
+pub fn install_plugin_notify_admin_scheduler() -> PeriodicScheduler {
+    PeriodicScheduler::new(
+        mm_model::job::JOB_TYPE_INSTALL_PLUGIN_NOTIFY_ADMIN,
+        Duration::from_secs(24 * 60 * 60),
+        |_config| true,
+    )
+}
+
 /// The schedulers this build knows about, matching [`crate::job_runtime::registered_workers`].
 ///
 /// Nothing starts them; see the module note and [D-802].
 pub fn registered_schedulers() -> Vec<Box<dyn Scheduler>> {
-    vec![Box::new(cleanup_desktop_tokens_scheduler())]
+    vec![
+        Box::new(cleanup_desktop_tokens_scheduler()),
+        Box::new(crate::job_workers::active_users_scheduler()),
+        Box::new(crate::job_workers::mobile_session_metadata_scheduler()),
+        Box::new(crate::job_workers::refresh_materialized_views_scheduler()),
+        Box::new(crate::job_workers::expiry_notify_scheduler()),
+        Box::new(crate::job_workers::cleanup_expired_access_tokens_scheduler()),
+        Box::new(crate::job_workers::notify_expiring_access_tokens_scheduler()),
+        Box::new(ProductNoticesScheduler),
+        Box::new(install_plugin_notify_admin_scheduler()),
+    ]
 }
 
 #[cfg(test)]
@@ -358,11 +404,65 @@ mod tests {
         );
     }
 
+    /// `NoticesFetchFrequency` seconds from now, with no jitter, and off only when both notice
+    /// switches are.
+    #[test]
+    fn the_product_notices_scheduler_waits_the_fetch_frequency() {
+        let config = Config {
+            notices_fetch_frequency: 120,
+            ..Config::default()
+        };
+        let before = Local::now();
+        let next = ProductNoticesScheduler
+            .next_schedule_time(&config, before, false, None)
+            .expect("representable");
+        let delta = next - before;
+        assert!(delta >= chrono::Duration::seconds(120), "{delta}");
+        assert!(delta < chrono::Duration::seconds(121), "no jitter: {delta}");
+        for (admin, user, on) in [
+            (true, false, true),
+            (false, true, true),
+            (false, false, false),
+        ] {
+            let config = Config {
+                admin_notices_enabled: admin,
+                user_notices_enabled: user,
+                ..Config::default()
+            };
+            assert_eq!(
+                ProductNoticesScheduler.enabled(&config),
+                on,
+                "{admin} {user}"
+            );
+        }
+    }
+
+    /// Workers with no scheduler here, each for a stated reason. Nothing starts a scheduler in
+    /// this server (see the module note), so a missing one changes nothing at run time; the list
+    /// keeps the gap named rather than silent.
+    ///
+    /// - `post_persistent_notifications`: `enabledFunc` is `MinimumProfessionalLicense` and the
+    ///   period is half `PersistentNotificationIntervalMinutes`, neither of which a
+    ///   [`Scheduler`] can read from [`Config`].
+    const WORKERS_WITHOUT_A_SCHEDULER: &[&str] =
+        &[mm_model::job::JOB_TYPE_POST_PERSISTENT_NOTIFICATIONS];
+
     #[test]
     fn the_registered_schedulers_match_the_registered_workers() {
         let schedulers = registered_schedulers();
         let workers = crate::job_runtime::registered_workers();
-        assert_eq!(schedulers.len(), workers.len());
+        // The batch-migration workers have no scheduler in Go either: their jobs are queued once,
+        // at startup, by the migrations that need them (migrations.go:1211), and the CSV export by
+        // the report API (report.go:225). So the counts differ; only the direction
+        // "a scheduler queues nothing no worker runs" is an invariant.
+        assert!(schedulers.len() <= workers.len());
+        for job_type in WORKERS_WITHOUT_A_SCHEDULER {
+            assert!(workers.get(job_type).is_some(), "{job_type} has a worker");
+            assert!(
+                schedulers.iter().all(|s| s.job_type() != *job_type),
+                "{job_type} is listed as unscheduled but has a scheduler"
+            );
+        }
         for scheduler in &schedulers {
             assert!(
                 workers.get(scheduler.job_type()).is_some(),
@@ -547,37 +647,19 @@ mod go_parity {
     }
 
     /// `time.Parse("15:04", …)` is the daily scheduler's whole input validation, and a failure is
-    /// the `nil` start time that switches the scheduler off (base_schedulers.go:70). Recorded
-    /// because the next person to port a `DailyScheduler` needs it, and because replaying it
-    /// found a divergence that reading would not have.
-    ///
-    /// Ten of the eleven inputs agree between Go's `"15:04"` and chrono's `"%H:%M"`, including
-    /// the two that surprise: `"3:00"` — a **one-digit hour** — is accepted by both, and
-    /// `"0300"` is rejected by both.
-    ///
-    /// The eleventh does not. **`"03:0"` parses in chrono and fails in Go**: Go's `04` is a
-    /// zero-padded two-digit minute and will not take one digit, while chrono's `%M` will. So a
-    /// `RefreshPostStatsRunTime` of `"03:0"` switches the job off on the Go server and would
-    /// schedule it for 03:00 on a port that reached for `%H:%M`. Nothing consumes this yet —
-    /// `refresh_materialized_views` is the only `DailyScheduler` in the public tree and is not
-    /// ported — so it is a trap recorded rather than a bug fixed; see [D-803].
+    /// the `nil` start time that switches it off. [`crate::job_workers::parse_go_hhmm`] must agree
+    /// with Go on **every** input of the corpus — acceptance, hour and minute. chrono's `%H:%M`
+    /// does not (`"03:0"` and `"3:5"` parse there and fail in Go, [D-803]), which is why the
+    /// scheduler does not use it.
     #[test]
     fn the_hhmm_parse_corpus_is_what_a_daily_scheduler_must_reproduce() {
-        /// The one input on which chrono is more permissive than Go.
-        const CHRONO_ACCEPTS_AND_GO_DOES_NOT: &str = "03:0";
-
         let mut accepted_by_go = 0;
-        let mut divergences = Vec::new();
         for case in cases("parse_hhmm") {
             let input = case["input"].as_str().expect("input");
             let go_ok = case["ok"].as_bool().expect("ok");
-            let parsed = NaiveTime::parse_from_str(input, "%H:%M");
-
-            if parsed.is_ok() != go_ok {
-                divergences.push(input);
-                continue;
-            }
-            let Ok(parsed) = parsed else { continue };
+            let parsed = crate::job_workers::parse_go_hhmm(input);
+            assert_eq!(parsed.is_some(), go_ok, "{input:?}: {case}");
+            let Some(parsed) = parsed else { continue };
             accepted_by_go += 1;
             assert_eq!(parsed.hour() as u64, case["hour"].as_u64().expect("hour"));
             assert_eq!(
@@ -590,12 +672,10 @@ mod go_parity {
             assert_eq!(case["year"], 0);
             assert_eq!(case["offset_seconds"], 0);
         }
-
-        assert_eq!(accepted_by_go, 4, "four inputs are accepted by both");
-        assert_eq!(
-            divergences,
-            vec![CHRONO_ACCEPTS_AND_GO_DOES_NOT],
-            "the set of Go/chrono parse divergences changed; see [D-803]"
+        assert_eq!(accepted_by_go, 6, "six inputs are accepted by Go");
+        assert!(
+            NaiveTime::parse_from_str("03:0", "%H:%M").is_ok(),
+            "chrono still accepts what Go refuses; the reason this is not `%H:%M`"
         );
     }
 

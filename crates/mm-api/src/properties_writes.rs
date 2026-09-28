@@ -62,7 +62,7 @@ use mm_model::utils::{AppError, is_valid_id};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::custom_profile_attributes::{decode_struct, first_value, is_options_only_patch};
+use crate::custom_profile_attributes::{decode_struct, is_options_only_patch};
 use crate::error::ApiError;
 use crate::properties::{
     CONNECTION_ID_HEADER, Group, encoded, permission_error, refusal, v2_group,
@@ -457,11 +457,8 @@ pub async fn patch_system_property_values(
 /// error (the empty-batch refusal follows), an array decodes item by item, anything else is
 /// the decode error.
 fn decode_items(body: &[u8]) -> Option<Vec<PropertyValuePatchItem>> {
-    match first_value(body)? {
-        serde_json::Value::Null => Some(Vec::new()),
-        array @ serde_json::Value::Array(_) => serde_json::from_value(array).ok(),
-        _ => None,
-    }
+    // A `null` element is a zero item, as Go decodes one into a value slice ([D-075]).
+    mm_model::utils::decode_one_value_from_json(body).ok()
 }
 
 /// What the write half of `hasTargetAccess` decided.

@@ -104,10 +104,14 @@ pub trait WebhookStore {
         hook: &IncomingWebhook,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
-    /// Port of `SqlWebhookStore.UpdateIncoming` (webhook_store.go:87).
+    /// Port of `SqlWebhookStore.UpdateIncoming` (webhook_store.go:101).
+    ///
+    /// **Stamps `hook.update_at` itself**, as Go's does (`hook.UpdateAt = model.GetMillis()`) —
+    /// so a caller that writes a hook it did not stamp, `MoveChannel`'s re-homing, still moves
+    /// `UpdateAt`, and the caller's hook carries the value written.
     fn update_incoming(
         &self,
-        hook: &IncomingWebhook,
+        hook: &mut IncomingWebhook,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
     /// Port of `SqlWebhookStore.DeleteIncoming` (webhook_store.go:151) — a **soft** delete.
@@ -123,10 +127,14 @@ pub trait WebhookStore {
         hook: &OutgoingWebhook,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
-    /// Port of `SqlWebhookStore.UpdateOutgoing` (webhook_store.go:298).
+    /// Port of `SqlWebhookStore.UpdateOutgoing` (webhook_store.go:394).
+    ///
+    /// Stamps `hook.update_at`, like [`WebhookStore::update_incoming`] — which is what makes
+    /// `RegenOutgoingWebhookToken`'s answer carry a fresh `update_at` and a moved channel's hook
+    /// a new one.
     fn update_outgoing(
         &self,
-        hook: &OutgoingWebhook,
+        hook: &mut OutgoingWebhook,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
     /// Port of `SqlWebhookStore.DeleteOutgoing` (webhook_store.go:313) — a **soft** delete.
@@ -310,15 +318,17 @@ fn string_array_column(
     raw: Option<String>,
     column: &'static str,
 ) -> Result<Option<StringArray>, StoreError> {
+    // The text `null` — `StringArray.Value` of a nil slice, so what Go itself writes for a hook
+    // with no trigger words — unmarshals to nil. [D-331]
     match raw {
         None => Ok(None),
-        Some(json) => serde_json::from_str(&json)
-            .map(Some)
-            .map_err(|source| StoreError::Decode {
+        Some(json) => serde_json::from_str::<Option<StringArray>>(&json).map_err(|source| {
+            StoreError::Decode {
                 entity: "OutgoingWebhook",
                 column,
                 source,
-            }),
+            }
+        }),
     }
 }
 
@@ -385,7 +395,8 @@ impl WebhookStore for SqlWebhookStore {
     /// last-used stamp — which is why `UpdateIncomingWebhook` copies them off the old hook first
     /// and the store never has to.
     #[tracing::instrument(skip_all, fields(id = %hook.id))]
-    async fn update_incoming(&self, hook: &IncomingWebhook) -> Result<(), StoreError> {
+    async fn update_incoming(&self, hook: &mut IncomingWebhook) -> Result<(), StoreError> {
+        hook.update_at = mm_model::utils::get_millis();
         sqlx::query!(
             r#"
             UPDATE incomingwebhooks
@@ -484,7 +495,8 @@ impl WebhookStore for SqlWebhookStore {
     /// `Token` and `CreatorId`. That is what lets `RegenOutgoingWebhookToken` reuse it with
     /// nothing changed but the token.
     #[tracing::instrument(skip_all, fields(id = %hook.id))]
-    async fn update_outgoing(&self, hook: &OutgoingWebhook) -> Result<(), StoreError> {
+    async fn update_outgoing(&self, hook: &mut OutgoingWebhook) -> Result<(), StoreError> {
+        hook.update_at = mm_model::utils::get_millis();
         let trigger_words = string_array_text(hook.trigger_words.as_ref())?;
         let callback_urls = string_array_text(hook.callback_urls.as_ref())?;
 
@@ -543,9 +555,12 @@ impl WebhookStore for SqlWebhookStore {
         Ok(())
     }
 
-    /// **No `DeleteAt` predicate**, and that is Go's. The intersection check therefore compares a
-    /// new hook against *deleted* ones too, so a trigger word freed by deleting a hook stays
-    /// unusable. Reproduced: the alternative accepts hooks Go refuses.
+    /// Port of `GetOutgoingByTeam(teamId, -1, -1)` → `GetOutgoingByTeamByUser` (webhook_store.go:337):
+    /// live hooks only (`DeleteAt = 0`), ordered by `DisplayName, Id`. Its two callers are the
+    /// intersection check on create and update, and `createPost`'s would-a-hook-fire forward. An
+    /// earlier version read deleted rows too, on a claim that Go does — measured wrong 2026-09-25:
+    /// Go re-creates a deleted hook's trigger and callback with a 201, and a deleted hook fires
+    /// nothing. `parity::webhook_writes` and `parity::post_creates` pin both.
     ///
     /// Go's `-1` offset and limit reach `squirrel` as `OFFSET -1 LIMIT -1`, which Postgres treats
     /// as "no offset, no limit"; expressed here as the absence of both clauses.
@@ -575,6 +590,8 @@ impl WebhookStore for SqlWebhookStore {
                    iconurl       AS "iconurl!"
               FROM outgoingwebhooks
              WHERE teamid = $1
+               AND deleteat = 0
+             ORDER BY displayname, id
             "#,
             team_id,
         )

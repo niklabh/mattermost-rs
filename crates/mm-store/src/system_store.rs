@@ -28,6 +28,15 @@ pub trait SystemStore {
         name: &str,
     ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + Send;
 
+    /// Port of `SqlSystemStore.Save` (system_store.go:30): a plain `INSERT`. An existing `Name`
+    /// is the unique-key violation, as an error — the batch migrations' `markAsComplete` only
+    /// logs it, so re-running a completed migration leaves its row as it was.
+    fn save(
+        &self,
+        name: &str,
+        value: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlSystemStore.SaveOrUpdate` (system_store.go:39): one upsert on `Name`.
     fn save_or_update(
         &self,
@@ -91,6 +100,22 @@ impl SystemStore for SqlSystemStore {
 
         tracing::Span::current().record("found", value.is_some());
         Ok(value)
+    }
+
+    #[tracing::instrument(skip(self, value), fields(name = %name))]
+    async fn save(&self, name: &str, value: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "INSERT INTO systems (name, value) VALUES ($1, $2)",
+            name,
+            value,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to save system property with name={name}"),
+            source,
+        })?;
+        Ok(())
     }
 
     #[tracing::instrument(skip(self, value), fields(name = %name))]

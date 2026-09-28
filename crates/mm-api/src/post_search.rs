@@ -141,15 +141,13 @@ fn invalid_body() -> ApiError {
 
 /// The first JSON value in the body, Go-style: see the module docs.
 pub(crate) fn decode_search_parameter(bytes: &[u8]) -> Result<SearchParameter, ApiError> {
-    let mut values =
-        serde_json::Deserializer::from_slice(bytes).into_iter::<Option<SearchParameter>>();
-    match values.next() {
-        Some(Ok(params)) => Ok(params.unwrap_or_default()),
-        Some(Err(err)) => {
+    // `var params model.SearchParameter; Decode` (post.go:971): the shared body decoder's rules.
+    match mm_model::utils::decode_one_value_from_json::<SearchParameter>(bytes) {
+        Ok(params) => Ok(params),
+        Err(err) => {
             tracing::debug!(error = %err, "search body did not decode");
             Err(invalid_body())
         }
-        None => Err(invalid_body()),
     }
 }
 
@@ -182,6 +180,7 @@ async fn serve_search(
         .app
         .search_posts_for_user(
             hook_ctx,
+            Some(&session.0),
             terms,
             user_id,
             team_id,

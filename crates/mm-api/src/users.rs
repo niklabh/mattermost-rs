@@ -534,41 +534,34 @@ pub async fn search_users(
         }
     };
 
-    // Decoded to a `Value` first: **serde builds a struct from a JSON array positionally** where
-    // Go's decoder refuses a non-object, so `["x"]` would otherwise become a search for `x`.
-    let decoded: serde_json::Value = match mm_model::utils::decode_one_from_json(&bytes) {
-        Ok(decoded) => decoded,
-        Err(err) => {
-            tracing::debug!(error = %err, "user search body did not decode");
-            return ApiError::invalid_param("props").into_response();
-        }
-    };
-    let Some(map) = decoded.as_object() else {
-        // `Decode` into a non-pointer struct leaves the zero value for `null`, which then fails
-        // the empty-term check rather than the decode one — the same 400 either way.
-        return if decoded.is_null() {
-            ApiError::invalid_param("term").into_response()
-        } else {
-            ApiError::invalid_param("props").into_response()
+    // `var props model.UserSearch; Decode` — a value: `null` is the zero search (which fails the
+    // term check below), an array or a mistyped member is the `props` 400, and a folded or `null`
+    // member decodes as Go decodes it.
+    let props: mm_model::user_search::UserSearch =
+        match mm_model::utils::decode_one_value_from_json(&bytes) {
+            Ok(props) => props,
+            Err(err) => {
+                tracing::debug!(error = %err, "user search body did not decode");
+                return ApiError::invalid_param("props").into_response();
+            }
         };
-    };
 
-    if USER_SEARCH_FORWARDED_FIELDS
-        .iter()
-        .any(|name| map.contains_key(*name))
-    {
+    // Which fields the body *named*, spelt any way Go would fold onto them. The decode above
+    // succeeded, so the body is an object or `null`.
+    let named_forwarded_field = match mm_model::utils::decode_one_from_json(&bytes) {
+        Ok(serde_json::Value::Object(map)) => map.keys().any(|key| {
+            let key = mm_model::go_json::fold_name(key);
+            USER_SEARCH_FORWARDED_FIELDS
+                .iter()
+                .any(|name| mm_model::go_json::fold_name(name) == key)
+        }),
+        _ => false,
+    };
+    if named_forwarded_field {
         tracing::Span::current().record("forwarded", true);
         let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
         return crate::proxy::forward_to_go(State(state), request).await;
     }
-
-    let props: mm_model::user_search::UserSearch = match serde_json::from_value(decoded.clone()) {
-        Ok(props) => props,
-        Err(err) => {
-            tracing::debug!(error = %err, "user search body has the wrong field types");
-            return ApiError::invalid_param("props").into_response();
-        }
-    };
 
     // `if props.Limit == 0 { props.Limit = UserSearchDefaultLimit }` — **before** the term check.
     let limit = if props.limit == 0 {
@@ -2051,12 +2044,12 @@ pub async fn save_user_terms_of_service(
     // Bound so the shape of the route is visible, then dropped — see the doc comment.
     let _ = user_id;
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
         .unwrap_or_default();
-    // Port of `model.StringInterfaceFromJSON` (utils.go:527): every failure is an empty map.
-    let props: std::collections::HashMap<String, serde_json::Value> =
-        serde_json::from_slice(&bytes).unwrap_or_default();
+    // Port of `model.StringInterfaceFromJSON` (utils.go:590).
+    let props = mm_model::utils::string_interface_from_json(&bytes);
 
     let Some(terms_of_service_id) = props.get("termsOfServiceId").and_then(|v| v.as_str()) else {
         return Err(ApiError::invalid_param("termsOfServiceId"));
@@ -2075,6 +2068,14 @@ pub async fn save_user_terms_of_service(
         .save_user_terms_of_service(&session.0.user_id, terms_of_service_id, accepted)
         .await?;
 
+    // `"TermsOfServiceId=" + id + ", accepted=" + strconv.FormatBool(accepted)`.
+    audit
+        .log(
+            &state.app,
+            Some(&session.0),
+            &format!("TermsOfServiceId={terms_of_service_id}, accepted={accepted}"),
+        )
+        .await;
     Ok(status_ok())
 }
 

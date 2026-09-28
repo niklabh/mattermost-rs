@@ -69,6 +69,13 @@ use crate::error::StoreError;
 
 /// Port of `store.PostStore`, narrowed to what `GET /posts/{post_id}` reaches.
 pub trait PostStore {
+    /// Port of `SqlPostStore.RefreshPostStats` (post_store.go:3358): `posts_by_team_day`, then
+    /// `bot_posts_by_team_day`, each under its own `analyticsContext` of `timeout_seconds`.
+    fn refresh_post_stats(
+        &self,
+        timeout_seconds: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlPostPersistentNotificationStore.GetSingle`
     /// (post_persistent_notification_store.go:25), narrowed to the one question its only reachable
     /// caller asks: **does an undeleted persistent-notification row exist for this post**.
@@ -466,6 +473,32 @@ pub trait PostStore {
         post_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlPostPersistentNotificationStore.Get` (post_persistent_notification_store.go:46):
+    /// up to `per_page` live rows created **and** last sent at or before `max_time` and sent fewer
+    /// than `max_sent_count` times. No `ORDER BY`, as in Go — the caller treats a page as a set,
+    /// and pages by re-querying after [`PostStore::update_persistent_notifications_last_activity`]
+    /// moved the rows it saw out of the window. `per_page == 0` is Go's `1000`.
+    fn get_due_persistent_notifications(
+        &self,
+        max_time: i64,
+        max_sent_count: i16,
+        per_page: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<PersistentNotificationRow>, StoreError>> + Send;
+
+    /// Port of `SqlPostPersistentNotificationStore.UpdateLastActivity` (:73): `LastSentAt` to now
+    /// and `SentCount + 1` for every id, deleted rows included — Go's `WHERE` is the ids alone.
+    fn update_persistent_notifications_last_activity(
+        &self,
+        post_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPostPersistentNotificationStore.DeleteExpired` (:106): soft-delete every live
+    /// row sent `max_sent_count` times or more.
+    fn delete_expired_persistent_notifications(
+        &self,
+        max_sent_count: i16,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlPostPersistentNotificationStore.DeleteByChannel`
     /// (post_persistent_notification_store.go:124) for the single channel its only reachable
     /// caller passes — `App.DeleteChannel`, which archives a channel.
@@ -505,7 +538,8 @@ pub trait PostStore {
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
     /// Port of `SqlPostStore.Save` (post_store.go:341) and the `SaveMultiple` (:159) it delegates
-    /// to, narrowed to **one root post that is not burn-on-read, prioritised or persistent**.
+    /// to, narrowed to **one post that is not burn-on-read**. A priority and its
+    /// persistent-notification row are written in the same transaction.
     ///
     /// # `LastPostAt` moves even when the message count does not
     ///
@@ -637,12 +671,17 @@ pub trait PostStore {
     ///
     /// `params_list` is taken by value because Go rewrites `params.Terms` in place before the
     /// searches run and the caller never reads it again.
+    ///
+    /// `cjk_search` is `FeatureFlags.CJKSearch`, which Go's store reads from the running config
+    /// through `WithFeatureFlags` (sqlstore/store.go:184); this store has no config, so the
+    /// caller passes it.
     fn search_posts_for_user(
         &self,
         params_list: Vec<SearchParams>,
         user_id: &str,
         team_id: &str,
         page: i64,
+        cjk_search: bool,
     ) -> impl std::future::Future<Output = Result<PostSearchResults, StoreError>> + Send;
 
     /// Port of `SqlPostStore.PermanentDeleteByUser` (post_store.go:1163).
@@ -1588,13 +1627,18 @@ struct ThreadedPostRow {
 /// An empty participants array leaves the field **nil**, not `[]`: Go appends into a nil slice
 /// and never allocates when there is nothing to append. `participants` carries no `omitempty`,
 /// so that is `"participants":null` on the wire.
+///
+/// `COALESCE(Threads.Participants, '[]')` catches only a SQL NULL; a jsonb `null` reaches
+/// `StringArray.Scan` and unmarshals to a nil slice, which is the same empty loop. [D-331]
 fn threaded_post_from_row(row: ThreadedPostRow) -> Result<Post, StoreError> {
     let participant_ids: Vec<String> =
-        serde_json::from_value(row.thread_participants).map_err(|source| StoreError::Decode {
-            entity: "Thread",
-            column: "participants",
-            source,
-        })?;
+        serde_json::from_value::<Option<Vec<String>>>(row.thread_participants)
+            .map_err(|source| StoreError::Decode {
+                entity: "Thread",
+                column: "participants",
+                source,
+            })?
+            .unwrap_or_default();
 
     let mut post = post_from_row(PostRow {
         id: row.id,
@@ -1716,7 +1760,36 @@ pub(crate) fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
     })
 }
 
+/// A `PersistentNotifications` row — Go's `model.PostPersistentNotifications`, which never
+/// reaches the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistentNotificationRow {
+    pub post_id: String,
+    pub create_at: i64,
+    pub last_sent_at: i64,
+    pub delete_at: i64,
+    pub sent_count: i16,
+}
+
 impl PostStore for SqlPostStore {
+    #[tracing::instrument(skip(self))]
+    async fn refresh_post_stats(&self, timeout_seconds: i64) -> Result<(), StoreError> {
+        refresh_materialized_view(
+            &self.pool,
+            "posts_by_team_day",
+            timeout_seconds,
+            "error refreshing materialized view posts_by_team_day",
+        )
+        .await?;
+        refresh_materialized_view(
+            &self.pool,
+            "bot_posts_by_team_day",
+            timeout_seconds,
+            "error refreshing materialized view bot_posts_by_team_day",
+        )
+        .await
+    }
+
     #[tracing::instrument(skip(self), fields(post_id = %post_id))]
     async fn has_persistent_notification(&self, post_id: &str) -> Result<bool, StoreError> {
         // `DeleteAt = 0` bare, not coalesced — the column is NOT NULL here, unlike `Reactions`.
@@ -3677,6 +3750,82 @@ impl PostStore for SqlPostStore {
         })
     }
 
+    #[tracing::instrument(skip(self), fields(max_time, max_sent_count, per_page))]
+    async fn get_due_persistent_notifications(
+        &self,
+        max_time: i64,
+        max_sent_count: i16,
+        per_page: i64,
+    ) -> Result<Vec<PersistentNotificationRow>, StoreError> {
+        let per_page = if per_page == 0 { 1000 } else { per_page };
+        // The four nullable columns are Go's `int64`/`int16` fields, which a NULL would fail to
+        // scan; every writer sets them, so they are read as non-null.
+        sqlx::query_as!(
+            PersistentNotificationRow,
+            r#"
+            SELECT postid AS "post_id!",
+                   createat AS "create_at!",
+                   lastsentat AS "last_sent_at!",
+                   deleteat AS "delete_at!",
+                   sentcount AS "sent_count!"
+              FROM persistentnotifications
+             WHERE deleteat = 0
+               AND createat <= $1
+               AND lastsentat <= $1
+               AND sentcount < $2
+             LIMIT $3
+            "#,
+            max_time,
+            max_sent_count,
+            per_page,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to get notifications".to_owned(),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip(self), fields(count = post_ids.len()))]
+    async fn update_persistent_notifications_last_activity(
+        &self,
+        post_ids: &[String],
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE persistentnotifications SET lastsentat = $1, sentcount = sentcount + 1 \
+             WHERE postid = ANY($2)",
+            get_millis(),
+            post_ids,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update last activity for posts {post_ids:?}"),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip(self), fields(max_sent_count))]
+    async fn delete_expired_persistent_notifications(
+        &self,
+        max_sent_count: i16,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE persistentnotifications SET deleteat = $1 WHERE deleteat = 0 AND sentcount >= $2",
+            get_millis(),
+            max_sent_count,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete notifications".to_owned(),
+            source,
+        })
+    }
+
     #[tracing::instrument(skip(self), fields(post_id = %post_id))]
     async fn delete_persistent_notification(&self, post_id: &str) -> Result<(), StoreError> {
         sqlx::query!(
@@ -3975,13 +4124,6 @@ impl PostStore for SqlPostStore {
                 detail: "a burn-on-read post is a TemporaryPost write",
             });
         }
-        if post.get_persistent_notification() == Some(true) {
-            return Err(StoreError::Argument {
-                entity: "Post",
-                detail: "savePostsPersistentNotifications writes PersistentNotifications",
-            });
-        }
-
         post.pre_save();
 
         let max_post_size = self.max_post_size().await?;
@@ -4038,7 +4180,26 @@ impl PostStore for SqlPostStore {
                 source,
             })?;
         }
-        // `savePostsPersistentNotifications` — refused above; see the trait docs.
+        // `savePostsPersistentNotifications` (post_store.go:3133): a row for a priority that
+        // asks for persistent notifications, `CreateAt` the post's and every other column zero.
+        if post
+            .get_priority()
+            .and_then(|priority| priority.persistent_notifications)
+            == Some(true)
+        {
+            sqlx::query!(
+                "INSERT INTO persistentnotifications (postid, createat, lastsentat, deleteat, sentcount) \
+                 VALUES ($1, $2, 0, 0, 0)",
+                post.id,
+                post.create_at,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to save posts persistent notifications".to_owned(),
+                source,
+            })?;
+        }
 
         tx.commit().await.map_err(|source| StoreError::Db {
             context: "commit_transaction".to_owned(),
@@ -4141,6 +4302,7 @@ impl PostStore for SqlPostStore {
         user_id: &str,
         team_id: &str,
         page: i64,
+        cjk_search: bool,
     ) -> Result<PostSearchResults, StoreError> {
         if page > 0 {
             return Ok(PostSearchResults::new(Some(PostList::new()), None));
@@ -4156,7 +4318,7 @@ impl PostStore for SqlPostStore {
             // "remove any unquoted term that contains only non-alphanumeric chars" — applied to
             // `Terms` only; `ExcludedTerms` is not filtered here or anywhere.
             params.terms = remove_non_alpha_numeric_unquoted_terms(&params.terms, " ");
-            let found = search(&self.pool, team_id, user_id, params).await?;
+            let found = search(&self.pool, team_id, user_id, params, cjk_search).await?;
             posts.extend(&found);
         }
         posts.sort_by_create_at();
@@ -4641,16 +4803,61 @@ pub(crate) const SPECIAL_SEARCH_CHARS: [char; 7] = ['<', '>', '+', '(', ')', '~'
 ///
 /// # The CJK branch is live
 ///
-/// `FeatureFlags.CJKSearch` defaults to `true` (feature_flags.go:198), so a term containing Han,
-/// Hiragana, Katakana or Hangul takes the `LIKE` path instead of `to_tsquery` on a stock server
-/// as much as here. `SearchWithoutUserId` is never set by this route's caller and is not
+/// `cjk_search` is `FeatureFlags.CJKSearch`, which defaults to `true` (feature_flags.go:198) and
+/// which Go's store reads through `WithFeatureFlags` (sqlstore/store.go:184) — see
+/// [`term_clause`]. `SearchWithoutUserId` is never set by this route's caller and is not
 /// modelled: every search is scoped to the caller's channel memberships.
+/// The term half of `search`'s WHERE (post_store.go:2282-2300).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct TermClause {
+    /// The `to_tsquery` text, on the full-text path.
+    ts_query: Option<String>,
+    /// One `LIKE` pattern per term on the CJK path; `None` when there are none, so no clause.
+    like_terms: Option<Vec<String>>,
+    /// One `NOT LIKE` pattern per excluded term on the CJK path.
+    like_excluded: Option<Vec<String>>,
+}
+
+/// Go's three-way branch over the blanked terms: nothing when both are empty ("we've already
+/// confirmed that we have a channel or user to search for"); `buildCJKSearchClause`
+/// (post_store.go:2202) when `FeatureFlags.CJKSearch` is on **and** either side contains Han,
+/// Hiragana, Katakana or Hangul; otherwise `to_tsquery`, after `neutralizeNonWordHyphens`.
+///
+/// With the flag off a CJK term goes to `to_tsquery` like any other, which under the default
+/// English text-search config matches only whole space-delimited tokens.
+fn term_clause(terms: &str, excluded_terms: &str, or_terms: bool, cjk_search: bool) -> TermClause {
+    if terms.is_empty() && excluded_terms.is_empty() {
+        return TermClause::default();
+    }
+    if cjk_search && (contains_cjk(terms) || contains_cjk(excluded_terms)) {
+        // One `LIKE` per term, ANDed or ORed, and one `NOT LIKE` per excluded term. An empty
+        // list adds no clause, so it binds as NULL.
+        let patterns = |input: &str| -> Option<Vec<String>> {
+            let parsed: Vec<String> = split_cjk_search_terms(input)
+                .iter()
+                .map(|term| like_pattern(term))
+                .collect();
+            (!parsed.is_empty()).then_some(parsed)
+        };
+        return TermClause {
+            ts_query: None,
+            like_terms: patterns(terms),
+            like_excluded: patterns(excluded_terms),
+        };
+    }
+    TermClause {
+        ts_query: Some(build_ts_query(terms, excluded_terms, or_terms)),
+        ..TermClause::default()
+    }
+}
+
 #[tracing::instrument(skip_all, fields(team_id = %team_id, hashtag = params.is_hashtag, or_terms = params.or_terms))]
 async fn search(
     pool: &PgPool,
     team_id: &str,
     user_id: &str,
     params: &SearchParams,
+    cjk_search: bool,
 ) -> Result<PostList, StoreError> {
     let mut list = PostList::new();
     // Note what the list omits: `ExcludedDate`, `ExcludedAfterDate` and `ExcludedBeforeDate`.
@@ -4714,31 +4921,11 @@ async fn search(
         excluded_terms = excluded_terms.replace(c, " ");
     }
 
-    let mut ts_query: Option<String> = None;
-    let mut like_terms: Option<Vec<String>> = None;
-    let mut like_excluded: Option<Vec<String>> = None;
-    if terms.is_empty() && excluded_terms.is_empty() {
-        // "we've already confirmed that we have a channel or user to search for"
-    } else if contains_cjk(&terms) || contains_cjk(&excluded_terms) {
-        // `buildCJKSearchClause` (post_store.go:2202): one `LIKE` per term, ANDed or ORed, and
-        // one `NOT LIKE` per excluded term. An empty list adds no clause, so it binds as NULL.
-        let parsed: Vec<String> = split_cjk_search_terms(&terms)
-            .iter()
-            .map(|term| like_pattern(term))
-            .collect();
-        if !parsed.is_empty() {
-            like_terms = Some(parsed);
-        }
-        let parsed: Vec<String> = split_cjk_search_terms(&excluded_terms)
-            .iter()
-            .map(|term| like_pattern(term))
-            .collect();
-        if !parsed.is_empty() {
-            like_excluded = Some(parsed);
-        }
-    } else {
-        ts_query = Some(build_ts_query(&terms, &excluded_terms, params.or_terms));
-    }
+    let TermClause {
+        ts_query,
+        like_terms,
+        like_excluded,
+    } = term_clause(&terms, &excluded_terms, params.or_terms, cjk_search);
 
     let text_config = crate::channel_store::default_text_search_config(pool).await?;
 
@@ -5048,6 +5235,44 @@ fn like_pattern(term: &str) -> String {
 mod tests {
     use super::*;
 
+    /// `FeatureFlags.CJKSearch` (post_store.go:2284): on — Go's default — a CJK term takes the
+    /// `LIKE` path; off, it takes `to_tsquery` like any other term. A non-CJK term and an empty
+    /// search are the same either way.
+    #[test]
+    fn the_cjk_flag_decides_like_or_tsquery() {
+        let like = term_clause("日本 語", "中", false, true);
+        assert_eq!(
+            like,
+            TermClause {
+                ts_query: None,
+                like_terms: Some(vec!["%日本%".to_owned(), "%語%".to_owned()]),
+                like_excluded: Some(vec!["%中%".to_owned()]),
+            }
+        );
+        // Either side alone is enough.
+        assert!(term_clause("plain", "中", true, true).ts_query.is_none());
+        assert_eq!(
+            term_clause("日本 語", "中", false, false),
+            TermClause {
+                ts_query: Some(build_ts_query("日本 語", "中", false)),
+                ..TermClause::default()
+            }
+        );
+        for cjk_search in [true, false] {
+            assert_eq!(
+                term_clause("plain words", "", true, cjk_search),
+                TermClause {
+                    ts_query: Some(build_ts_query("plain words", "", true)),
+                    ..TermClause::default()
+                }
+            );
+            assert_eq!(
+                term_clause("", "", false, cjk_search),
+                TermClause::default()
+            );
+        }
+    }
+
     fn row() -> PostRow {
         PostRow {
             id: "post00000000000000000000000".to_owned(),
@@ -5277,4 +5502,37 @@ mod search_term_tests {
         assert_eq!(like_pattern("a_b"), "%a\\_b%");
         assert_eq!(like_pattern("a\\b"), "%ab%");
     }
+}
+
+/// `REFRESH MATERIALIZED VIEW <view>` under Go's `analyticsContext`
+/// (`context.WithTimeout(…, AnalyticsQueryTimeout seconds)`, store.go:489).
+///
+/// The deadline is `SET LOCAL statement_timeout` inside a transaction of its own, so it is the
+/// server that stops the refresh, as the cancelled context makes `lib/pq` do; a Rust-side
+/// timeout would stop waiting and leave the refresh running. Not `CONCURRENTLY`, as in Go ("takes
+/// less resources and completes faster at the expense of locking the mat view"). `view` is always
+/// one of four literals, never input.
+pub(crate) async fn refresh_materialized_view(
+    pool: &sqlx::PgPool,
+    view: &'static str,
+    timeout_seconds: i64,
+    context: &'static str,
+) -> Result<(), StoreError> {
+    let db = |source| StoreError::Db {
+        context: context.to_owned(),
+        source,
+    };
+    let mut tx = pool.begin().await.map_err(db)?;
+    // A zero or negative timeout is an already-expired context in Go; `statement_timeout = 0`
+    // would mean "none" here, so the smallest positive deadline stands in for it.
+    let millis = timeout_seconds.saturating_mul(1000).max(1);
+    sqlx::query(&format!("SET LOCAL statement_timeout = {millis}"))
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    sqlx::query(&format!("REFRESH MATERIALIZED VIEW {view}"))
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    tx.commit().await.map_err(db)
 }

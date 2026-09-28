@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO propertyvalues\n                (id, targetid, targettype, groupid, fieldid, value,\n                 createat, updateat, deleteat, createdby, updatedby)\n            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Jsonb",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "89b162e63abfd2b8c241d86b33444d31a3afe61e85efbe0acc5c67a821055cdc"
+}

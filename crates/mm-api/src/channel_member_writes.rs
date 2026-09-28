@@ -49,26 +49,16 @@ use crate::proxy;
 /// `maxListSize` (api4/channel.go:18) — the cap on `user_ids`.
 const MAX_LIST_SIZE: usize = 1000;
 
-/// Port of `model.MapFromJSON` (utils.go:507).
-///
-/// **Every failure is an empty map**, including a body that is not an object, an object with a
-/// non-string value, and an empty body. Go's `json.NewDecoder(...).Decode(&objmap)` result is
-/// discarded and a nil map is replaced with an allocated one, so the caller can never distinguish
-/// "no keys" from "unparseable".
-///
-/// Note the partial-decode case: Go's decoder fills the map as it goes and only *then* fails, but
-/// `objmap` is non-nil by then, so `{"a":"b","c":5}` yields `{"a":"b"}` — not `{}`. `serde_json`
-/// has no partial result, so this returns `{}` for that input. The difference is reachable only
-/// with a mixed-type object, and only on the three routes that read a single key out of the map;
-/// see the parity suite, which asserts the shared cases and records this one.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    serde_json::from_slice::<StringMap>(bytes).unwrap_or_default()
+    mm_model::utils::map_from_json(bytes)
 }
 
-/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — the same swallow-everything shape for
-/// `map[string]any`.
+/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — see
+/// [`mm_model::utils::string_interface_from_json`].
 fn string_interface_from_json(bytes: &[u8]) -> serde_json::Map<String, serde_json::Value> {
-    serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes).unwrap_or_default()
+    mm_model::utils::string_interface_from_json(bytes)
 }
 
 /// Port of `web.ReturnStatusOK` (web/web.go:127).
@@ -254,7 +244,7 @@ pub async fn update_channel_member_scheme_roles(
             return ApiError::invalid_param("scheme_roles").into_response();
         }
     };
-    let scheme_roles: SchemeRoles = match serde_json::from_slice(&bytes) {
+    let scheme_roles: SchemeRoles = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(roles) => roles,
         Err(err) => {
             tracing::debug!(error = %err, "scheme_roles body did not decode");
@@ -444,6 +434,14 @@ pub async fn remove_channel_member(
     {
         Ok(MemberWrite::Done(())) => {
             tracing::Span::current().record("forwarded", false);
+            // `c.LogAudit("name=" + channel.Name + " user_id=" + c.Params.UserId)` on success.
+            crate::audit_log::AuditRequest::of_request(&request)
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("name={} user_id={user_id}", channel.name),
+                )
+                .await;
             status_ok()
         }
         Ok(MemberWrite::Forward(why)) => {
@@ -452,6 +450,45 @@ pub async fn remove_channel_member(
             proxy::forward_to_go(State(state), request).await
         }
         Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// The group-constrained block of `addChannelMember` (api4/channel.go:2452) and
+/// `localAddChannelMember` (channel_local.go:202): `FilterNonGroupChannelMembers` over every
+/// requested id, before any is added.
+///
+/// A filter failure is answered two ways, because Go type-switches on the `error`: the
+/// group-user read's `*AppError` (500 `app.user.get_profiles.app_error`) is passed through
+/// unchanged, and the profile read's bare store error becomes 400 `api.channel.add_members.error`.
+/// Any id no linked group vouches for (and that is not a bot) makes the whole request 400
+/// `api.channel.add_members.user_denied`, naming them in the profile read's username order.
+pub(crate) async fn group_filter_refusal(
+    state: &AppState,
+    where_: &str,
+    user_ids: &[String],
+    channel: &mm_model::channel::Channel,
+) -> Option<ApiError> {
+    match state
+        .app
+        .filter_non_group_channel_members(user_ids, channel)
+        .await
+    {
+        Ok(non_members) if non_members.is_empty() => None,
+        Ok(non_members) => Some(ApiError::from(mm_app::channel_member::user_denied(
+            where_,
+            non_members,
+        ))),
+        Err(mm_app::group::NonGroupFilterError::GroupUsers(err)) => Some(ApiError::from(err)),
+        Err(err @ mm_app::group::NonGroupFilterError::Profiles(_)) => {
+            tracing::warn!(error = %err, "the group filter failed");
+            Some(ApiError::from(AppError::new(
+                where_,
+                "api.channel.add_members.error",
+                None,
+                String::new(),
+                400,
+            )))
+        }
     }
 }
 
@@ -500,7 +537,8 @@ struct AddMemberRequest {
 ///
 /// A **guest** session (`UserCanSeeOtherUser`'s restricted branch), a `post_root_id`
 /// (`GetSinglePost` plus a `ThreadMemberships` write), a **discoverable private** channel (the
-/// join-request queue), and a **group-constrained** channel (`FilterNonGroupChannelMembers`).
+/// join-request queue). A **group-constrained** channel is filtered here: see
+/// [`group_filter_refusal`].
 #[tracing::instrument(skip_all, fields(channel_id = %channel_id, added, forwarded))]
 pub async fn add_channel_member(
     State(state): State<AppState>,
@@ -514,6 +552,7 @@ pub async fn add_channel_member(
 
     let (parts, body) = request.into_parts();
     let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
+    let audit = crate::audit_log::AuditRequest::of(&parts);
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -616,9 +655,11 @@ pub async fn add_channel_member(
         }
     }
 
-    if channel.is_group_constrained() {
-        tracing::Span::current().record("forwarded", true);
-        return forward(state, parts, bytes).await;
+    if channel.is_group_constrained()
+        && let Some(refusal) =
+            group_filter_refusal(&state, "addChannelMember", &parsed.user_ids, &channel).await
+    {
+        return refusal.into_response();
     }
 
     // Go's loop, with `lastError` and `c.Err` tracked separately: `lastError` decides whether the
@@ -694,7 +735,18 @@ pub async fn add_channel_member(
             .add_channel_member(member_user_id, &channel, &opts, &hook_ctx)
             .await
         {
-            Ok(MemberWrite::Done(member)) => new_members.push(member),
+            Ok(MemberWrite::Done(member)) => {
+                // `c.LogAudit("name=" + channel.Name + " user_id=" + cm.UserId)`, once per member
+                // the loop adds — not for one it skipped as already present.
+                audit
+                    .log(
+                        &state.app,
+                        Some(&session.0),
+                        &format!("name={} user_id={}", channel.name, member.user_id),
+                    )
+                    .await;
+                new_members.push(member);
+            }
             Ok(MemberWrite::Forward(why)) => {
                 tracing::Span::current().record("forwarded", true);
                 tracing::debug!(reason = why, "handing the member add to Go");
@@ -890,7 +942,7 @@ pub async fn set_channel_members(
     };
 
     let req: mm_model::channel_member::SetChannelMembersRequest =
-        match serde_json::from_slice(&bytes) {
+        match mm_model::utils::decode_one_value_from_json(&bytes) {
             Ok(req) => req,
             Err(err) => {
                 tracing::debug!(error = %err, "set_channel_members body did not decode");
@@ -1038,14 +1090,24 @@ mod tests {
     /// The swallow-everything decode is the behaviour three routes depend on, and it is the one a
     /// reader is most likely to "fix" into a 400.
     #[test]
-    fn map_from_json_turns_every_failure_into_an_empty_map() {
-        assert!(map_from_json(b"").is_empty());
-        assert!(map_from_json(b"[]").is_empty());
-        assert!(map_from_json(b"\"x\"").is_empty());
-        assert!(map_from_json(b"{\"roles\": 5}").is_empty());
+    fn map_from_json_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"roles":"channel_user","n":5} trailing"#);
+        assert_eq!(mixed.get("roles").map(String::as_str), Some("channel_user"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(b"{\"roles\":\"channel_user\"}").get("roles"),
-            Some(&"channel_user".to_owned())
+            map_from_json(br#"{"roles":7}"#)
+                .get("roles")
+                .map(String::as_str),
+            Some("")
         );
     }
 

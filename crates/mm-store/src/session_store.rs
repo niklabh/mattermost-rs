@@ -80,6 +80,24 @@ pub trait SessionStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Session>, StoreError>> + Send;
 
+    /// Port of `SqlSessionStore.GetSessionsExpired` (session_store.go:246): sessions whose
+    /// `ExpiresAt` is non-zero, in the past and within the last `threshold_millis`, optionally
+    /// only those with a `DeviceId` and only those not yet notified. No `ORDER BY`, as in Go.
+    fn get_sessions_expired(
+        &self,
+        threshold_millis: i64,
+        mobile_only: bool,
+        unnotified_only: bool,
+    ) -> impl std::future::Future<Output = Result<Vec<Session>, StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.UpdateExpiredNotify` (session_store.go:273): the flag alone, by
+    /// id; a miss updates nothing and succeeds.
+    fn update_expired_notify(
+        &self,
+        session_id: &str,
+        notified: bool,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlSessionStore.UpdateExpiresAt` (session_store.go:315): the new expiry, and
     /// `ExpiredNotify` cleared so the session can be warned about again. **Id only**, like
     /// [`SessionStore::update_last_activity_at`]; a miss updates nothing and succeeds.
@@ -209,8 +227,14 @@ struct SessionRow {
 impl SessionRow {
     /// Map a row to the wire type. `team_members` is `db:"-"` in Go and hydrated separately.
     fn into_session(self) -> Result<Session, StoreError> {
+        // Every Go read scans `[]*model.Session` through sqlx, which allocates the nil
+        // `StringMap` first: a SQL NULL leaves it **empty** (`StringMap.Scan` returns early) and a
+        // jsonb `null` sets it back to nil. The second is what `update_props` writes for `None`,
+        // so it is reachable without a hand-edited row. [D-331]
         let props =
             match self.props {
+                None => Some(StringMap::new()),
+                Some(serde_json::Value::Null) => None,
                 Some(value) => Some(serde_json::from_value::<StringMap>(value).map_err(
                     |source| StoreError::Decode {
                         entity: "Session",
@@ -218,7 +242,6 @@ impl SessionRow {
                         source,
                     },
                 )?),
-                None => None,
             };
 
         Ok(Session {
@@ -541,6 +564,77 @@ impl SessionStore for SqlSessionStore {
         Ok(sessions)
     }
 
+    #[tracing::instrument(skip(self), fields(count))]
+    async fn get_sessions_expired(
+        &self,
+        threshold_millis: i64,
+        mobile_only: bool,
+        unnotified_only: bool,
+    ) -> Result<Vec<Session>, StoreError> {
+        let now = mm_model::utils::get_millis();
+        // Go adds each optional predicate only when its flag is set; `NOT $n OR …` is the same
+        // query either way. `<> ''` and `<> true` keep squirrel's `NotEq`, which a NULL fails.
+        let rows = sqlx::query_as!(
+            SessionRow,
+            r#"
+            SELECT id,
+                   token,
+                   createat,
+                   expiresat,
+                   lastactivityat,
+                   userid,
+                   deviceid,
+                   voipdeviceid,
+                   roles,
+                   isoauth,
+                   props,
+                   expirednotify
+              FROM sessions
+             WHERE expiresat <> 0
+               AND expiresat < $1
+               AND expiresat > $2
+               AND (NOT $3 OR deviceid <> '')
+               AND (NOT $4 OR expirednotify <> true)
+            "#,
+            now,
+            now - threshold_millis,
+            mobile_only,
+            unnotified_only
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Sessions".to_owned(),
+            source,
+        })?;
+        let sessions = rows
+            .into_iter()
+            .map(SessionRow::into_session)
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        tracing::Span::current().record("count", sessions.len());
+        Ok(sessions)
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn update_expired_notify(
+        &self,
+        session_id: &str,
+        notified: bool,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE sessions SET expirednotify = $1 WHERE id = $2",
+            notified,
+            session_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Session with sessionId={session_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
     #[tracing::instrument(skip_all, fields(session_id = %session_id, time = time))]
     async fn update_expires_at(&self, session_id: &str, time: i64) -> Result<(), StoreError> {
         sqlx::query!(
@@ -790,7 +884,8 @@ mod tests {
         assert_eq!(session.token, "");
         assert_eq!(session.expires_at, 0);
         assert!(!session.is_oauth);
-        assert_eq!(session.props, None);
+        // sqlx allocated the map before `StringMap.Scan` returned early ([D-331]).
+        assert_eq!(session.props, Some(StringMap::new()));
         // Hydrated by the caller, never by the row.
         assert_eq!(session.team_members, None);
     }

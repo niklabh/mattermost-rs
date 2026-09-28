@@ -680,11 +680,12 @@ impl User {
 
         // Go's two-stage behaviour: nothing is written for a malformed document, but a
         // well-formed one that simply is not a CustomStatus still allocates the value.
-        let value: serde_json::Value = serde_json::from_str(data).ok()?;
+        let value: serde_json::Value = crate::utils::unmarshal_from_json(data.as_bytes()).ok()?;
         if value.is_null() {
             return None;
         }
-        Some(serde_json::from_value(value).unwrap_or_default())
+        // `json.Unmarshal` into a `*CustomStatus`: Go's key fold and `null` rules.
+        Some(crate::utils::from_value_go(&value).unwrap_or_default())
     }
 
     /// Port of `(*User).CustomStatus` (user.go:799).
@@ -721,7 +722,8 @@ impl User {
         if status.is_empty() {
             return true;
         }
-        serde_json::from_str::<serde_json::Value>(status).is_ok_and(|v| !v.is_null())
+        crate::utils::unmarshal_from_json::<serde_json::Value>(status.as_bytes())
+            .is_ok_and(|v| !v.is_null())
     }
 
     /// Port of `(*User).SetDefaultNotifications` (user.go:597). Replaces the map wholesale.

@@ -31,8 +31,8 @@
 //! A shape this server cannot answer is Go's `API <Name> called but not implemented.`, decided
 //! before anything is written: `GetUsers` with a role filter, the `update_at_asc` sort,
 //! `UpdatedAfter` or view restrictions ([D-1030]); `SearchUsers` outside a team or a channel
-//! ([D-1031]); `GetProfileImage` for a user with no stored picture (the generated default
-//! avatar, [D-204]); and a deactivation of a user who owns bots ([D-461]).
+//! ([D-1031]); `GetProfileImage` on a storage driver this port does not implement; and a
+//! deactivation of a user who owns bots ([D-461]).
 
 use mm_model::team::Team;
 use mm_model::team_search::TeamSearch;
@@ -254,9 +254,10 @@ impl AppPluginApi {
         Ok(api::Z_SearchUsersReturns { a, b })
     }
 
-    /// Port of `PluginAPI.GetProfileImage` (app/plugin_api.go:1016): the user, then the stored
-    /// picture's bytes. A user with no stored picture gets Go's generated avatar there, which is
-    /// not reproduced ([D-204]); that call is not implemented here.
+    /// Port of `PluginAPI.GetProfileImage` (app/plugin_api.go:1016): the user, then
+    /// [`crate::App::get_profile_image`] — the stored picture, or the generated avatar (written
+    /// back when `LastPictureUpdate == 0`). Only an unimplemented storage driver is not
+    /// implemented here.
     pub(super) async fn users_get_profile_image(
         &self,
         args: api::Z_GetProfileImageArgs,
@@ -270,8 +271,8 @@ impl AppPluginApi {
                 });
             }
         };
-        match self.app.get_profile_image(&user.id).await {
-            Ok(bytes) => Ok(api::Z_GetProfileImageReturns { a: bytes, b: None }),
+        match self.app.get_profile_image(&user).await {
+            Ok((bytes, _)) => Ok(api::Z_GetProfileImageReturns { a: bytes, b: None }),
             Err(PrepareError::App(err)) => Ok(api::Z_GetProfileImageReturns {
                 a: Vec::new(),
                 b: self.wire(err),

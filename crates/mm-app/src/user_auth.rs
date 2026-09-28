@@ -11,24 +11,13 @@
 //! caller who gets the `auth_service` wrong has locked the account out, and nothing in the route
 //! confirms anything.
 //!
-//! # MFA: every path that would touch a secret is a gate on this deployment
+//! # MFA
 //!
-//! `ServiceSettings.EnableMultifactorAuthentication` is off, and it is the *second* check in both
-//! [`App::generate_mfa_secret`] and [`App::activate_mfa`] — after `GetUser`, and in `ActivateMfa`
-//! after the auth-service refusal too. So the reachable answers are a 404, a 400 and a 501, all
-//! three decided from a `SELECT` and the configuration, and the TOTP library Go reaches for
-//! afterwards is never entered. Neither function ports that library: a secret generated here
-//! could not be compared against Go's, which is generated from `crypto/rand`, and a token
-//! validated here could not be shown to agree with `dgoogauth`. The api layer forwards the whole
-//! request when the flag is on; the `Err` arms below exist so that a caller which forgot to
-//! forward fails loudly instead of quietly authenticating without a second factor — the same
-//! shape as [`crate::login`]'s [`App::check_user_mfa`].
-//!
-//! Deactivation is *not* here. `DeactivateMfa` has no configuration gate at all, writes
-//! `MfaActive = false` and `MfaSecret = ''`, and then sends an MFA-change e-mail from a
-//! goroutine — a side effect after the write, which is the shape this process forwards rather
-//! than diverges on ([D-238]). See [`crate::App::get_user`] and the api module for where that
-//! decision is taken.
+//! [`App::generate_mfa_secret`], [`App::update_mfa`] and the activate/deactivate pair behind it
+//! port `App` and `platform/shared/mfa` whole; the TOTP and the QR code are
+//! [`crate::otp`], checked against Go's own `dgoogauth` and `rsc/qr` output. The flag is the
+//! second check in both generate and activate — after `GetUser`, and in activation after the
+//! auth-service refusal too — and deactivation has none at all.
 
 use mm_model::mfa_secret::MfaSecret;
 use mm_model::user::external::USER_AUTH_SERVICE_LDAP;
@@ -99,31 +88,56 @@ impl App {
         Ok(user_auth.clone())
     }
 
-    /// Port of `App.GenerateMfaSecret` (app/user.go:937), as far as this deployment can reach.
+    /// Port of `App.GenerateMfaSecret` (app/user.go:937) and `UserService.GenerateMfaSecret`
+    /// (users/users.go:249).
     ///
     /// `GetUser` first — so an unknown id is a **404 before** the disabled-MFA 501, and a caller
-    /// cannot use this route to probe whether MFA is on without naming a real account. Measured
-    /// in that order against the running server.
-    ///
-    /// Past the flag, Go mints 160 bits from `crypto/rand`, renders a QR PNG, and **writes**
-    /// `MfaSecret`. None of that is here; the api layer forwards the request before this is
-    /// called when the flag is on.
+    /// cannot use this route to probe whether MFA is on without naming a real account. Then 20
+    /// bytes of randomness, the `otpauth://` link for `ServiceSettings.SiteURL` and the user's
+    /// e-mail, the QR code's PNG ([`crate::otp::generate_secret`]), and the write: `MfaSecret`
+    /// replaced, the replay list emptied, `UpdateAt` bumped. `MfaActive` is untouched, so a user
+    /// who generates a new secret while enrolled stays enrolled — on the new secret, which their
+    /// authenticator does not have yet. Any failure past the flag is the one 500,
+    /// `mfa.generate_qr_code.create_code.app_error`.
     #[tracing::instrument(skip_all, fields(user_id = %user_id))]
     pub async fn generate_mfa_secret(&self, user_id: &str) -> AppResult<MfaSecret> {
-        let _user = self.get_user(user_id).await?;
+        let user = self.get_user(user_id).await?;
 
         if !self.config().enable_multifactor_authentication {
             return Err(mfa_disabled("GenerateMfaSecret"));
         }
 
-        tracing::error!(
-            user_id = %user_id,
-            "MFA secret generation reached in a port that has none — the caller should have forwarded"
-        );
-        Err(mfa_disabled("GenerateMfaSecret"))
+        let create_code_failed = || {
+            AppError::boxed(
+                "GenerateMfaSecret",
+                "mfa.generate_qr_code.create_code.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        };
+        let site_url = self.config().site_url.clone().unwrap_or_default();
+        let generated = crate::otp::generate_secret(&site_url, &user.email).map_err(|err| {
+            tracing::error!(error = %err, "rendering the MFA QR code failed");
+            create_code_failed()
+        })?;
+        self.store()
+            .user()
+            .update_mfa_secret(&user.id, &generated.secret)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "storing the MFA secret failed");
+                create_code_failed()
+            })?;
+        self.invalidate_cache_for_user(&user.id).await;
+
+        Ok(MfaSecret {
+            secret: generated.secret,
+            qr_code: crate::otp::qr_code_base64(&generated.png),
+        })
     }
 
-    /// Port of `App.ActivateMfa` (app/user.go:955), as far as this deployment can reach.
+    /// Port of `App.ActivateMfa` (app/user.go:955) over `mfa.Activate`.
     ///
     /// The order is `GetUser`, then the auth-service refusal, then the flag — so an `ldap` or
     /// email account on a server with MFA off gets the 501, and a `gitlab` account gets a **400**
@@ -132,10 +146,14 @@ impl App {
     /// password account — passes, and `email` spelled out explicitly does **not**: nothing on
     /// this route normalises the two, and `updateUserAuth` is the reason a row can hold either.
     ///
-    /// The token is not validated here and the parameter is unused; Go hands it to `dgoogauth`
-    /// past the flag. See the module doc.
+    /// Past the flag, the token is checked against the stored secret at the current step
+    /// ([`crate::otp::authenticate`]). A well-formed code that does not match is the **401**
+    /// `mfa.activate.bad_token.app_error`; everything else that fails — a code that is not six
+    /// digits among them, since `errors.Is(err, mfa.InvalidToken)` is false for dgoogauth's parse
+    /// error — is the **500** `mfa.activate.app_error`. On success `MfaActive` is set and then the
+    /// replay list stored, two writes, in that order.
     #[tracing::instrument(skip_all, fields(user_id = %user_id))]
-    pub async fn activate_mfa(&self, user_id: &str, _token: &str) -> AppResult<()> {
+    pub async fn activate_mfa(&self, user_id: &str, token: &str) -> AppResult<()> {
         let user = self.get_user(user_id).await?;
 
         if !user.auth_service.is_empty() && user.auth_service != USER_AUTH_SERVICE_LDAP {
@@ -152,11 +170,115 @@ impl App {
             return Err(mfa_disabled("ActivateMfa"));
         }
 
-        tracing::error!(
-            user_id = %user_id,
-            "MFA activation reached in a port that has none — the caller should have forwarded"
-        );
-        Err(mfa_disabled("ActivateMfa"))
+        let activate_failed = || {
+            AppError::boxed(
+                "ActivateMfa",
+                "mfa.activate.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        };
+        let users = self.store().user();
+        let used = users
+            .get_mfa_used_timestamps(&user.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "reading the MFA replay list failed");
+                activate_failed()
+            })?;
+        let secret = user.mfa_secret.as_str();
+        let reuse = match crate::otp::authenticate(secret, &used, token, crate::otp::current_step())
+        {
+            Ok(reuse) => reuse,
+            Err(crate::otp::TokenError::Invalid) => {
+                return Err(AppError::boxed(
+                    "ActivateMfa",
+                    "mfa.activate.bad_token.app_error",
+                    None,
+                    String::new(),
+                    401,
+                ));
+            }
+            Err(crate::otp::TokenError::Parse) => return Err(activate_failed()),
+        };
+        users
+            .update_mfa_active(&user.id, true)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "setting MfaActive failed");
+                activate_failed()
+            })?;
+        users
+            .store_mfa_used_timestamps(&user.id, &reuse)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "storing the MFA replay list failed");
+                activate_failed()
+            })?;
+        self.invalidate_cache_for_user(&user.id).await;
+        Ok(())
+    }
+
+    /// Port of `App.DeactivateMfa` (app/user.go:984) over `mfa.Deactivate`: `GetUser`, then
+    /// `MfaActive = false`, then `MfaSecret = ''` (which also empties the replay list). **No
+    /// configuration gate**: a user can switch MFA off on a server that has it disabled. Either
+    /// write failing is the 500 `mfa.deactivate.app_error`.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    pub async fn deactivate_mfa(&self, user_id: &str) -> AppResult<()> {
+        let user = self.get_user(user_id).await?;
+        let deactivate_failed = |err: StoreError| {
+            tracing::error!(error = %err, "deactivating MFA failed");
+            AppError::boxed(
+                "DeactivateMfa",
+                "mfa.deactivate.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        };
+        let users = self.store().user();
+        users
+            .update_mfa_active(&user.id, false)
+            .await
+            .map_err(deactivate_failed)?;
+        users
+            .update_mfa_secret(&user.id, "")
+            .await
+            .map_err(deactivate_failed)?;
+        self.invalidate_cache_for_user(&user.id).await;
+        Ok(())
+    }
+
+    /// Port of `App.UpdateMfa` (app/user.go:1723): activate or deactivate, then the MFA-change
+    /// e-mail from a goroutine — re-reading the user, and only logging a failure, so the e-mail is
+    /// never part of the answer.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, activate))]
+    pub async fn update_mfa(&self, activate: bool, user_id: &str, token: &str) -> AppResult<()> {
+        if activate {
+            self.activate_mfa(user_id, token).await?;
+        } else {
+            self.deactivate_mfa(user_id).await?;
+        }
+        let app = self.clone();
+        let user_id = user_id.to_owned();
+        tokio::spawn(async move {
+            let user = match app.get_user(&user_id).await {
+                Ok(user) => user,
+                Err(err) => {
+                    tracing::error!(error = %err.id, "Failed to get user");
+                    return;
+                }
+            };
+            let site_url = app.live_site_url().await.unwrap_or_default();
+            if let Err(err) = app
+                .send_mfa_change_email(&user.email, activate, &user.locale, &site_url)
+                .await
+            {
+                tracing::error!(error = %err, "Failed to send mfa change email");
+            }
+        });
+        Ok(())
     }
 }
 

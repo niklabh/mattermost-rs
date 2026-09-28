@@ -1,0 +1,21 @@
+# avatar.plan — D-204: gofont (freetype-go port) and mm_app::profile_image, 2026-09-25.
+# even-odd-fold survived the glyph oracle (no Nunito glyph overlaps itself) and is pinned by the
+# raster unit test; blend-0x100 survived a filter that matched no test. gofont lines replay the
+# 161-case glyph oracle; mm-app lines the 51 avatars; api lines image_writes.
+even-odd-fold	crates/gofont/src/raster.rs	alpha = 0x2000 - alpha;	alpha = 0x1fff - alpha;	unit	area_to_alpha_folds_even_odd
+vertical-edge-area	crates/gofont/src/raster.rs	let x0f_times2 = (i64::from(x0) - 64 * x0i) * 2;	let x0f_times2 = (i64::from(x0) - 64 * x0i) * 1;	unit	every_glyph_matches_gos_rasteriser
+quad-split-depth	crates/gofont/src/raster.rs	            dev /= 4;	            dev /= 2;	unit	every_glyph_matches_gos_rasteriser
+scale-rounding	crates/gofont/src/truetype.rs	x.wrapping_add(half)	x.wrapping_add(half - 1)	unit	every_glyph_matches_gos_rasteriser
+implied-midpoint-dropped	crates/gofont/src/face.rs	            } else if !on0 {	            } else if on0 {	unit	every_glyph_matches_gos_rasteriser
+subpixel-bias-dropped	crates/gofont/src/face.rs	let dot_x = dot.x.wrapping_add(self.sub_pixel_bias_x) & self.sub_pixel_mask_x;	let dot_x = dot.x & self.sub_pixel_mask_x;	unit	every_glyph_matches_gos_rasteriser
+blend-0x100	crates/gofont/src/draw.rs	.wrapping_mul(0x101);	.wrapping_mul(0x100);	unit	every_avatar_is_gos_png_byte_for_byte
+colour-modulus	crates/mm-app/src/profile_image.rs	COLORS[(i64::from(seed) % COLORS.len() as i64) as usize]	COLORS[(i64::from(seed) % (COLORS.len() as i64 - 1)) as usize]	unit	every_avatar_is_gos_png_byte_for_byte
+centring-height	crates/mm-app/src/profile_image.rs	glyph_bounds.max.y.wrapping_sub(glyph_bounds.min.y)	glyph_bounds.max.y	unit	every_avatar_is_gos_png_byte_for_byte
+initial-is-a-char	crates/mm-app/src/profile_image.rs	        .as_bytes()\n        .first()\n        .map(|b| char::from(*b))	        .chars()\n        .next()	unit	every_avatar_is_gos_png_byte_for_byte
+failed-read-cached-a-day	crates/mm-api/src/images.rs	            Some(FAILED_READ_CACHE_CONTROL),	            Some(DAY_CACHE_CONTROL),	api	image_writes
+no-write-back	crates/mm-app/src/user.rs	                if user.last_picture_update == 0 {	                if false {	api	image_writes
+rename-not-redrawn	crates/mm-app/src/user.rs	        if new_user.username != update.old.username && new_user.last_picture_update <= 0 {	        if new_user.username == update.old.username && new_user.last_picture_update <= 0 {	api	image_writes
+reset-sign	crates/mm-store/src/user_store.rs	            -cur_time,	            cur_time,	api	image_writes
+# no-op controls
+control-annotate-out	crates/mm-app/src/profile_image.rs	let mut out = Vec::new();	let mut out: Vec<u8> = Vec::new();	unit	every_avatar_is_gos_png_byte_for_byte
+control-max-abs	crates/gofont/src/raster.rs	if a < b { b } else { a }	if b > a { b } else { a }	unit	every_glyph_matches_gos_rasteriser

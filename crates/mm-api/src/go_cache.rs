@@ -6,12 +6,16 @@
 //! Go exposes no "forget this user's sessions" route, so each method drives a route whose handler
 //! runs exactly the clear it needs, with no lasting write:
 //!
-//! - **`clear_user_sessions`** inserts a throwaway session row for the user and has Go revoke it
-//!   (`POST /users/{id}/sessions/revoke`). `PlatformService.RevokeSession` deletes the row and
-//!   calls `ClearUserSessionCache(session.UserId)` — the very function being reproduced. If Go
-//!   does not answer 200 the row is deleted here instead, so it never outlives the call. Go
-//!   audits that request, so each call leaves an `Audits` row attributed to the cache
-//!   administrator that the same operation through Go would not ([D-870]).
+//! - **`clear_user_sessions`** inserts a throwaway session row for the user and, **authenticated
+//!   as that row**, sends `PUT /users/sessions/device` with the body `{}`. `handleDeviceProps`
+//!   (api4/user.go:2707) then has no device id to attach and no prop to write
+//!   (`SetExtraSessionProps` with an empty map writes nothing), and ends in
+//!   `ClearSessionCacheForUser(Session().UserId)` — the very function being reproduced. It writes
+//!   **no `Audits` row**: that handler calls `LogAudit` only inside `attachDeviceIds`. The row is
+//!   deleted here afterwards, whatever Go answered. It is an OAuth session so that neither
+//!   `MfaRequired` (authentication.go:390) nor the idle-timeout revoke in `GetSession` can refuse
+//!   it. This replaced a `POST /users/{id}/sessions/revoke` by the administrator, which Go audits
+//!   and which left a row the same operation through Go would not ([D-870], closed 2026-09-25).
 //! - **`invalidate_user`** calls `POST /users/{id}/reset_failed_attempts`, whose
 //!   `UpdateFailedPasswordAttempts(id, 0)` goes through the local-cache layer's
 //!   `InvalidateProfileCacheForUser`. It **writes the counter**, so it is sent only when the
@@ -257,24 +261,36 @@ impl GoCacheInvalidator {
         let mut probe = Session {
             user_id: user_id.to_owned(),
             expires_at: mm_model::utils::get_millis() + PROBE_LIFETIME_MS,
+            is_oauth: true,
             ..Session::default()
         };
         probe.add_prop(PEER_CACHE_PROBE_PROP, "true");
         let probe = match self.store.session().save(probe).await {
             Ok(probe) => probe,
             Err(err) => {
-                tracing::warn!(error = %err, "could not insert the session Go is asked to revoke");
+                tracing::warn!(error = %err, "could not insert the session Go is asked to purge by");
                 return;
             }
         };
-        let body = serde_json::json!({ "session_id": probe.id }).to_string();
-        let revoked = self
-            .post(&format!("/api/v4/users/{user_id}/sessions/revoke"), body)
-            .await;
-        if !revoked {
-            if let Err(err) = self.store.session().remove(&probe.id).await {
-                tracing::warn!(error = %err, "could not delete the unrevoked probe session");
+        match self
+            .http
+            .put(format!("{}/api/v4/users/sessions/device", self.base))
+            .bearer_auth(&probe.token)
+            .body("{}")
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => {}
+            Ok(response) => {
+                tracing::warn!(status = %response.status(), "the Go server refused to purge its session cache");
             }
+            Err(err) => {
+                tracing::warn!(error = %err, "could not reach the Go server to purge its cache");
+            }
+        }
+        if let Err(err) = self.store.session().remove(&probe.id).await {
+            tracing::warn!(error = %err, "could not delete the probe session");
         }
     }
 

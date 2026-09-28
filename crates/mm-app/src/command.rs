@@ -26,65 +26,6 @@ use mm_store::{CommandStore, StoreError};
 
 use crate::App;
 
-/// The triggers the built-in slash-command providers occupy, which
-/// [`App::validate_command_trigger_uniqueness`] reserves against custom commands.
-///
-/// # Why a list and not a registry
-///
-/// Go asks `commandProviders` — a map of ~35 providers in `channels/app/slashcommands/` — for
-/// each provider's `GetCommand(a, i18n.T)` and compares `.Trigger`. Only that one field is read.
-/// Every provider's `GetCommand` returns the same constant its `GetTrigger` does (checked across
-/// all 35, not assumed), so the *whole* of what this check needs from the registry is this list of
-/// strings. Porting the providers to reach it would pull in i18n, the plugin host and the
-/// execution path for a string comparison.
-///
-/// Sorted, so a reader can diff it against the Go tree; the check is a linear scan either way.
-/// Two triggers are **not** here because their providers return `nil` from `GetCommand` on a
-/// stock server, which makes them available as custom triggers — see
-/// [`App::built_in_command_triggers`].
-const BUILT_IN_COMMAND_TRIGGERS: &[&str] = &[
-    "away",
-    "code",
-    "collapse",
-    "dnd",
-    "echo",
-    "expand",
-    "groupmsg",
-    "header",
-    "help",
-    "invite",
-    "invite_people",
-    "join",
-    "kick",
-    "leave",
-    "logout",
-    "marketplace",
-    "me",
-    "mobile-logs",
-    "msg",
-    "mute",
-    "offline",
-    "online",
-    "open",
-    "purpose",
-    "remove",
-    "rename",
-    "search",
-    // `CommandTriggerRemote` — the shared-channels connection command, registered unconditionally.
-    "secure-connection",
-    "settings",
-    // `CommandTriggerShare`, likewise.
-    "share-channel",
-    "shortcuts",
-    "shrug",
-    // `CmdCustomStatus` is `app.CmdCustomStatusTrigger` (app/command.go:27) — the string is
-    // `status`, **not** `custom_status`, and the constant name is the only place that is visible.
-    "status",
-];
-
-/// `CmdTest` (`/test`), whose provider returns `nil` unless `ServiceSettings.EnableTesting`.
-const BUILT_IN_TRIGGER_BEHIND_ENABLE_TESTING: &str = "test";
-
 impl App {
     /// Port of `App.GetCommand` (command.go:762).
     #[tracing::instrument(skip(self), fields(command_id = %command_id))]
@@ -186,7 +127,7 @@ impl App {
     /// Both sides are lower-cased, because the *stored* trigger need not be: `createCommand`
     /// lower-cases the incoming one, but a plugin-registered row is written as-is.
     #[tracing::instrument(skip(self), fields(team_id = %team_id, trigger = %trigger))]
-    async fn validate_command_trigger_uniqueness(
+    pub(crate) async fn validate_command_trigger_uniqueness(
         &self,
         team_id: &str,
         trigger: &str,
@@ -194,8 +135,9 @@ impl App {
     ) -> AppResult {
         let trigger = trigger.to_lowercase();
 
-        if built_in_command_triggers(self.config().enable_testing)
-            .any(|built_in| built_in.eq_ignore_ascii_case(&trigger))
+        if built_in_command_triggers(&self.config(), self.export_file_backend().generates_links())
+            .iter()
+            .any(|built_in| built_in.to_lowercase() == trigger)
         {
             return Err(duplicate_trigger());
         }
@@ -232,11 +174,16 @@ impl App {
     /// is where `PreSave` and `IsValid` live: a body that is both a duplicate *and* invalid
     /// answers `api.command.duplicate_trigger.app_error`, never the validation error.
     #[tracing::instrument(skip_all, fields(team_id = %command.team_id, trigger = %command.trigger))]
-    pub async fn create_command(&self, mut command: Command) -> AppResult<Command> {
+    pub async fn create_command(&self, command: Command) -> AppResult<Command> {
         if !self.config().enable_commands {
             return Err(commands_disabled("CreateCommand"));
         }
+        self.create_command_ungated(command).await
+    }
 
+    /// Port of the unexported `App.createCommand` (command.go:717): [`App::create_command`]
+    /// without the `EnableCommands` gate, which the plugin API's `CreateCommand` calls directly.
+    pub async fn create_command_ungated(&self, mut command: Command) -> AppResult<Command> {
         command.trigger = command.trigger.to_lowercase();
 
         self.validate_command_trigger_uniqueness(&command.team_id, &command.trigger, "")
@@ -375,26 +322,26 @@ impl App {
     }
 }
 
-/// The built-in triggers this server's configuration actually registers.
+/// The triggers `validateCommandTriggerUniqueness` (command.go:741) reserves: every registered
+/// provider whose `GetCommand` is non-nil, asked through
+/// [`crate::command_provider::provider_command`] exactly as Go ranges over `commandProviders`.
 ///
-/// Two of the 35 providers return `nil` from `GetCommand`, which removes them from the comparison
-/// entirely and *frees* the trigger for a custom command:
-///
-/// - **`/test`** unless `ServiceSettings.EnableTesting` (default `false`);
-/// - **`/exportlink`** unless `FeatureFlags.EnableExportDirectDownload` **and**
-///   `FileSettings.DedicatedExportStore` **and** the export file backend implements
-///   `FileBackendWithLinkGenerator`.
-///
-/// `exportlink` is therefore never reserved here: the feature flag is not modelled in
-/// [`crate::config::Config`] and defaults to `false` in Go, and the third condition is a property
-/// of a file backend this server does not construct. On a stock configuration that is exact; on
-/// one with the flag on, an operator could create a custom `/exportlink` here that Go would
-/// refuse. See [D-260].
-fn built_in_command_triggers(enable_testing: bool) -> impl Iterator<Item = &'static str> {
-    BUILT_IN_COMMAND_TRIGGERS
+/// Thirty-three providers are unconditional. Two return `nil` and so **free** their trigger for a
+/// custom command: `/test` unless `ServiceSettings.EnableTesting`, and `/exportlink` unless
+/// `FeatureFlags.EnableExportDirectDownload`, `FileSettings.DedicatedExportStore` and a
+/// link-generating export backend all hold — `export_links`, see
+/// [`crate::filestore::FileBackend::generates_links`].
+fn built_in_command_triggers(config: &crate::config::Config, export_links: bool) -> Vec<String> {
+    use crate::command_provider::{BUILTIN_TRIGGERS, ProviderCommand, provider_command};
+    BUILTIN_TRIGGERS
         .iter()
-        .copied()
-        .chain(enable_testing.then_some(BUILT_IN_TRIGGER_BEHIND_ENABLE_TESTING))
+        .filter_map(
+            |trigger| match provider_command(config, export_links, trigger) {
+                ProviderCommand::Command(command) => Some(command.trigger),
+                ProviderCommand::Nil | ProviderCommand::Unregistered => None,
+            },
+        )
+        .collect()
 }
 
 /// `api.command.duplicate_trigger.app_error` at 400 — the one answer both halves of the
@@ -490,6 +437,48 @@ fn commands_disabled(where_: &'static str) -> Box<AppError> {
 mod tests {
     use super::*;
 
+    /// An `App` whose export backend is built, as at boot, from `export_driver`; its store is a
+    /// lazy pool that can never connect (250ms cap), so a check that reaches it is a 500.
+    fn app_exporting_to(export_driver: &str) -> App {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool is built without connecting");
+        let mut config = crate::config::Config {
+            dedicated_export_store: true,
+            file_export_driver_name: export_driver.to_owned(),
+            ..crate::config::Config::default()
+        };
+        config.feature_flags.enable_export_direct_download = true;
+        App::with_config(mm_store::SqlStore::from_pool(pool), config)
+    }
+
+    /// D-260: with the flag and a dedicated store on, `/exportlink` is refused as a duplicate
+    /// exactly when the export backend the app was built with generates links — the 400 before
+    /// any team command is read — and otherwise passes the built-in check to the store.
+    #[tokio::test]
+    async fn exportlink_is_reserved_by_the_backend_the_app_was_built_with() {
+        for driver in ["amazons3", "azureblob"] {
+            let err = app_exporting_to(driver)
+                .validate_command_trigger_uniqueness("team", "ExportLink", "")
+                .await
+                .expect_err("reserved");
+            assert_eq!(
+                err.id, "api.command.duplicate_trigger.app_error",
+                "{driver}"
+            );
+            assert_eq!(err.status_code, 400);
+        }
+        let err = app_exporting_to("local")
+            .validate_command_trigger_uniqueness("team", "exportlink", "")
+            .await
+            .expect_err("the unreachable store");
+        assert_eq!(
+            err.id, "app.command.validatecommandtriggeruniqueness.internal_error",
+            "a local export backend frees the trigger, so the check goes on to the team's commands"
+        );
+    }
+
     /// The setting's refusal is a **501**, and it is the same id from both callers — which is what
     /// makes `getCommand`'s discarding of it visible only as a 404.
     #[test]
@@ -529,33 +518,42 @@ mod tests {
     }
 
     /// **Thirty-five providers, thirty-three of them unconditional.** The count is asserted
-    /// because the list is a transcription: a trigger dropped from it silently lets a client
-    /// register a custom command that shadows a built-in, and nothing else in this crate would
-    /// notice. `parity::command_writes` checks the *contents* against the running Go server.
+    /// because a provider that wrongly went nil would silently let a client register a custom
+    /// command that shadows a built-in. `parity::command_writes` checks the *contents* against
+    /// the running Go server.
     #[test]
-    fn the_built_in_list_is_thirty_three_plus_the_testing_one() {
-        let stock: Vec<&str> = built_in_command_triggers(false).collect();
+    fn the_built_in_list_is_thirty_three_plus_the_two_conditional_ones() {
+        let mut config = crate::config::Config::default();
+        let stock = built_in_command_triggers(&config, true);
         assert_eq!(stock.len(), 33);
-        assert!(!stock.contains(&"test"), "gated on EnableTesting");
+        assert!(!stock.iter().any(|t| t == "test"), "gated on EnableTesting");
         assert!(
-            !stock.contains(&"exportlink"),
-            "gated on a feature flag this server does not model — see D-260"
+            !stock.iter().any(|t| t == "exportlink"),
+            "gated on EnableExportDirectDownload, off by default"
         );
 
-        let testing: Vec<&str> = built_in_command_triggers(true).collect();
+        config.enable_testing = true;
+        let testing = built_in_command_triggers(&config, false);
         assert_eq!(testing.len(), 34);
-        assert!(testing.contains(&"test"));
+        assert!(testing.iter().any(|t| t == "test"));
+
+        // D-260: reserved exactly when Go's `GetCommand` is non-nil.
+        config.feature_flags.enable_export_direct_download = true;
+        config.dedicated_export_store = true;
+        assert_eq!(built_in_command_triggers(&config, false).len(), 34);
+        let everything = built_in_command_triggers(&config, true);
+        assert_eq!(everything.len(), 35);
+        assert!(everything.iter().any(|t| t == "exportlink"));
 
         // `CmdCustomStatus` is `app.CmdCustomStatusTrigger`, whose *value* is `status`. Spelling
         // it `custom_status` would free the trigger `/status` for a custom command.
-        assert!(stock.contains(&"status"));
-        assert!(!stock.contains(&"custom_status"));
+        assert!(stock.iter().any(|t| t == "status"));
+        assert!(!stock.iter().any(|t| t == "custom_status"));
 
-        let mut sorted = stock.clone();
+        let mut sorted = everything.clone();
         sorted.sort_unstable();
-        assert_eq!(sorted, stock, "kept sorted so it can be diffed against Go");
         sorted.dedup();
-        assert_eq!(sorted.len(), stock.len(), "no duplicates");
+        assert_eq!(sorted.len(), everything.len(), "no duplicates");
     }
 
     /// Both halves of the uniqueness check answer the **same** 400, so a client cannot tell a

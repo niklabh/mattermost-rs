@@ -534,6 +534,18 @@ pub async fn init() -> Result<(), I18nError> {
     Ok(())
 }
 
+/// [`init`] from a named directory rather than the one `FindDirRelBinary` finds — for a process
+/// whose executable and working directory are not a server's, which is a test binary building an
+/// `App` beside a running stack. Loses to a bundle already loaded, as [`init`] does.
+pub async fn init_from_dir(dir: &std::path::Path) -> Result<(), I18nError> {
+    let dir = dir.to_path_buf();
+    let bundle = tokio::task::spawn_blocking(move || Translations::load_dir(&dir))
+        .await
+        .map_err(|err| I18nError::Join(err.to_string()))??;
+    let _already_loaded = TRANSLATIONS.set(Some(bundle));
+    Ok(())
+}
+
 /// The process's bundle, loading it on first use. `None` when there is no such directory or a
 /// file in it will not load — a server Go refuses to start, and one [`init`] refuses too.
 pub async fn translations() -> Option<&'static Translations> {

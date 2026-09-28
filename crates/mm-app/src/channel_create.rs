@@ -35,8 +35,10 @@
 //! - `SetChannelManagedCategory` — `MinimumEnterpriseLicense` **and** a feature flag; on an
 //!   unlicensed installation Go takes the `else` branch, logs a warning and **blanks
 //!   `managed_category_name` on the answer**, which is reproduced because it is wire surface.
-//! - `ShareChannel` for a DM or GM with a remote participant — shared channels are refused
-//!   before they are created here, because `FeatureFlags.EnableSharedChannelsDMs` is false.
+//! - `ShareChannel` for a DM or GM with a remote participant, when the shared-channel sync
+//!   service would be running — that request is forwarded before anything is written (the
+//!   service keeps its state in the Go process). With `FeatureFlags.EnableSharedChannelsDMs` off,
+//!   Go's default, a remote participant is refused before that point.
 
 use mm_model::channel::{
     CHANNEL_GROUP_MAX_USERS, CHANNEL_GROUP_MIN_USERS, CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_GROUP,
@@ -44,35 +46,43 @@ use mm_model::channel::{
 };
 use mm_model::channel_member::{ChannelMember, get_default_channel_notify_props};
 use mm_model::sidebar_category::{
-    SIDEBAR_CATEGORY_CUSTOM, SIDEBAR_CATEGORY_SORT_DEFAULT, SidebarCategory,
-    SidebarCategoryWithChannels,
+    SIDEBAR_CATEGORY_CUSTOM, SIDEBAR_CATEGORY_DIRECT_MESSAGES, SIDEBAR_CATEGORY_SORT_DEFAULT,
+    SidebarCategory, SidebarCategoryWithChannels,
 };
 use mm_model::user::User;
-use mm_model::utils::{AppError, AppResult, get_millis};
+use mm_model::utils::{AppError, AppResult, get_millis, go_equal_fold};
 use mm_model::websocket_message::{
     WEBSOCKET_EVENT_CHANNEL_CREATED, WEBSOCKET_EVENT_DIRECT_ADDED, WEBSOCKET_EVENT_GROUP_ADDED,
     WebSocketEvent,
 };
 use mm_store::channel_member_history_store::ChannelMemberHistoryStore;
 use mm_store::channel_store::ChannelStore;
+use mm_store::team_store::TeamStore;
 use mm_store::user_store::UserStore;
 use mm_store::{ChannelSave, StoreError};
 
 use crate::App;
 
-/// `FeatureFlags.EnableSharedChannelsDMs` (feature_flags.go:20), **false** at the pinned SHA
-/// (:163).
+/// `!FeatureFlags.EnableSharedChannelsDMs && <a participant is remote>` — the refusal
+/// `createDirectChannelWithUser` (app/channel.go:478) and `createGroupChannel` (:603) share.
 ///
-/// Go clears `FeatureFlags` before persisting a configuration, so there is nothing to read and
-/// nothing to configure — the same reading [`crate::channel_write`] records for
-/// `DiscoverableChannels`. It gates two refusals on the DM and GM paths, and with the flag off
-/// both fire for any remote participant.
-const FEATURE_FLAG_ENABLE_SHARED_CHANNELS_DMS: bool = false;
+/// The flag is **false** by default (feature_flags.go:163) and settable only by the environment
+/// at start ([`crate::config::Config::feature_flags`]). With it on, a remote participant is
+/// admitted and the channel is created `shared`.
+fn refuses_remote_participants(config: &crate::config::Config, any_remote: bool) -> bool {
+    any_remote && !config.feature_flags.enable_shared_channels_dms
+}
 
-/// `FeatureFlags.EnableDocs` (feature_flags.go:104), **false** at the pinned SHA (:196). Gates
-/// `CreateChannel`'s space branch, which no route of this group can reach anyway — `POST
-/// /channels` refuses type `S` twice before the app layer sees it.
-const FEATURE_FLAG_ENABLE_DOCS: bool = false;
+/// `FeatureFlags.EnableDocs` (feature_flags.go:104), **false** by default (:196): off,
+/// `CreateChannel` refuses a space (type `S`) with a **403**. No REST route of this group reaches
+/// it with the flag either way — `POST /channels` refuses type `S` twice before the app layer.
+fn refuses_space(config: &crate::config::Config, channel: &Channel) -> bool {
+    channel.is_space() && !config.feature_flags.enable_docs
+}
+
+/// The id `getSharedChannelsService` answers with when the sync service is nil
+/// (app/shared_channel.go:35), which `ShareChannel` returns and a DM/GM create logs.
+const SHARED_CHANNELS_SERVICE_DISABLED: &str = "api.command_share.service_disabled";
 
 /// What a create did, or why it declined to do it.
 ///
@@ -365,7 +375,7 @@ impl App {
                 400,
             ));
         }
-        if channel.is_space() && !FEATURE_FLAG_ENABLE_DOCS {
+        if refuses_space(&self.config(), channel) {
             // A **403**, not the 400 every other refusal on this path answers.
             return Err(AppError::boxed(
                 "CreateChannel",
@@ -477,27 +487,34 @@ impl App {
         Ok(())
     }
 
-    /// Port of `app.App.addChannelToDefaultCategory` (app/channel.go:4706), for a channel that
-    /// has just been created.
+    /// Port of `app.App.addChannelToDefaultCategory` (app/channel.go:4706) — after a create
+    /// (`CreateChannelWithUser`) and after a patch (`PatchChannel`).
     ///
     /// **Fire and forget.** Go logs every failure and returns nothing, so a sidebar that could
-    /// not be written does not fail the create — and a caller cannot tell the two apart. That is
-    /// reproduced: this returns `()`.
+    /// not be written does not fail the request. Reproduced: this returns `()`.
     ///
-    /// The "already in a category" half of Go's logic is dead for a brand-new channel — nothing
-    /// can reference an id the database learned about a millisecond ago — so only the
-    /// find-or-create half is ported, and the doc comment is the record of why the rest is
-    /// missing — along with the `SidebarCategoryDirectMessages` exclusion inside it, which only
-    /// ever mattered for a channel that was already filed somewhere.
+    /// # The channel is always already somewhere
     ///
-    /// Two details that decide whether the channel lands where Go puts it:
+    /// The read goes through `GetSidebarCategoriesForTeamForUser`, which files every channel the
+    /// user belongs to and no category names into **Channels** (the orphan query). So even a
+    /// channel created a millisecond ago has an *original* category, and Go:
     ///
-    /// - the match is **case-insensitive** (`strings.EqualFold`) and only against `custom`
-    ///   categories, so a `default_category_name` of `"channels"` creates a *second*, custom
-    ///   category rather than filing into the built-in one;
-    /// - the channel is **prepended**, not appended, to an existing category.
+    /// 1. returns early if the original **is** the target (the same category, by identity);
+    /// 2. removes the channel from the original (first occurrence) and queues that category;
+    /// 3. creates the target if no `custom` category matches — `strings.EqualFold`, so a name of
+    ///    `"channels"` makes a *second*, custom category — or prepends the channel to the match
+    ///    and queues it;
+    /// 4. calls `UpdateSidebarCategories` with the queue **even when it is empty**, which still
+    ///    publishes a `sidebar_category_updated` carrying `"[]"`.
+    ///
+    /// Step 4 writing Channels back is what turns that category's orphans into explicit
+    /// `SidebarChannels` rows, and it runs the mute reconciliation — a channel moved from an
+    /// unmuted category into a muted one is muted.
+    ///
+    /// The original is searched across every category but **Direct Messages**, the target across
+    /// `custom` ones only; both take the first match.
     #[tracing::instrument(skip_all, fields(user_id = %user_id, channel_id = %channel.id))]
-    async fn add_channel_to_default_category(&self, user_id: &str, channel: &Channel) {
+    pub(crate) async fn add_channel_to_default_category(&self, user_id: &str, channel: &Channel) {
         if channel.default_category_name.is_empty()
             || !self.config().enable_channel_category_sorting
         {
@@ -514,32 +531,32 @@ impl App {
                 return;
             }
         };
+        let mut categories = categories.categories.unwrap_or_default();
 
-        let target = categories
-            .categories
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .find(|category| {
-                category.category.category_type == SIDEBAR_CATEGORY_CUSTOM
-                    && category
-                        .category
-                        .display_name
-                        .eq_ignore_ascii_case(&channel.default_category_name)
-            })
-            .cloned();
+        let plan = default_category_plan(&categories, &channel.id, &channel.default_category_name);
+        let DefaultCategoryPlan::Move { original, target } = plan else {
+            return;
+        };
+
+        let mut to_update = Vec::new();
+        if let Some(index) = original {
+            // Taken rather than cloned: `original != target`, so the two indices are distinct.
+            let mut category = std::mem::take(&mut categories[index]);
+            if let Some(channels) = category.channel_ids.as_mut()
+                && let Some(at) = channels.iter().position(|id| *id == channel.id)
+            {
+                channels.remove(at);
+            }
+            to_update.push(category);
+        }
 
         match target {
-            Some(mut target) => {
-                let mut channels = target.channel_ids.take().unwrap_or_default();
+            Some(index) => {
+                let mut category = std::mem::take(&mut categories[index]);
+                let mut channels = category.channel_ids.take().unwrap_or_default();
                 channels.insert(0, channel.id.clone());
-                target.channel_ids = Some(channels);
-                if let Err(err) = self
-                    .update_sidebar_categories(user_id, &channel.team_id, &[target])
-                    .await
-                {
-                    tracing::error!(error = %err, category_name = %channel.default_category_name, "Failed to update default category");
-                }
+                category.channel_ids = Some(channels);
+                to_update.push(category);
             }
             None => {
                 let new_category = SidebarCategoryWithChannels {
@@ -561,6 +578,13 @@ impl App {
                 }
             }
         }
+
+        if let Err(err) = self
+            .update_sidebar_categories(user_id, &channel.team_id, &to_update)
+            .await
+        {
+            tracing::error!(error = %err, category_name = %channel.default_category_name, "Failed to update default category");
+        }
     }
 
     /// Port of `app.App.GetOrCreateDirectChannel` (app/channel.go:351).
@@ -577,16 +601,24 @@ impl App {
     /// id this function then recognises and swallows, returning the channel the loser's insert
     /// found. Both paths are ported and only the first is reachable in a test.
     ///
-    /// # `RestrictDirectMessage = "team"` is forwarded
+    /// # `RestrictDirectMessage = "team"`
     ///
-    /// That branch needs `IsBotExemptFromDMRestrictions` (a plugin decision) or
-    /// `GetCommonTeamIDsForTwoUsers` (a store method this port does not have). The setting
-    /// defaults to `"any"`, so the forward is unreachable on a stock server; it is a forward
-    /// rather than a guess because refusing where Go allows would break every cross-team DM.
-    #[tracing::instrument(skip(self), fields(user_id = %user_id, other_user_id = %other_user_id, existed))]
+    /// After the lookup, so an existing DM is returned however the setting stands. Unless the
+    /// session holds `manage_system`, the two users must share a live team
+    /// ([`get_common_team_ids_for_two_users`](mm_store::team_store::get_common_team_ids_for_two_users),
+    /// which is also what lets a self-DM through) — **403
+    /// `api.channel.create_channel.direct_channel.team_restricted_error`** — unless one of them is
+    /// a bot [`App::is_bot_exempt_from_dm_restrictions`] exempts, checked first, in the order
+    /// `GetUsersByIds` returns them. A bot whose exemption is Go's to decide (plugins on, hosted
+    /// by Go) makes the whole create a forward, taken before anything is written.
+    ///
+    /// `session` is `None` where Go's context carries no session (the plugin API): no
+    /// `manage_system`, and no bot owner.
+    #[tracing::instrument(skip(self, session), fields(user_id = %user_id, other_user_id = %other_user_id, existed))]
     pub async fn get_or_create_direct_channel(
         &self,
         ctx: &crate::plugin_hooks::HookContext,
+        session: Option<&mm_model::session::Session>,
         user_id: &str,
         other_user_id: &str,
     ) -> AppResult<ChannelCreate> {
@@ -597,13 +629,29 @@ impl App {
         tracing::Span::current().record("existed", false);
 
         if self.config().restrict_direct_message == crate::config::DIRECT_MESSAGE_TEAM {
-            return Ok(ChannelCreate::Forward(
-                "TeamSettings.RestrictDirectMessage is 'team'",
-            ));
+            let manages_system = match session {
+                Some(session) => {
+                    self.session_has_permission_to(
+                        session,
+                        &mm_model::permission::PERMISSION_MANAGE_SYSTEM,
+                    )
+                    .await
+                }
+                None => false,
+            };
+            if !manages_system {
+                if let Some(forward) = self
+                    .check_direct_message_team_restriction(session, user_id, other_user_id)
+                    .await?
+                {
+                    return Ok(forward);
+                }
+            }
         }
 
         let channel = match self.create_direct_channel(user_id, other_user_id).await {
-            Ok(channel) => channel,
+            Ok(ChannelCreate::Created(channel)) => *channel,
+            Ok(forward @ ChannelCreate::Forward(_)) => return Ok(forward),
             Err(err) if err.id == CHANNEL_EXISTS_ERROR => {
                 // Go returns `(channel, nil)` here, having carried the existing channel out
                 // alongside the error. That value is the *loser's* view of the winner's row.
@@ -618,6 +666,61 @@ impl App {
         self.handle_creation_event(ctx, user_id, other_user_id, &channel)
             .await;
         Ok(ChannelCreate::Created(Box::new(channel)))
+    }
+
+    /// The body of `GetOrCreateDirectChannel`'s team-restriction branch (app/channel.go:361):
+    /// `Ok(None)` to go on and create, `Ok(Some(forward))` when a bot's exemption is Go's to
+    /// decide, and the 403 when the two users share no live team.
+    async fn check_direct_message_team_restriction(
+        &self,
+        session: Option<&mm_model::session::Session>,
+        user_id: &str,
+        other_user_id: &str,
+    ) -> AppResult<Option<ChannelCreate>> {
+        let users = self
+            .get_users_by_ids(&[user_id.to_owned(), other_user_id.to_owned()], 0)
+            .await?;
+        let session_user_id = session.map(|session| session.user_id.as_str());
+        for user in users.iter().filter(|user| user.is_bot) {
+            match self
+                .is_bot_exempt_from_dm_restrictions(session_user_id, &user.id)
+                .await?
+            {
+                crate::bot::BotExemption::Exempt => return Ok(None),
+                crate::bot::BotExemption::NotExempt => {}
+                crate::bot::BotExemption::Undecidable => {
+                    return Ok(Some(ChannelCreate::Forward(
+                        "a plugin-owned bot's DM exemption needs Go's plugin directory",
+                    )));
+                }
+            }
+        }
+
+        let common = self
+            .store()
+            .team()
+            .get_common_team_ids_for_two_users(user_id, other_user_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "common teams for two users failed");
+                AppError::boxed(
+                    "GetCommonTeamIDsForUsers",
+                    "app.team.get_common_team_ids_for_users.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        if common.is_empty() {
+            return Err(AppError::boxed(
+                "createDirectChannel",
+                "api.channel.create_channel.direct_channel.team_restricted_error",
+                None,
+                String::new(),
+                403,
+            ));
+        }
+        Ok(None)
     }
 
     /// Port of `app.Server.getDirectChannel` (app/channel.go:4484).
@@ -665,7 +768,7 @@ impl App {
         &self,
         user_id: &str,
         other_user_id: &str,
-    ) -> AppResult<Channel> {
+    ) -> AppResult<ChannelCreate> {
         let ids = if user_id == other_user_id {
             vec![user_id.to_owned()]
         } else {
@@ -705,8 +808,8 @@ impl App {
             (users[1].clone(), users[0].clone())
         };
 
-        if !FEATURE_FLAG_ENABLE_SHARED_CHANNELS_DMS && (user.is_remote() || other_user.is_remote())
-        {
+        let shared = user.is_remote() || other_user.is_remote();
+        if refuses_remote_participants(&self.config(), shared) {
             return Err(AppError::boxed(
                 "createDirectChannelWithUser",
                 "api.channel.create_channel.direct_channel.remote_restricted.app_error",
@@ -719,12 +822,26 @@ impl App {
         // `SqlChannelStore.CreateDirectChannel` (channel_store.go:681) builds the channel and the
         // two memberships; it is inlined here because the store port's entry point is
         // `save_direct_channel`, one level down.
+        // `ShareChannel` (app/channel.go:525) for a shared DM whose creator is local. With the sync
+        // service running it writes `SharedChannels` and syncs; that is forwarded before any
+        // write. Without it `ShareChannel` fails, Go logs it and still answers the channel.
+        let share_fails = if shared && !user.is_remote() {
+            if self.shared_channel_service_would_exist().await? {
+                return Ok(ChannelCreate::Forward(
+                    "a shared DM is shared through the shared-channel sync service",
+                ));
+            }
+            true
+        } else {
+            false
+        };
+
         let mut channel = Channel {
             display_name: String::new(),
             name: get_dm_name_from_ids(&other_user.id, &user.id),
             header: String::new(),
             channel_type: CHANNEL_TYPE_DIRECT.to_owned(),
-            shared: Some(user.is_remote() || other_user.is_remote()),
+            shared: Some(shared),
             creator_id: user.id.clone(),
             ..Channel::default()
         };
@@ -773,7 +890,23 @@ impl App {
                 .map_err(|err| log_join_failed("createDirectChannelWithUser", &err))?;
         }
 
-        Ok(channel)
+        if share_fails {
+            tracing::error!(channel_id = %channel.id, error = SHARED_CHANNELS_SERVICE_DISABLED, "Failed to share newly created direct channel");
+        }
+
+        Ok(ChannelCreate::Created(Box::new(channel)))
+    }
+
+    /// `getSharedChannelsService(false) != nil` (app/shared_channel.go:32): the service starts
+    /// only under a licence that `HasSharedChannels` **and** with
+    /// `ConnectedWorkspacesSettings.EnableSharedChannels` on (app/server.go:713-732). The same
+    /// test `canUserDirectMessage` makes in `mm_api::connected_workspaces`.
+    async fn shared_channel_service_would_exist(&self) -> AppResult<bool> {
+        let licence = self.license().await?;
+        Ok(
+            licence.is_some_and(|l| l.has_shared_channels())
+                && self.config().enable_shared_channels,
+        )
     }
 
     /// Port of `app.App.handleCreationEvent` (app/channel.go:426).
@@ -827,9 +960,10 @@ impl App {
         ctx: &crate::plugin_hooks::HookContext,
         user_ids: &[String],
         creator_id: &str,
-    ) -> AppResult<Channel> {
-        let channel = match self.create_group_channel_inner(user_ids).await {
-            Ok(channel) => channel,
+    ) -> AppResult<ChannelCreate> {
+        let channel = match self.create_group_channel_inner(user_ids, creator_id).await {
+            Ok(ChannelCreate::Created(channel)) => *channel,
+            Ok(forward @ ChannelCreate::Forward(_)) => return Ok(forward),
             Err(err) if err.id == CHANNEL_EXISTS_ERROR => {
                 // The name is a hash of the membership, so the existing channel is *the* group
                 // channel for this set. Go carries it out of the store; here it is re-read by the
@@ -840,6 +974,7 @@ impl App {
                     .channel()
                     .get_by_name("", &name, true)
                     .await
+                    .map(|existing| ChannelCreate::Created(Box::new(existing)))
                     .map_err(|store_err| {
                         tracing::error!(error = %store_err, "existing group channel lookup failed");
                         err
@@ -869,16 +1004,19 @@ impl App {
             self.publish(message).await;
         }
 
-        Ok(channel)
+        Ok(ChannelCreate::Created(Box::new(channel)))
     }
 
-    /// `creatorID` is not a parameter here.
+    /// The body of `createGroupChannel` (app/channel.go:572).
     ///
-    /// Go's `createGroupChannel` reads it for exactly one thing: deciding whether to write a
-    /// `SharedChannels` record when a participant is remote. Every remote participant is refused
-    /// four lines earlier while `EnableSharedChannelsDMs` is false, so the id has no reachable
-    /// use — and a parameter no branch can read is a lie at the call site.
-    async fn create_group_channel_inner(&self, user_ids: &[String]) -> AppResult<Channel> {
+    /// `creator_id` decides one thing: whether a shared GM is shared (`ShareChannel` and the
+    /// remote invites, :686), which happens only when the creator is among the participants and
+    /// is local. The plugin API passes `""`, which is Go's `creator == nil`.
+    async fn create_group_channel_inner(
+        &self,
+        user_ids: &[String],
+        creator_id: &str,
+    ) -> AppResult<ChannelCreate> {
         if user_ids.len() > CHANNEL_GROUP_MAX_USERS || user_ids.len() < CHANNEL_GROUP_MIN_USERS {
             return Err(AppError::boxed(
                 "CreateGroupChannel",
@@ -920,8 +1058,9 @@ impl App {
 
         // `remoteIDs` is a *set* of remote cluster ids, so `channelIsShared` is "at least one
         // participant is remote". With the shared-DM flag off every remote participant is then
-        // refused one line later, which is why no shared-channel record is written below.
-        if !FEATURE_FLAG_ENABLE_SHARED_CHANNELS_DMS && users.iter().any(User::is_remote) {
+        // refused.
+        let channel_is_shared = users.iter().any(User::is_remote);
+        if refuses_remote_participants(&self.config(), channel_is_shared) {
             return Err(AppError::boxed(
                 "createGroupChannel",
                 "api.channel.create_group.remote_restricted.app_error",
@@ -931,13 +1070,30 @@ impl App {
             ));
         }
 
+        // `channel.IsShared() && creator != nil && !creator.IsRemote()` (:686): `ShareChannel`
+        // and one invite per remote. The running sync service is forwarded before any write;
+        // without it `ShareChannel` fails, Go logs it, and sends no invite.
+        let creator_local = users
+            .iter()
+            .any(|user| user.id == creator_id && !user.is_remote());
+        let share_fails = if channel_is_shared && creator_local {
+            if self.shared_channel_service_would_exist().await? {
+                return Ok(ChannelCreate::Forward(
+                    "a shared GM is shared through the shared-channel sync service",
+                ));
+            }
+            true
+        } else {
+            false
+        };
+
         let mut group = Channel {
             name: get_group_name_from_user_ids(user_ids),
             display_name: get_group_display_name_from_users(users.iter(), true),
             channel_type: CHANNEL_TYPE_GROUP.to_owned(),
-            // `new(channelIsShared)` — a **pointer to false**, not nil, so a group channel's
-            // `shared` is `false` on the wire where a fresh public channel's is `null`.
-            shared: Some(false),
+            // `new(channelIsShared)` — a **pointer**, never nil, so a group channel's `shared` is
+            // `false` on the wire where a fresh public channel's is `null`.
+            shared: Some(channel_is_shared),
             ..Channel::default()
         };
 
@@ -983,7 +1139,11 @@ impl App {
                 .map_err(|err| log_join_failed("createGroupChannel", &err))?;
         }
 
-        Ok(group)
+        if share_fails {
+            tracing::error!(channel_id = %group.id, error = SHARED_CHANNELS_SERVICE_DISABLED, "Failed to share newly created group channel");
+        }
+
+        Ok(ChannelCreate::Created(Box::new(group)))
     }
 }
 
@@ -1023,4 +1183,276 @@ fn log_join_failed(handler: &'static str, err: &StoreError) -> Box<AppError> {
         String::new(),
         500,
     )
+}
+
+/// What [`App::add_channel_to_default_category`] does with the categories it read, decided
+/// without a database.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DefaultCategoryPlan {
+    /// The channel already sits in the category it is being filed into.
+    AlreadyThere,
+    /// Remove it from `original` (if any) and file it in `target`, or in a new category when
+    /// `target` is `None`. Both are indices into the categories as read.
+    Move {
+        original: Option<usize>,
+        target: Option<usize>,
+    },
+}
+
+/// The two searches in `addChannelToDefaultCategory` (app/channel.go:4712-4728): the first
+/// `custom` category whose display name `EqualFold`s `name`, and the first category other than
+/// Direct Messages that lists `channel_id`.
+pub(crate) fn default_category_plan(
+    categories: &[SidebarCategoryWithChannels],
+    channel_id: &str,
+    name: &str,
+) -> DefaultCategoryPlan {
+    let target = categories.iter().position(|category| {
+        category.category.category_type == SIDEBAR_CATEGORY_CUSTOM
+            && go_equal_fold(&category.category.display_name, name)
+    });
+    let original = categories.iter().position(|category| {
+        category.category.category_type != SIDEBAR_CATEGORY_DIRECT_MESSAGES
+            && category
+                .channel_ids
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .any(|id| id == channel_id)
+    });
+    if original.is_some() && original == target {
+        return DefaultCategoryPlan::AlreadyThere;
+    }
+    DefaultCategoryPlan::Move { original, target }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn category(kind: &str, name: &str, channels: &[&str]) -> SidebarCategoryWithChannels {
+        SidebarCategoryWithChannels {
+            category: SidebarCategory {
+                category_type: kind.to_owned(),
+                display_name: name.to_owned(),
+                ..SidebarCategory::default()
+            },
+            channel_ids: Some(channels.iter().map(|c| (*c).to_owned()).collect()),
+        }
+    }
+
+    const CHANNELS: &str = "channels";
+    const FAVORITES: &str = "favorites";
+
+    /// The usual case: the channel is an orphan in Channels, the target is a custom category
+    /// matched case-insensitively — by Go's `EqualFold`, which folds beyond ASCII.
+    #[test]
+    fn the_channel_moves_from_channels_into_a_folded_match() {
+        let categories = [
+            category(FAVORITES, "Favorites", &[]),
+            category(CHANNELS, "Channels", &["x", "c"]),
+            category(SIDEBAR_CATEGORY_CUSTOM, "ÄRGER", &["y"]),
+            category(SIDEBAR_CATEGORY_DIRECT_MESSAGES, "Direct Messages", &[]),
+        ];
+        assert_eq!(
+            default_category_plan(&categories, "c", "ärger"),
+            DefaultCategoryPlan::Move {
+                original: Some(1),
+                target: Some(2)
+            }
+        );
+    }
+
+    /// Only a `custom` category can be the target: a name equal to a built-in category's creates
+    /// a new custom one.
+    #[test]
+    fn a_built_in_category_is_never_the_target() {
+        let categories = [
+            category(FAVORITES, "Favorites", &[]),
+            category(CHANNELS, "Channels", &["c"]),
+        ];
+        assert_eq!(
+            default_category_plan(&categories, "c", "channels"),
+            DefaultCategoryPlan::Move {
+                original: Some(1),
+                target: None
+            }
+        );
+    }
+
+    /// Already filed where it is asked to go: nothing is written, not even the empty update.
+    #[test]
+    fn already_in_the_target_is_a_no_op() {
+        let categories = [
+            category(CHANNELS, "Channels", &[]),
+            category(SIDEBAR_CATEGORY_CUSTOM, "Zed", &["c"]),
+        ];
+        assert_eq!(
+            default_category_plan(&categories, "c", "zed"),
+            DefaultCategoryPlan::AlreadyThere
+        );
+    }
+
+    /// Direct Messages is skipped as an original; any other category, Favorites included, is not.
+    /// Both searches take the **first** match.
+    #[test]
+    fn the_original_skips_direct_messages_and_both_searches_take_the_first() {
+        let categories = [
+            category(SIDEBAR_CATEGORY_DIRECT_MESSAGES, "Direct Messages", &["c"]),
+            category(FAVORITES, "Favorites", &["c"]),
+            category(CHANNELS, "Channels", &["c"]),
+            category(SIDEBAR_CATEGORY_CUSTOM, "zed", &[]),
+            category(SIDEBAR_CATEGORY_CUSTOM, "ZED", &[]),
+        ];
+        assert_eq!(
+            default_category_plan(&categories, "c", "Zed"),
+            DefaultCategoryPlan::Move {
+                original: Some(1),
+                target: Some(3)
+            }
+        );
+    }
+
+    /// A channel filed nowhere (not even as an orphan) has no original, and a null channel list
+    /// holds nothing.
+    #[test]
+    fn a_channel_filed_nowhere_has_no_original() {
+        let mut null_list = category(CHANNELS, "Channels", &[]);
+        null_list.channel_ids = None;
+        let categories = [null_list, category(SIDEBAR_CATEGORY_CUSTOM, "Zed", &[])];
+        assert_eq!(
+            default_category_plan(&categories, "c", "Zed"),
+            DefaultCategoryPlan::Move {
+                original: None,
+                target: Some(1)
+            }
+        );
+    }
+    use crate::config::Config;
+    use mm_model::channel::CHANNEL_TYPE_SPACE;
+    use mm_store::SqlStore;
+    use sqlx::postgres::PgPoolOptions;
+
+    fn unreachable_store() -> SqlStore {
+        let pool = PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool is built without connecting");
+        SqlStore::from_pool(pool)
+    }
+
+    fn with_flags(edit: impl FnOnce(&mut mm_model::feature_flags::FeatureFlags)) -> Config {
+        let mut config = Config::default();
+        edit(&mut config.feature_flags);
+        config
+    }
+
+    /// `createDirectChannelWithUser` (channel.go:478) and `createGroupChannel` (:603): a remote
+    /// participant is refused only while `EnableSharedChannelsDMs` is off, and a channel with no
+    /// remote participant is never refused.
+    #[test]
+    fn a_remote_participant_is_refused_only_with_the_shared_dm_flag_off() {
+        let off = Config::default();
+        let on = with_flags(|f| f.enable_shared_channels_dms = true);
+        assert!(
+            !off.feature_flags.enable_shared_channels_dms,
+            "Go's default"
+        );
+        assert!(refuses_remote_participants(&off, true));
+        assert!(!refuses_remote_participants(&off, false));
+        assert!(!refuses_remote_participants(&on, true));
+        assert!(!refuses_remote_participants(&on, false));
+    }
+
+    /// `CreateChannel` (channel.go:243): a space is a 403 with `EnableDocs` off; with it on the
+    /// gate passes and the create goes on to the store — here unreachable, so a different error.
+    #[tokio::test]
+    async fn a_space_is_refused_only_with_docs_off() {
+        let space = || Channel {
+            channel_type: CHANNEL_TYPE_SPACE.to_owned(),
+            display_name: "  Docs  ".to_owned(),
+            ..Channel::default()
+        };
+        let create = |config: Config| async move {
+            let app = App::with_config(unreachable_store(), config);
+            let mut channel = space();
+            let err = app
+                .create_channel(
+                    &crate::plugin_hooks::HookContext::default(),
+                    &mut channel,
+                    false,
+                )
+                .await
+                .expect_err("either refused or the store is unreachable");
+            (err, channel)
+        };
+
+        let (err, untouched) = create(Config::default()).await;
+        assert_eq!(
+            err.id,
+            "app.channel.create_channel.spaces_not_enabled.app_error"
+        );
+        assert_eq!(err.status_code, 403);
+        assert_eq!(
+            untouched.display_name, "  Docs  ",
+            "refused before the trim"
+        );
+
+        let (err, trimmed) = create(with_flags(|f| f.enable_docs = true)).await;
+        assert_ne!(
+            err.id,
+            "app.channel.create_channel.spaces_not_enabled.app_error"
+        );
+        assert_eq!(trimmed.display_name, "Docs", "past the gate");
+
+        let open = Channel {
+            channel_type: mm_model::channel::CHANNEL_TYPE_OPEN.to_owned(),
+            ..Channel::default()
+        };
+        assert!(!refuses_space(&Config::default(), &open));
+    }
+
+    /// `getSharedChannelsService(false) != nil`: a licence with shared channels **and**
+    /// `ConnectedWorkspacesSettings.EnableSharedChannels`.
+    #[tokio::test]
+    async fn the_sync_service_needs_the_licence_and_the_setting() {
+        let app = |sku: &str, enabled: bool| {
+            App::with_config(
+                unreachable_store(),
+                Config {
+                    enable_shared_channels: enabled,
+                    ..crate::license::test_signing::licensed_config(sku)
+                },
+            )
+        };
+        assert!(
+            app("professional", true)
+                .shared_channel_service_would_exist()
+                .await
+                .unwrap()
+        );
+        assert!(
+            !app("professional", false)
+                .shared_channel_service_would_exist()
+                .await
+                .unwrap()
+        );
+        // Below professional, `HasSharedChannels` is the feature bit — which `SetDefaults` seeds
+        // from `FutureFeatures`, so it has to be switched off explicitly.
+        let without_feature = App::with_config(
+            unreachable_store(),
+            Config {
+                enable_shared_channels: true,
+                ..crate::license::test_signing::licensed_config_from(
+                    r#"{"id":"mmrslicensedtestkey0000001","issued_at":1,"starts_at":1,"expires_at":4102444800000,"customer":{"id":"c","name":"n","email":"e","company":"co"},"features":{"users":10,"future_features":false,"shared_channels":false},"sku_name":"starter","sku_short_name":"starter"}"#,
+                )
+            },
+        );
+        assert!(
+            !without_feature
+                .shared_channel_service_would_exist()
+                .await
+                .unwrap()
+        );
+    }
 }

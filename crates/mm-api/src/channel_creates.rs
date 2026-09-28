@@ -43,8 +43,7 @@ use mm_model::permission::{
 };
 use mm_model::session::Session;
 use mm_model::utils::{
-    AppError, decode_one_object_from_json, is_valid_id, non_sorted_array_from_json,
-    sorted_array_from_json,
+    AppError, decode_one_from_json, is_valid_id, non_sorted_array_from_json, sorted_array_from_json,
 };
 
 use crate::AppState;
@@ -146,6 +145,7 @@ pub async fn create_channel(
     request: Request,
 ) -> Response {
     let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request, "channel").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -153,7 +153,7 @@ pub async fn create_channel(
 
     // `decode_one_from_json` rather than `from_slice`: `json.Decoder.Decode` reads one value and
     // stops, so `{"…"} garbage` is a success on Go taking the first. See `channel_writes`.
-    let mut channel: Channel = match decode_one_object_from_json::<Option<Channel>>(&bytes) {
+    let mut channel: Channel = match decode_one_from_json::<Option<Channel>>(&bytes) {
         Ok(Some(channel)) => channel,
         Ok(None) => return ApiError::invalid_param("channel").into_response(),
         Err(err) => {
@@ -176,7 +176,7 @@ pub async fn create_channel(
         Err(err) => return err.into_response(),
     }
 
-    match serve_create_channel(&state, &session.0, &mut channel, &hook_ctx).await {
+    match serve_create_channel(&state, &session.0, &mut channel, &hook_ctx, &audit).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -187,6 +187,7 @@ async fn serve_create_channel(
     session: &Session,
     channel: &mut Channel,
     hook_ctx: &mm_app::plugin_hooks::HookContext,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
     if channel.team_id.is_empty() {
         return Err(ApiError::invalid_param("team_id"));
@@ -252,6 +253,10 @@ async fn serve_create_channel(
         .app
         .create_channel_with_user(hook_ctx, channel, &session.user_id)
         .await?;
+    // `c.LogAudit("name=" + channel.Name)` — the name `PreSave` left on the body.
+    audit
+        .log(&state.app, Some(session), &format!("name={}", channel.name))
+        .await;
     created("createChannel", channel)
 }
 
@@ -385,7 +390,7 @@ async fn serve_create_direct_channel(
     // The two ids keep the **body's** order, which is what decides `creator_id` on the event.
     match state
         .app
-        .get_or_create_direct_channel(hook_ctx, &user_ids[0], &user_ids[1])
+        .get_or_create_direct_channel(hook_ctx, Some(session), &user_ids[0], &user_ids[1])
         .await?
     {
         ChannelCreate::Created(channel) => created("createDirectChannel", &channel).map(Some),
@@ -508,9 +513,15 @@ async fn serve_create_group_channel(
         return Err(make_permission_error(session, &[&PERMISSION_VIEW_MEMBERS]).into());
     }
 
-    let channel = state
+    match state
         .app
         .create_group_channel(hook_ctx, user_ids, &session.user_id)
-        .await?;
-    created("createGroupChannel", &channel).map(Some)
+        .await?
+    {
+        ChannelCreate::Created(channel) => created("createGroupChannel", &channel).map(Some),
+        ChannelCreate::Forward(reason) => {
+            tracing::debug!(reason, "forwarding to Go");
+            Ok(None)
+        }
+    }
 }

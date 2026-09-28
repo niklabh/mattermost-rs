@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT userid                 AS \"user_id!\",\n                   createat               AS \"create_at?\",\n                   requiredplan           AS \"required_plan!\",\n                   requiredfeature        AS \"required_feature!\",\n                   trial                  AS \"trial!\",\n                   sentat                 AS \"sent_at?\"\n              FROM notifyadmin\n             WHERE trial = $1 AND sentat IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "create_at?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "required_plan!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "required_feature!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "trial!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "sent_at?",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "5ea584a621a890e917650a1a2ebd751bd195ef6cc71b449d0be62495fdfbf702"
+}

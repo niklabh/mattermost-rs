@@ -998,14 +998,22 @@ pub fn remove_duplicate_strings(input: &mut Vec<String>) {
 
 /// Port of `json.NewDecoder(r.Body).Decode(&v)`, which is **not** `json.Unmarshal`.
 ///
-/// Two differences, both reachable from the wire:
+/// The document is decoded under `encoding/json`'s rules rather than serde's — see
+/// `go_decode` for each, with the entries it closes:
 ///
 /// 1. **Trailing data is ignored.** The decoder reads one value and stops, so a body of
-///    `{"term":"a"}{"term":"b"}` decodes to the first object and succeeds. `serde_json::from_slice`
-///    rejects it as trailing characters, which would be a 400 where Go answers 200. Deserializing
-///    from a `Deserializer` without calling `end()` reproduces Go.
-/// 2. **A lone surrogate escape is `U+FFFD`, not an error** — see [`replace_lone_surrogates`],
-///    which every other body decoder in this crate already goes through.
+///    `{"term":"a"}{"term":"b"}` decodes to the first object and succeeds. [`unmarshal_from_json`]
+///    is the `json.Unmarshal` form, for the handlers that read the body and unmarshal it.
+/// 2. **A lone surrogate escape is `U+FFFD`, not an error** — see [`replace_lone_surrogates`].
+/// 3. **A JSON array is never a struct**, at any depth ([D-941]).
+/// 4. **`null` into a scalar or a struct is ignored**, and into a slice element or map value is
+///    the zero value ([D-057], [D-075]).
+/// 5. **Keys match fields case-insensitively**, Go's fold ([D-040], [D-460]).
+/// 6. **A repeated key is assigned again**, as Go assigns it ([D-071]).
+///
+/// `null` for the whole body is the caller's to model, because Go's answer depends on the
+/// declaration: for `var x *model.T` decode an `Option<T>` (`null` is `None`, which the handler
+/// usually refuses by the body's name), for `var x model.T` use [`decode_one_value_from_json`].
 ///
 /// An empty body is an error on both (`EOF` there, "expected value" here); the two ids differ but
 /// neither reaches the wire, since every caller maps the failure to its own `AppError`.
@@ -1014,48 +1022,90 @@ pub fn decode_one_from_json<T: serde::de::DeserializeOwned>(
 ) -> Result<T, serde_json::Error> {
     let data = replace_lone_surrogates(data);
     let mut deserializer = serde_json::Deserializer::from_slice(&data);
-    T::deserialize(&mut deserializer)
+    let document = crate::go_decode::GoJson::deserialize(&mut deserializer)?;
+    crate::go_decode::from_go_json(&document)
 }
 
-/// [`decode_one_from_json`] for a body whose Go target is a **struct**, which a JSON array is
-/// never a valid encoding of.
-///
-/// serde's derived `Deserialize` accepts a *sequence* as well as a map — the fields are read
-/// positionally — so `[]` decodes into a struct with every field at its default, where
-/// `encoding/json` answers `cannot unmarshal array into Go value of type model.X`. The difference
-/// is on the wire: Go's handler answers `invalid_body_param` naming the **body**, and a port that
-/// accepted the array walks on to a later validation branch and names some *field* instead. Found
-/// 2026-09-20 by `parity::channel_creates`, once error messages started being compared.
-///
-/// A leading `[` is the whole test, because that is the only token serde and `encoding/json`
-/// disagree about here: a string, a number and a bare `true` are errors for both, and `null` is
-/// the caller's to model — `T = Option<Struct>` for Go's `var x *model.T`, and
-/// [`decode_one_value_from_json`] for its `var x model.T`.
-pub fn decode_one_object_from_json<T: serde::de::DeserializeOwned>(
-    data: &[u8],
-) -> Result<T, serde_json::Error> {
-    if data
-        .iter()
-        .find(|byte| !byte.is_ascii_whitespace())
-        .is_some_and(|byte| *byte == b'[')
-    {
-        return Err(serde::de::Error::custom(
-            "json: cannot unmarshal array into Go value",
-        ));
-    }
-    decode_one_from_json(data)
-}
-
-/// [`decode_one_object_from_json`] for Go's `var x model.T` — a **value**, not a pointer.
+/// [`decode_one_from_json`] for Go's `var x model.T` — a **value**, not a pointer.
 ///
 /// `json.Decode(&x)` of a `null` body into a non-pointer is a no-op *success*: `x` keeps its zero
-/// value and the handler walks on to its field checks. serde rejects `null` for a struct, so a
-/// port that used the plain decoder answers `invalid_body_param` naming the body where Go names
-/// the first empty field. Found 2026-09-20 by `parity::properties`.
+/// value and the handler walks on to its field checks. Found 2026-09-20 by `parity::properties`.
+/// The same holds for a value map or slice (`var m map[string]string`), which `null` leaves nil.
 pub fn decode_one_value_from_json<T: serde::de::DeserializeOwned + Default>(
     data: &[u8],
 ) -> Result<T, serde_json::Error> {
-    Ok(decode_one_object_from_json::<Option<T>>(data)?.unwrap_or_default())
+    Ok(decode_one_from_json::<Option<T>>(data)?.unwrap_or_default())
+}
+
+/// Port of `json.Unmarshal(data, &v)`: [`decode_one_from_json`]'s rules, except that anything
+/// but whitespace after the value is an error (`invalid character 'x' after top-level value`).
+/// For the handlers that `io.ReadAll` the body first — `linkGroupSyncable`, `updateScheduledPost`.
+pub fn unmarshal_from_json<T: serde::de::DeserializeOwned>(
+    data: &[u8],
+) -> Result<T, serde_json::Error> {
+    let data = replace_lone_surrogates(data);
+    let mut deserializer = serde_json::Deserializer::from_slice(&data);
+    let document = crate::go_decode::GoJson::deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    crate::go_decode::from_go_json(&document)
+}
+
+/// Deserialize an already-parsed `serde_json::Value` under the same rules as
+/// [`decode_one_from_json`] — for a handler that has to look at the document before it knows the
+/// target type. The `Value` has already collapsed repeated keys (last wins) and sorted them, so
+/// rule 6 is `Value`'s; the fold, `null` and array rules apply in full.
+pub fn from_value_go<T: serde::de::DeserializeOwned>(
+    value: &serde_json::Value,
+) -> Result<T, serde_json::Error> {
+    let document = crate::go_decode::GoJson::deserialize(value)?;
+    crate::go_decode::from_go_json(&document)
+}
+
+/// Port of `model.MapFromJSON` (utils.go:507) — `json.NewDecoder(r.Body).Decode(&map[string]string)`
+/// with the error **discarded**, which is not the same thing as "an empty map on any problem".
+///
+/// 1. **A partial decode survives.** `encoding/json` records the first `UnmarshalTypeError` and
+///    keeps going, so `{"roles":"system_user","n":1}` leaves `roles` set, where
+///    `from_slice::<HashMap<String,String>>().unwrap_or_default()` returns the *empty* map.
+/// 2. **The offending key is still inserted, holding `""`.** Go assigns the element's zero value
+///    and records the error rather than skipping the entry: `{"roles":1}` and `{"roles":null}`
+///    are both `{"roles":""}` (measured; `user_updates`' fixture rows).
+/// 3. **Trailing bytes after the first value are ignored**, and a duplicate key is last-wins.
+/// 4. A non-object — `null`, an array, a number, a malformed body — leaves the map nil, which Go
+///    replaces with an empty one.
+pub fn map_from_json(data: &[u8]) -> StringMap {
+    match decode_one_from_json::<serde_json::Value>(data) {
+        Ok(serde_json::Value::Object(map)) => map
+            .into_iter()
+            .map(|(key, value)| match value {
+                serde_json::Value::String(value) => (key, value),
+                _ => (key, String::new()),
+            })
+            .collect(),
+        _ => StringMap::new(),
+    }
+}
+
+/// Port of `model.MapBoolFromJSON` (utils.go:519) — [`map_from_json`] into `map[string]bool`, so a
+/// member that is not a bool is `false` rather than a failed decode.
+pub fn map_bool_from_json(data: &[u8]) -> BTreeMap<String, bool> {
+    match decode_one_from_json::<serde_json::Value>(data) {
+        Ok(serde_json::Value::Object(map)) => map
+            .into_iter()
+            .map(|(key, value)| (key, value.as_bool().unwrap_or(false)))
+            .collect(),
+        _ => BTreeMap::new(),
+    }
+}
+
+/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — the same call into a
+/// `map[string]any`, where every JSON value is assignable, so only a non-object top level (or a
+/// malformed body) produces the empty map. Trailing bytes are ignored.
+pub fn string_interface_from_json(data: &[u8]) -> serde_json::Map<String, serde_json::Value> {
+    match decode_one_from_json::<serde_json::Value>(data) {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    }
 }
 
 /// Port of `model.SortedArrayFromJSON` (utils.go:546): `json.Decoder.Decode` into `[]string`,
@@ -3433,6 +3483,293 @@ mod go_quote_go_parity {
         // …and agrees on ordinary text, which is why the difference is easy to miss.
         for input in ["", "abc", "a\"b", "a\\b", "é", "日本語", "😀"] {
             assert_eq!(go_quote(input), format!("{input:?}"));
+        }
+    }
+}
+
+/// The body decoders against `fixtures/behaviour_body_decode.json`, which Go wrote by running each
+/// corpus body through `Decode` into a value, `Decode` into a pointer and `json.Unmarshal` —
+/// the three ways an api4 handler reads its body ([D-941]).
+#[cfg(test)]
+mod body_decode_go_parity {
+    use super::*;
+
+    /// `bodyDecodeInner` in `reference/dump/behaviour_body_decode.go`.
+    #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+    #[serde(default)]
+    struct Inner {
+        #[serde(rename = "a")]
+        a: String,
+        #[serde(rename = "n")]
+        n: i64,
+    }
+
+    /// `bodyDecodeOuter`. Go's nil slices and maps marshal as `null`, hence the `Option`s.
+    #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+    #[serde(default)]
+    struct Outer {
+        #[serde(rename = "name")]
+        name: String,
+        #[serde(rename = "count")]
+        count: i64,
+        #[serde(rename = "flag")]
+        flag: bool,
+        #[serde(rename = "inner")]
+        inner: Inner,
+        #[serde(rename = "maybe")]
+        maybe: Option<Inner>,
+        #[serde(rename = "list")]
+        list: Option<Vec<Inner>>,
+        #[serde(rename = "tags")]
+        tags: Option<Vec<String>>,
+        #[serde(rename = "props")]
+        props: Option<serde_json::Map<String, serde_json::Value>>,
+    }
+
+    fn section(name: &str) -> Vec<serde_json::Value> {
+        let doc: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_body_decode.json"))
+                .unwrap();
+        doc[name].as_array().unwrap().clone()
+    }
+
+    fn check<T: Serialize>(
+        body: &str,
+        how: &str,
+        ours: Result<T, serde_json::Error>,
+        row: &serde_json::Value,
+    ) {
+        let go_ok = row[format!("{how}_ok")].as_bool().unwrap();
+        match ours {
+            Ok(ours) => {
+                assert!(go_ok, "{how}: Go refuses {body:?} and we accepted it");
+                assert_eq!(
+                    serde_json::to_value(ours).unwrap(),
+                    row[how],
+                    "{how}: {body:?}"
+                );
+            }
+            Err(err) => assert!(!go_ok, "{how}: Go accepts {body:?} and we refused: {err}"),
+        }
+    }
+
+    #[test]
+    fn the_three_struct_decodes_match_go() {
+        let rows = section("struct_decode");
+        assert!(rows.len() >= 85, "the corpus is populated");
+        for row in &rows {
+            let body = row["in"].as_str().unwrap();
+            check(
+                body,
+                "value",
+                decode_one_value_from_json::<Outer>(body.as_bytes()),
+                row,
+            );
+            check(
+                body,
+                "pointer",
+                decode_one_from_json::<Option<Outer>>(body.as_bytes()),
+                row,
+            );
+            check(
+                body,
+                "whole",
+                unmarshal_from_json::<Option<Outer>>(body.as_bytes()),
+                row,
+            );
+        }
+    }
+
+    /// The rows that separate Go from serde's derive, pinned by name so the assertion above
+    /// cannot pass vacuously if they leave the corpus.
+    #[test]
+    fn the_corpus_holds_the_rows_serde_alone_gets_wrong() {
+        let rows = section("struct_decode");
+        let row = |body: &str| {
+            rows.iter()
+                .find(|row| row["in"] == body)
+                .unwrap_or_else(|| panic!("{body:?} left the corpus"))
+                .clone()
+        };
+        // An array for a struct, at the top and one level down.
+        for body in [
+            "[]",
+            r#"{"inner":[]}"#,
+            r#"{"maybe":[]}"#,
+            r#"{"list":[[]]}"#,
+        ] {
+            assert_eq!(row(body)["value_ok"], false, "{body}");
+            assert!(serde_json::from_str::<Outer>(body).is_ok(), "{body}");
+        }
+        // `null` is the zero value for a value target and nil for a pointer.
+        assert_eq!(row("null")["value_ok"], true);
+        assert_eq!(row("null")["pointer"], serde_json::Value::Null);
+        assert!(serde_json::from_str::<Outer>("null").is_err());
+        // Trailing bytes: ignored by `Decode`, refused by `Unmarshal`.
+        assert_eq!(row(r#"{"name":"a"} trailing"#)["value_ok"], true);
+        assert_eq!(row(r#"{"name":"a"} trailing"#)["whole_ok"], false);
+        // A repeated key is last-wins.
+        assert_eq!(row(r#"{"name":"a","name":"b"}"#)["value"]["name"], "b");
+        assert!(serde_json::from_str::<Outer>(r#"{"name":"a","name":"b"}"#).is_err());
+        // `null` into a scalar and a slice element, a folded key and the two special runes.
+        for body in [
+            r#"{"name":null,"count":null,"flag":null}"#,
+            r#"{"tags":[null]}"#,
+        ] {
+            assert_eq!(row(body)["value_ok"], true, "{body}");
+            assert!(serde_json::from_str::<Outer>(body).is_err(), "{body}");
+        }
+        assert_eq!(row(r#"{"NAME":"a"}"#)["value"]["name"], "a");
+        assert_eq!(row("{\"TAG\u{17f}\":[\"s\"]}")["value"]["tags"][0], "s");
+        assert_eq!(
+            row("{\"inner\":{\"\u{212a}\":1}}")["value"]["inner"]["n"],
+            0
+        );
+        // A repeated slice decodes into the backing array; a repeated struct merges.
+        assert_eq!(
+            row(r#"{"tags":["a","b"],"tags":["x"],"tags":[null,null]}"#)["value"]["tags"],
+            serde_json::json!(["x", "b"])
+        );
+        assert_eq!(
+            row(r#"{"inner":{"a":"x"},"inner":{"n":2}}"#)["value"]["inner"],
+            serde_json::json!({"a": "x", "n": 2})
+        );
+    }
+
+    /// `bodyDecodeCollide`: two tags that differ only by case.
+    #[derive(Debug, Default, Serialize, Deserialize)]
+    #[serde(default)]
+    struct Collide {
+        #[serde(rename = "k")]
+        lower: String,
+        #[serde(rename = "K")]
+        upper: String,
+    }
+
+    /// The exact spelling finds its own field; a folded one (U+212A here) finds the first
+    /// declared, which is Go's "first folded match takes precedence".
+    #[test]
+    fn a_fold_collision_resolves_as_go_resolves_it() {
+        let rows = section("collide_decode");
+        assert_eq!(rows.len(), 5, "the collision corpus changed size");
+        for row in &rows {
+            let body = row["in"].as_str().unwrap();
+            let ours = decode_one_value_from_json::<Collide>(body.as_bytes());
+            assert_eq!(row["ok"], true, "{body:?}");
+            assert_eq!(
+                serde_json::to_value(ours.unwrap()).unwrap(),
+                row["value"],
+                "{body:?}"
+            );
+        }
+    }
+
+    /// `bodyDecodeEmbedBase`, which Go embeds in `bodyDecodeEmbed`.
+    #[derive(Debug, Default, Serialize, Deserialize)]
+    #[serde(default)]
+    struct EmbedBase {
+        #[serde(rename = "a")]
+        a: String,
+        #[serde(rename = "tags")]
+        tags: Option<Vec<String>>,
+        #[serde(rename = "inner")]
+        inner: Inner,
+    }
+
+    #[derive(Debug, Default, Serialize, Deserialize)]
+    #[serde(default)]
+    struct EmbedOwn {
+        #[serde(rename = "n")]
+        n: i64,
+        #[serde(rename = "items")]
+        items: Option<Vec<String>>,
+    }
+
+    /// `bodyDecodeEmbed`, decoded the way every embedding body type in the crate is.
+    #[derive(Debug, Default, Serialize)]
+    struct Embed {
+        #[serde(flatten)]
+        base: EmbedBase,
+        #[serde(flatten)]
+        own: EmbedOwn,
+    }
+
+    impl<'de> Deserialize<'de> for Embed {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let document = crate::go_decode::embedded_document(d)?;
+            Ok(Embed {
+                base: crate::go_decode::embedded_part(&document)?,
+                own: crate::go_decode::embedded_part(&document)?,
+            })
+        }
+    }
+
+    /// The same shape as serde's `flatten` alone would decode it — the premise.
+    #[derive(Debug, Default, Deserialize)]
+    #[serde(default)]
+    struct EmbedFlatten {
+        #[serde(flatten)]
+        _base: EmbedBase,
+        #[serde(rename = "n")]
+        _n: i64,
+    }
+
+    #[test]
+    fn an_embedded_struct_decodes_as_go_decodes_it() {
+        let rows = section("embed_decode");
+        assert_eq!(rows.len(), 16, "the embedding corpus changed size");
+        crate::go_decode::assert_disjoint_folds(&[
+            crate::go_decode::struct_fields::<EmbedBase>(),
+            crate::go_decode::struct_fields::<EmbedOwn>(),
+        ]);
+        let mut flatten_alone_differs = 0;
+        for row in &rows {
+            let body = row["in"].as_str().unwrap();
+            match decode_one_value_from_json::<Embed>(body.as_bytes()) {
+                Ok(ours) => {
+                    assert_eq!(row["ok"], true, "Go refuses {body:?}");
+                    assert_eq!(
+                        serde_json::to_value(ours).unwrap(),
+                        row["value"],
+                        "{body:?}"
+                    );
+                }
+                Err(err) => assert_eq!(row["ok"], false, "Go accepts {body:?}: {err}"),
+            }
+            let flatten_ok = decode_one_value_from_json::<EmbedFlatten>(body.as_bytes()).is_ok();
+            if flatten_ok != (row["ok"] == true) {
+                flatten_alone_differs += 1;
+            }
+        }
+        assert!(
+            flatten_alone_differs > 0,
+            "the premise: flatten alone differs somewhere"
+        );
+    }
+
+    #[test]
+    fn map_bool_from_json_matches_go() {
+        for row in section("map_bool_decode") {
+            let body = row["in"].as_str().unwrap();
+            assert_eq!(
+                serde_json::to_value(map_bool_from_json(body.as_bytes())).unwrap(),
+                row["out"],
+                "MapBoolFromJSON({body:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn a_scalar_value_target_matches_go() {
+        for row in section("int64_decode") {
+            let body = row["in"].as_str().unwrap();
+            match decode_one_value_from_json::<i64>(body.as_bytes()) {
+                Ok(n) => {
+                    assert_eq!(row["ok"], true, "{body:?}");
+                    assert_eq!(row["out"], n, "{body:?}");
+                }
+                Err(_) => assert_eq!(row["ok"], false, "{body:?}"),
+            }
         }
     }
 }

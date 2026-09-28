@@ -23,15 +23,10 @@ use crate::auth::AuthenticatedSession;
 use crate::error::ApiError;
 
 /// Port of `model.SortedArrayFromJSON` (utils.go:546): `Err` for a body that does not decode as a
-/// list of strings, `Ok(empty)` for `null`, otherwise the sorted, de-duplicated ids.
+/// list of strings, `Ok(empty)` for `null`, otherwise the sorted, de-duplicated ids — a `null`
+/// element as `""` and trailing bytes ignored; see [`mm_model::utils::sorted_array_from_json`].
 fn sorted_array_from_json(bytes: &[u8]) -> Result<Vec<String>, serde_json::Error> {
-    let mut ids: Vec<String> = match serde_json::from_slice::<Option<Vec<String>>>(bytes)? {
-        Some(ids) => ids,
-        None => return Ok(Vec::new()),
-    };
-    ids.sort();
-    ids.dedup();
-    Ok(ids)
+    mm_model::utils::sorted_array_from_json(bytes)
 }
 
 /// Port of `updateViewedProductNotices` — `PUT /api/v4/system/notices/view`.
@@ -39,8 +34,11 @@ fn sorted_array_from_json(bytes: &[u8]) -> Result<Vec<String>, serde_json::Error
 pub async fn update_viewed_product_notices(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
+    // `c.LogAudit("attempt")`, first; no `"success"` follows.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
         .unwrap_or_default();

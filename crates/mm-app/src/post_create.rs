@@ -309,21 +309,20 @@ impl App {
         // Anything but the default type takes a branch of its own: `card` reads
         // `FeatureFlags.IntegratedBoards`, `burn_on_read` writes TemporaryPost, `custom_*` is a
         // plugin's, and the rest skip the `use_channel_mentions` gate.
-        if !post.post_type.is_empty() {
+        //
+        // The one exception is `custom_up_notification`, the post the notify-admin send writes:
+        // no branch of `CreatePost` reads it, and its path through the pipeline is measured
+        // against Go in `parity::notify_jobs`.
+        if !post.post_type.is_empty()
+            && post.post_type != crate::notify_admin::POST_TYPE_UP_NOTIFICATION
+        {
             return Err(PrepareError::Unreproducible(
                 "a non-default post type takes a branch of its own in CreatePost",
             ));
         }
-        // A priority is served — `savePostsPriority` writes the row with the post — but a
-        // persistent notification is not: `savePostsPersistentNotifications` writes a row the
-        // notification job then acts on, the recipients check above the save runs
-        // `forEachPersistentNotificationPost`, and a reply to that root is resolved by
-        // `ResolvePersistentNotification` ([D-551]).
-        if post.get_persistent_notification() == Some(true) {
-            return Err(PrepareError::Unreproducible(
-                "savePostsPersistentNotifications writes PersistentNotifications, which has no port",
-            ));
-        }
+        // A priority is served — `savePostsPriority` writes the row with the post — and so is a
+        // persistent notification: the recipients check runs in `create_post_claimed` and
+        // `savePostsPersistentNotifications` writes its row in the same transaction.
         // The inbound `metadata` is **echoed**, not recomputed: `CreatePost` prepares the post
         // without `IncludePriority` ("we don't want to include PostPriority from the db to avoid
         // the replica lag, so we just return the one that was passed with post"), and
@@ -342,7 +341,9 @@ impl App {
                 ));
             }
         }
-        if post.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX) {
+        if post.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX)
+            && post.post_type != crate::notify_admin::POST_TYPE_UP_NOTIFICATION
+        {
             return Err(PrepareError::Unreproducible("plugin post type"));
         }
 
@@ -392,7 +393,12 @@ impl App {
         // post. Its own two gates come first and both are cheap: `EnableOutgoingWebhooks`, then
         // `channel.Type != ChannelTypeOpen` — a private channel never triggers one however many
         // hooks the team has. Only then is the team's hook list worth reading, and Go reads the
-        // whole list too (`GetOutgoingByTeam(team.Id, -1, -1)`).
+        // whole list too (`GetOutgoingByTeam(team.Id, -1, -1)`), then keeps only the hooks that
+        // fire for *this* post — [`outgoing_hook_fires`]. A hook on another channel, or one whose
+        // trigger words the message does not start with, writes nothing, so its mere existence is
+        // no reason to forward: until 2026-09-25 any hook anywhere on the team forwarded every
+        // post in every open channel of it, and a suite that created one for a moment turned an
+        // unrelated served post into a forwarded one.
         if self.config().enable_outgoing_webhooks && channel.channel_type == CHANNEL_TYPE_OPEN {
             let hooks = self
                 .store()
@@ -403,7 +409,10 @@ impl App {
                     tracing::error!(error = %err, "outgoing webhook lookup failed");
                     PrepareError::Unreproducible("the outgoing webhook lookup failed")
                 })?;
-            if !hooks.is_empty() {
+            if hooks
+                .iter()
+                .any(|hook| outgoing_hook_fires(hook, &post.channel_id, &post.message))
+            {
                 return Err(PrepareError::Unreproducible(
                     "an outgoing webhook turns its response into a second post",
                 ));
@@ -616,8 +625,7 @@ impl App {
         hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(Post, bool), PrepareError> {
         // `flags.SilentNotification` with persistent notifications on is a 400 before anything
-        // else looks at either. The persistent-notification post itself is refused by the store,
-        // so only the refusal arm is reachable.
+        // else looks at either.
         if flags.silent_notification && post.get_persistent_notification() == Some(true) {
             return Err(PrepareError::App(AppError::boxed(
                 "CreatePost",
@@ -626,6 +634,33 @@ impl App {
                 String::new(),
                 400,
             )));
+        }
+
+        // The recipient count of a persistent notification outside a DM (post.go:230): at least
+        // one mention and at most `PersistentNotificationMaxRecipients`. Go wraps whatever the
+        // walk returns — its own two 400s included — in one 500, so neither 400 reaches a client.
+        if post.get_persistent_notification() == Some(true)
+            && channel.channel_type != CHANNEL_TYPE_DIRECT
+        {
+            let max_recipients = self.persistent_settings().await.max_recipients;
+            self.for_each_persistent_notification_post(
+                std::slice::from_ref(&*post),
+                crate::post_persistent_notification::Visit::ValidateRecipients { max_recipients },
+            )
+            .await
+            .map_err(|err| {
+                PrepareError::App(
+                    AppError::new(
+                        "CreatePost",
+                        "api.post.post_priority.persistent_notification_validation_error.request_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                    .wrap(err)
+                    .into(),
+                )
+            })?;
         }
 
         // `SanitizeProps` strips `add_channel_member` always, and `force_notification` and
@@ -838,8 +873,18 @@ impl App {
         // post as the client will, and before the events, which carry what they answered.
         self.apply_post_will_be_consumed_hook(hook_ctx, &mut prepared)
             .await;
-        // `ResolvePersistentNotification` — a reply to a live persistent-notification root is
-        // forwarded by `resolve_root_post`; every other root returns on its first lines.
+        // `ResolvePersistentNotification` on the root, after the save: a failure here answers
+        // the request with the error although the reply is written, which is Go's order.
+        if !prepared.root_id.is_empty() {
+            if let Some(root) = parent_post_list
+                .as_ref()
+                .and_then(|list| list.posts.as_ref())
+                .and_then(|posts| posts.get(&prepared.root_id))
+            {
+                self.resolve_persistent_notification(root, &prepared.user_id)
+                    .await?;
+            }
+        }
         // Make sure the poster is following the thread.
         if self.config().thread_auto_follow && !prepared.root_id.is_empty() {
             if let Err(err) = self
@@ -1001,20 +1046,6 @@ impl App {
             )));
         }
 
-        if self
-            .store()
-            .post()
-            .has_persistent_notification(&post.root_id)
-            .await
-            .map_err(|err| {
-                tracing::error!(error = %err, "persistent notification lookup failed");
-                PrepareError::Unreproducible("the persistent notification lookup failed")
-            })?
-        {
-            return Err(PrepareError::Unreproducible(
-                "a reply to a persistent-notification root runs ResolvePersistentNotification",
-            ));
-        }
         Ok(Some(PostList {
             posts: Some(posts),
             ..parent
@@ -1434,8 +1465,116 @@ fn file_ids_as_go_captured_them(ids: &[String]) -> Vec<String> {
     list
 }
 
+/// Whether `handleWebhookEvents` (app/webhook.go:62) puts `hook` in its `relevantHooks` for a
+/// post of `message` in `channel_id` — the one predicate that decides whether an outgoing webhook
+/// fires. A hook on the post's channel with no trigger words fires on every post there; otherwise
+/// the hook must be on that channel or on none, and the message's **first field**
+/// (`strings.Fields`, so any Unicode space) must match a trigger word — exactly under
+/// `TriggerwordsExactMatch` (0), as a prefix under `TriggerwordsStartsWith` (1). Any other
+/// `TriggerWhen` fires nothing.
+pub(crate) fn outgoing_hook_fires(
+    hook: &mm_model::outgoing_webhook::OutgoingWebhook,
+    channel_id: &str,
+    message: &str,
+) -> bool {
+    if hook.channel_id != channel_id && !hook.channel_id.is_empty() {
+        return false;
+    }
+    let no_trigger_words = hook
+        .trigger_words
+        .as_ref()
+        .is_none_or(|words| words.is_empty());
+    if hook.channel_id == channel_id && no_trigger_words {
+        return true;
+    }
+    let first_word = message.split_whitespace().next().unwrap_or("");
+    match hook.trigger_when {
+        0 => hook.trigger_word_exact_match(first_word),
+        1 => hook.trigger_word_starts_with(first_word),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::outgoing_hook_fires;
+    use mm_model::outgoing_webhook::OutgoingWebhook;
+
+    fn hook(channel_id: &str, words: Option<&[&str]>, trigger_when: i64) -> OutgoingWebhook {
+        OutgoingWebhook {
+            channel_id: channel_id.to_owned(),
+            trigger_words: words.map(|w| w.iter().map(|s| (*s).to_owned()).collect()),
+            trigger_when,
+            ..OutgoingWebhook::default()
+        }
+    }
+
+    /// Every branch of `handleWebhookEvents`' relevance loop (app/webhook.go:63-75).
+    #[test]
+    fn an_outgoing_hook_fires_only_where_go_would_fire_it() {
+        let here = "cccccccccccccccccccccccccc";
+        let there = "dddddddddddddddddddddddddd";
+        // Its own channel and no trigger words: every post, whatever the message.
+        assert!(outgoing_hook_fires(&hook(here, None, 0), here, "anything"));
+        assert!(outgoing_hook_fires(&hook(here, Some(&[]), 1), here, ""));
+        // Another channel never fires, triggers or not.
+        assert!(!outgoing_hook_fires(
+            &hook(there, None, 0),
+            here,
+            "anything"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook(there, Some(&["go"]), 0),
+            here,
+            "go"
+        ));
+        // No channel and no trigger words fires nothing.
+        assert!(!outgoing_hook_fires(&hook("", None, 0), here, "anything"));
+        // Exact match on the first field, and only the first.
+        assert!(outgoing_hook_fires(
+            &hook("", Some(&["go"]), 0),
+            here,
+            "go on"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook("", Some(&["go"]), 0),
+            here,
+            "gone"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook("", Some(&["go"]), 0),
+            here,
+            "now go"
+        ));
+        assert!(outgoing_hook_fires(
+            &hook(here, Some(&["go"]), 0),
+            here,
+            " \u{a0}go"
+        ));
+        // Starts-with: the message word starts with the trigger.
+        assert!(outgoing_hook_fires(
+            &hook("", Some(&["go"]), 1),
+            here,
+            "gone"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook("", Some(&["gone"]), 1),
+            here,
+            "go"
+        ));
+        // An unknown TriggerWhen fires nothing; an empty message has no first word.
+        assert!(!outgoing_hook_fires(
+            &hook("", Some(&["go"]), 2),
+            here,
+            "go"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook(here, Some(&["go"]), 0),
+            here,
+            ""
+        ));
+    }
+
     #[test]
     fn a_captured_file_id_list_is_sorted_and_keeps_its_length() {
         // ["c","a","c"]: sorted ["a","c","c"], compacted in place to ["a","c" | "c"].

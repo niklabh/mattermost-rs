@@ -16,6 +16,10 @@
 //! repeated for all 71 modules; this is one function that a type opts into by declaring its field
 //! names.
 //!
+//! **Since 2026-09-25 the body decoders fold every struct themselves** (`crate::go_decode`, with
+//! [`fold_name`] below), so a schema here is needed only where a document is decoded some other
+//! way — a `Value` already in hand, or a `#[serde(flatten)]` type ([D-1240]).
+//!
 //! # Why an ASCII-only fold table is exact rather than approximate
 //!
 //! Go's `foldName` upper-cases ASCII and pushes every other rune through `foldRune`, which is the

@@ -84,7 +84,8 @@ impl CommandResponse {
     /// Go wraps the decode error with `utils.HumanizeJSONError`, which annotates it with the
     /// offending line and column; `serde_json::Error` already carries both.
     pub fn from_json(data: &[u8]) -> Result<Self, serde_json::Error> {
-        let mut o: CommandResponse = serde_json::from_slice(data)?;
+        // `var o CommandResponse; json.Unmarshal(b, &o)` — Go's decoding rules, whole input.
+        let mut o: CommandResponse = crate::utils::unmarshal_from_json(data)?;
 
         if let Some(attachments) = o.attachments.take() {
             o.attachments = Some(stringify_message_attachment_field_value(attachments));

@@ -12,10 +12,20 @@
 //!
 //! # What is forwarded
 //!
-//! A member whose removal this port cannot reproduce (a guest, a shared channel — see
-//! [`mm_app::App::remove_user_from_channel`]) makes the sweep a [`MemberWrite::Forward`], and the
-//! request is handed to Go whole. The deactivated-member sweep may already have run by then; it
-//! is a plain `DELETE` Go repeats without effect.
+//! Only the `force` sweep can forward, and only **before** the move writes anything: a shared
+//! channel while Go's shared-channel sync service runs, whose `NotifyMembershipChanged` is state
+//! in the Go process — see [`mm_app::App::remove_user_from_channel`] and [D-1170] — makes the
+//! sweep a [`MemberWrite::Forward`], and the request is handed to Go whole. The
+//! deactivated-member sweep may already have run by then; it is a plain `DELETE` Go repeats
+//! without effect. `App::move_channel` itself never forwards. Guests and group-constrained
+//! channels are swept here.
+//!
+//! # The audit
+//!
+//! Go's two `c.LogAudit` calls on success are two `Audits` rows (`channel=<name>`,
+//! `team=<name>`), written here through [`mm_app::App::log_audit`]. The `MakeAuditRecord` /
+//! `LogAuditRec` record goes to Go's audit *log* (mlog), which nothing over the API can read and
+//! this server does not keep.
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -31,14 +41,12 @@ use crate::channels::require_id;
 use crate::error::ApiError;
 use crate::proxy;
 
-/// `model.StringInterfaceFromJSON(r.Body)`: an object, or an empty map for anything else.
+/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — see
+/// [`mm_model::utils::string_interface_from_json`].
 pub(crate) fn string_interface_from_json(
     bytes: &[u8],
 ) -> serde_json::Map<String, serde_json::Value> {
-    match serde_json::from_slice::<serde_json::Value>(bytes) {
-        Ok(serde_json::Value::Object(map)) => map,
-        _ => serde_json::Map::new(),
-    }
+    mm_model::utils::string_interface_from_json(bytes)
 }
 
 /// Port of `moveChannel` — `POST /api/v4/channels/{channel_id}/move`.
@@ -59,6 +67,9 @@ pub async fn move_channel(
     };
 
     let (parts, body) = request.into_parts();
+    // `c.AppContext.Path()` and `c.AppContext.IPAddress()`, the `Action` and `IpAddress` of the
+    // two audit rows.
+    let audit = crate::audit_log::AuditRequest::of(&parts);
     let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
@@ -131,14 +142,20 @@ pub async fn move_channel(
         }
     }
 
-    match state
+    if let Err(err) = state
         .app
         .move_channel(&team, &mut channel, Some(&user), &hook_ctx)
         .await
     {
-        Ok(MemberWrite::Done(())) => {}
-        Ok(MemberWrite::Forward(why)) => return forward(state, why).await,
-        Err(err) => return ApiError::from(*err).into_response(),
+        return ApiError::from(*err).into_response();
+    }
+
+    // `c.LogAudit` twice, on success only — two `Audits` rows.
+    for extra_info in [
+        format!("channel={}", channel.name),
+        format!("team={}", team.name),
+    ] {
+        audit.log(&state.app, Some(&session.0), &extra_info).await;
     }
 
     let mut body = match serde_json::to_vec(&channel) {

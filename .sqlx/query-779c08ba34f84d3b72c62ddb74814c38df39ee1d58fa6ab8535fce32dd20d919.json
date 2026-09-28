@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT u.id\n              FROM users u\n             WHERE u.id IN (\n                   SELECT gm.userid\n                     FROM channels c\n                     JOIN groupchannels gc ON gc.channelid = c.id\n                     JOIN usergroups ug ON ug.id = gc.groupid\n                     JOIN groupmembers gm ON gm.groupid = ug.id\n                    WHERE c.id = $1\n                      AND gc.deleteat = 0\n                      AND ug.deleteat = 0\n                      AND gm.deleteat = 0\n                    GROUP BY gm.userid\n             )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "779c08ba34f84d3b72c62ddb74814c38df39ee1d58fa6ab8535fce32dd20d919"
+}

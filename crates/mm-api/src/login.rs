@@ -18,7 +18,8 @@
 //! **It mutates shared state before it can fail.** `Users.FailedAttempts` is claimed before the
 //! password is checked. A forward taken *after* that claim would have Go claim a second slot for
 //! the same attempt, so every condition this port cannot serve is detected **first** — see
-//! [`login`]'s forwarding table. The MFA probe costs an extra `SELECT` for exactly this reason.
+//! [`login`]'s forwarding table. The MFA check is served (since 2026-09-25), in Go's place after
+//! the claim, so it needs no probe.
 //!
 //! **Its success response is four headers and a body.** `Token`, and — only for a request
 //! carrying `X-Requested-With: XMLHttpRequest` — the three cookies `MMAUTHTOKEN` (HttpOnly),
@@ -35,7 +36,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_model::session::{
-    LoginOptions, SESSION_COOKIE_CSRF, SESSION_COOKIE_TOKEN, SESSION_COOKIE_USER,
+    LoginOptions, SESSION_COOKIE_CSRF, SESSION_COOKIE_TOKEN, SESSION_COOKIE_USER, Session,
 };
 use mm_model::utils::{AppError, StringMap, get_millis};
 
@@ -45,13 +46,10 @@ use crate::error::ApiError;
 use crate::proxy;
 use crate::sessions::{check_embedded_cookie, render_session_cookie};
 
-/// Port of `model.MapFromJSON` (utils.go:507) — every failure is an empty map.
-///
-/// A third copy of the two-liner `auth_writes` and `channel_member_writes` already carry, for the
-/// reason stated there: several agents edit this workspace at once and a shared two-line helper
-/// is a worse merge risk than a copy.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    serde_json::from_slice::<StringMap>(bytes).unwrap_or_default()
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// `model.HeaderRequestedWith` / `model.HeaderRequestedWithXML` (model/client4.go constants,
@@ -69,7 +67,7 @@ const HEADER_TOKEN: &str = "Token";
 /// client, and the ones reachable only after a licence or an LDAP server is configured must
 /// survive that change without anyone remembering this file.
 const UNMASKED_ERRORS: &[&str] = &[
-    // Both MFA ids: forwarded by this port, so Go writes them, not us.
+    // Both MFA ids: `App::check_user_mfa`'s 400 and 401.
     "mfa.validate_token.authenticate.app_error",
     "api.user.check_user_mfa.bad_code.app_error",
     "api.user.login.blank_pwd.app_error",
@@ -139,10 +137,10 @@ fn mask_login_error(state: &AppState, err: ApiError) -> ApiError {
 /// | `magic_link_token` present | before the body is otherwise read | `AuthenticateUserForGuestMagicLink` is not ported, and the branch is licensed |
 /// | `LdapSettings.Enable` | before any lookup | both `GetUserForLogin` and `authenticateUser` consult an LDAP client this port has not got |
 /// | the licence is a **cloud** one | before any lookup | the cloud session cookie and the CWS token path; a self-hosted licence is served since 2026-09-13 |
-/// | the account has MFA and the server has MFA on | after the blank-password check, before the counter | Go asks *after* claiming a failed-attempt slot; asking here costs one `SELECT` and keeps the counter honest |
 ///
 /// Every one of those is a read. Nothing in this handler writes until
-/// `App::authenticate_user_for_login`, which is past all four.
+/// `App::authenticate_user_for_login`, which is past all three — and which checks the MFA token
+/// itself, after the failed-attempt claim, as Go does.
 ///
 /// # The order of the checks after authentication
 ///
@@ -169,6 +167,7 @@ pub async fn login(
     // `pluginContext(rctx)` — `APIHandler` resolves any token the request carries, so a login
     // sent with a live session hands that session's id to `UserWillLogIn`.
     let hook_ctx = crate::plugin_context::hook_context_of(&request, session.0.as_ref());
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request).await {
         Ok(pair) => pair,
         Err(err) => return mask_login_error(&state, err).into_response(),
@@ -214,19 +213,11 @@ pub async fn login(
         return proxy::forward_to_go(State(state), request).await;
     }
 
-    // `AuthenticateUserForLogin` refuses a blank password before it looks anything up, and that
-    // id is unmasked — so the probe below must not run first or an empty body would answer the
-    // lookup error instead.
-    if !password.is_empty() && state.app.login_needs_mfa(id, login_id).await {
-        tracing::Span::current().record("forwarded", true);
-        tracing::Span::current().record("outcome", "mfa");
-        return proxy::forward_to_go(State(state), request).await;
-    }
-
     match serve_login(
         &state,
         &headers,
         &hook_ctx,
+        (&audit, session.0.as_ref()),
         id,
         login_id,
         password,
@@ -252,6 +243,7 @@ async fn serve_login(
     state: &AppState,
     headers: &HeaderMap,
     hook_ctx: &mm_app::plugin_hooks::HookContext,
+    (audit, caller): (&crate::audit_log::AuditRequest, Option<&Session>),
     id: &str,
     login_id: &str,
     password: &str,
@@ -259,10 +251,34 @@ async fn serve_login(
     device_id: &str,
     voip_device_id: &str,
 ) -> Result<Response, ApiError> {
-    let mut user = state
+    // `c.LogAuditWithUserId(id, "attempt - login_id="+loginId)` — under the **caller's** session,
+    // so a login sent with a live token gains that user's `session_user=` suffix.
+    audit
+        .log_with_user_id(
+            &state.app,
+            caller,
+            id,
+            &format!("attempt - login_id={login_id}"),
+        )
+        .await;
+    let mut user = match state
         .app
         .authenticate_user_for_login(id, login_id, password, mfa_token)
-        .await?;
+        .await
+    {
+        Ok(user) => user,
+        Err(err) => {
+            audit
+                .log_with_user_id(
+                    &state.app,
+                    caller,
+                    id,
+                    &format!("failure - login_id={login_id}"),
+                )
+                .await;
+            return Err(ApiError::from(err));
+        }
+    };
 
     // `user.IsMagicLinkEnabled()` is `AuthService == "magic_link" && IsGuest()`.
     //
@@ -319,6 +335,10 @@ async fn serve_login(
         )));
     }
 
+    audit
+        .log_with_user_id(&state.app, caller, &user.id, "authenticated")
+        .await;
+
     let opts = LoginOptions {
         device_id: device_id.to_owned(),
         voip_device_id: voip_device_id.to_owned(),
@@ -329,6 +349,11 @@ async fn serve_login(
         .app
         .do_login(hook_ctx, &user, &opts, user_agent(headers))
         .await?;
+    // `c.AppContext = c.AppContext.WithSession(session)` came first, so `"success"` is under the
+    // **new** session: its id, and the user's own `session_user=` suffix.
+    audit
+        .log_with_user_id(&state.app, Some(&session), &user.id, "success")
+        .await;
 
     // `GetUserTermsOfService` is **not** gated on anything here — unlike `getUser`, which only
     // consults it for self or an admin. This is always self.
@@ -424,7 +449,7 @@ async fn serve_login(
 /// fresh clock read, so it is a second or two later than the session's own `ExpiresAt`.
 ///
 /// The cloud cookie (`a.License().IsCloud()`) is unreachable: a cloud licence is forwarded.
-fn session_cookies(
+pub(crate) fn session_cookies(
     state: &AppState,
     headers: &HeaderMap,
     session: &mm_model::session::Session,
@@ -611,7 +636,7 @@ pub async fn login_cws(
 }
 
 /// Port of `loginWithDesktopToken` (api4/user.go:2300) — `POST /api/v4/users/login/desktop_token`,
-/// an `APIHandler` (no session) behind a route-level limit of 2/s that is not ported ([D-430]).
+/// an `APIHandler` (no session) behind a route-level limit of 2/s ([`crate::ratelimit`]).
 ///
 /// The desktop app's half of an SSO login: the browser finished OAuth or SAML and was handed a
 /// `DesktopTokens` row; the app posts that token here and gets a session. So the body is a
@@ -653,6 +678,7 @@ async fn desktop_token_login(
 ) -> Result<Response, ApiError> {
     let headers = request.headers().clone();
     let hook_ctx = crate::plugin_context::hook_context_of(&request, session.0.as_ref());
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (_, bytes) = split_body(request).await?;
     let props = map_from_json(&bytes);
     let get = |key: &str| props.get(key).map_or("", String::as_str);
@@ -694,6 +720,11 @@ async fn desktop_token_login(
         .do_login(&hook_ctx, &user, &opts, user_agent(&headers))
         .await?;
     tracing::Span::current().record("outcome", "session");
+    // `c.LogAuditWithUserId(user.Id, "success")`, after `WithSession(session)`: the new session's
+    // id, and the user's own `session_user=` suffix. The only row this route writes.
+    audit
+        .log_with_user_id(&state.app, Some(&session), &user.id, "success")
+        .await;
 
     let mut body = serde_json::to_vec(&user).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise User");
@@ -758,7 +789,7 @@ pub async fn login_sso_code_exchange(
     _csrf: crate::auth::CsrfGuard,
     request: Request,
 ) -> Response {
-    let enabled = state.app.config().feature_flag_mobile_sso_code_exchange;
+    let enabled = state.app.config().feature_flags.mobile_sso_code_exchange;
     tracing::Span::current().record("enabled", enabled);
     if enabled {
         tracing::debug!("handing an SSO code exchange to Go");
@@ -1058,17 +1089,24 @@ mod tests {
     /// `map_from_json` swallows everything, so a malformed login body is a blank password rather
     /// than a decode error — which is the id the client sees.
     #[test]
-    fn map_from_json_turns_every_failure_into_an_empty_map() {
-        assert!(map_from_json(b"").is_empty());
-        assert!(map_from_json(b"null").is_empty());
-        assert!(map_from_json(b"[]").is_empty());
-        assert!(map_from_json(br#"{"login_id": 7}"#).is_empty());
-        assert!(map_from_json(b"{").is_empty());
+    fn map_from_json_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"login_id":"a@b.c","n":5} trailing"#);
+        assert_eq!(mixed.get("login_id").map(String::as_str), Some("a@b.c"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(br#"{"login_id":"a@b.c"}"#)
+            map_from_json(br#"{"login_id":7}"#)
                 .get("login_id")
                 .map(String::as_str),
-            Some("a@b.c")
+            Some("")
         );
     }
 

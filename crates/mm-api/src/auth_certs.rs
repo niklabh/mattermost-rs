@@ -40,15 +40,12 @@
 //! refuses **two** `certificate` parts (`multiple_files`) where the other two take the first.
 //! Measured, all three, before this module existed.
 
-use std::collections::HashMap;
-
 use axum::Router;
 use axum::extract::{Path as UrlPath, RawQuery, Request, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use mm_model::config::LdapSettings;
-use mm_model::go_json::{GoFields, remap_object_keys};
 use mm_model::ldap::{LdapDiagnosticTestType, USER_AUTH_SERVICE_LDAP};
 use mm_model::permission::{
     PERMISSION_ADD_LDAP_PRIVATE_CERT, PERMISSION_ADD_LDAP_PUBLIC_CERT,
@@ -539,38 +536,16 @@ pub async fn get_saml_certificate_status(
     }
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507), the way it actually behaves: the decode error is
-/// discarded and whatever `objmap` holds is returned. `encoding/json` fills every string-valued
-/// key of an object even when a sibling's type is wrong — it "completes the unmarshaling as best
-/// it can" and reports the first mismatch afterwards — so `{"saml_metadata_url":"x","n":5}`
-/// carries the URL. A body that is not an object, or is not JSON, leaves `objmap` nil: empty.
-/// Only the **first** JSON value is read, as `Decoder.Decode` reads one.
-fn map_from_json(bytes: &[u8]) -> HashMap<String, String> {
-    let Some(Ok(serde_json::Value::Object(object))) = serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<serde_json::Value>()
-        .next()
-    else {
-        return HashMap::new();
-    };
-    object
-        .into_iter()
-        .filter_map(|(key, value)| match value {
-            serde_json::Value::String(text) => Some((key, text)),
-            _ => None,
-        })
-        .collect()
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
+fn map_from_json(bytes: &[u8]) -> mm_model::utils::StringMap {
+    mm_model::utils::map_from_json(bytes)
 }
 
-/// Port of `model.StringInterfaceFromJSON` (utils.go:590), the same shape for `map[string]any`
-/// — every value fits, so the first JSON value is the whole map or nothing.
+/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — see
+/// [`mm_model::utils::string_interface_from_json`].
 fn string_interface_from_json(bytes: &[u8]) -> serde_json::Map<String, serde_json::Value> {
-    match serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<serde_json::Value>()
-        .next()
-    {
-        Some(Ok(serde_json::Value::Object(object))) => object,
-        _ => serde_json::Map::new(),
-    }
+    mm_model::utils::string_interface_from_json(bytes)
 }
 
 /// Port of `getSamlMetadataFromIdp` (api4/saml.go:238).
@@ -620,87 +595,24 @@ pub async fn get_saml_metadata_from_idp(
     }
 }
 
-/// The handler-local `ResetAuthDataParams` (api4/saml.go:282). Every field is optional because
-/// `encoding/json` treats a JSON `null` as "leave it" for a `bool` and a slice alike, and a
-/// missing key the same way; the wire never sees the values on this build.
+/// The handler-local `ResetAuthDataParams` (api4/saml.go:269): two `bool`s and a `[]string`.
+/// A `null` member, a `null` element or a folded key decode as Go decodes them through the shared
+/// body decoder; the wire never sees the values on this build.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct ResetAuthDataParams {
-    include_deleted: Option<bool>,
-    dry_run: Option<bool>,
-    user_ids: Option<Vec<Option<String>>>,
-}
-
-/// The `json:` names of [`ResetAuthDataParams`], for the case-insensitive key match
-/// `encoding/json` makes and serde does not (see [D-040]).
-static RESET_AUTH_DATA_FIELDS: GoFields = GoFields {
-    names: &["include_deleted", "dry_run", "user_ids"],
-    nested: &[],
-};
-
-/// The 33 `json:` names of `model.LdapSettings` (config.go:2680), in declaration order — the
-/// struct has no tags, so the names are the field names — for the same key fold.
-static LDAP_SETTINGS_FIELDS: GoFields = GoFields {
-    names: &[
-        "Enable",
-        "EnableSync",
-        "LdapServer",
-        "LdapPort",
-        "ConnectionSecurity",
-        "BaseDN",
-        "BindUsername",
-        "BindPassword",
-        "MaximumLoginAttempts",
-        "UserFilter",
-        "GroupFilter",
-        "GuestFilter",
-        "EnableAdminFilter",
-        "AdminFilter",
-        "GroupDisplayNameAttribute",
-        "GroupIdAttribute",
-        "FirstNameAttribute",
-        "LastNameAttribute",
-        "EmailAttribute",
-        "UsernameAttribute",
-        "NicknameAttribute",
-        "IdAttribute",
-        "PositionAttribute",
-        "LoginIdAttribute",
-        "PictureAttribute",
-        "SyncIntervalMinutes",
-        "ReAddRemovedMembers",
-        "SkipCertificateVerification",
-        "PublicCertificateFile",
-        "PrivateKeyFile",
-        "QueryTimeout",
-        "MaxPageSize",
-        "LoginFieldName",
-    ],
-    nested: &[],
-};
-
-/// `json.NewDecoder(r.Body).Decode(&v)`, up to the point the target type matters: the **first**
-/// JSON value in the body, its object keys folded the way `encoding/json` folds them. `None` is
-/// an empty body or a syntax error — `Decode`'s `io.EOF` and `SyntaxError`.
-fn decode_first_value(bytes: &[u8], schema: &GoFields) -> Option<serde_json::Value> {
-    let mut value = serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<serde_json::Value>()
-        .next()?
-        .ok()?;
-    remap_object_keys(&mut value, schema);
-    Some(value)
+    #[serde(rename = "include_deleted")]
+    include_deleted: bool,
+    #[serde(rename = "dry_run")]
+    dry_run: bool,
+    #[serde(rename = "user_ids")]
+    user_ids: Vec<String>,
 }
 
 /// `Decode(&settings)` into a non-pointer `model.LdapSettings`: a JSON `null` is a no-op that
 /// leaves the zero value, and every other value must be an object whose members fit.
 fn decode_ldap_settings(bytes: &[u8]) -> Option<LdapSettings> {
-    match decode_first_value(bytes, &LDAP_SETTINGS_FIELDS)? {
-        serde_json::Value::Null => Some(LdapSettings::default()),
-        // Only an object fits a struct in Go; serde would also read a *sequence* into one,
-        // positionally, and `[]` would then be a settings block rather than the 400 it is.
-        value @ serde_json::Value::Object(_) => serde_json::from_value(value).ok(),
-        _ => None,
-    }
+    mm_model::utils::decode_one_value_from_json(bytes).ok()
 }
 
 /// Port of `resetAuthDataToEmail` (api4/saml.go:270), on the HTTP and the local router alike.
@@ -732,26 +644,17 @@ pub async fn reset_auth_data_to_email(
     let Ok(bytes) = read_body(request.into_body()).await else {
         return decode_error().into_response();
     };
-    let params: ResetAuthDataParams = match decode_first_value(&bytes, &RESET_AUTH_DATA_FIELDS) {
-        // An object, or nothing: `null` leaves the pointer nil, and any other shape is the
-        // decoder's type error (serde would read a sequence positionally — see
-        // `decode_ldap_settings`).
-        Some(value @ serde_json::Value::Object(_)) => match serde_json::from_value(value) {
-            Ok(params) => params,
-            Err(_) => return decode_error().into_response(),
-        },
-        _ => return decode_error().into_response(),
-    };
-    let user_ids: Vec<String> = params
-        .user_ids
-        .unwrap_or_default()
-        .into_iter()
-        .map(Option::unwrap_or_default)
-        .collect();
+    // `var params *ResetAuthDataParams`: `null` leaves the pointer nil, which the handler refuses
+    // with the same 400 as a body that does not decode.
+    let params: ResetAuthDataParams =
+        match mm_model::utils::decode_one_from_json::<Option<ResetAuthDataParams>>(&bytes) {
+            Ok(Some(params)) => params,
+            _ => return decode_error().into_response(),
+        };
     match state.app.reset_saml_auth_data_to_email(
-        params.include_deleted.unwrap_or(false),
-        params.dry_run.unwrap_or(false),
-        &user_ids,
+        params.include_deleted,
+        params.dry_run,
+        &params.user_ids,
     ) {
         Ok(num_affected) => encoded(
             "resetAuthDataToEmail",
@@ -1136,16 +1039,27 @@ mod tests {
 
     #[test]
     fn map_from_json_keeps_the_string_entries_of_a_mixed_object() {
-        let props = map_from_json(br#"{"saml_metadata_url":"x","n":5} trailing"#);
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"saml_metadata_url":"x","n":5} trailing"#);
         assert_eq!(
-            props.get("saml_metadata_url").map(String::as_str),
+            mixed.get("saml_metadata_url").map(String::as_str),
             Some("x")
         );
-        assert!(!props.contains_key("n"));
-        assert!(map_from_json(b"null").is_empty());
-        assert!(map_from_json(b"[1]").is_empty());
-        assert!(map_from_json(b"{\"a\":").is_empty());
-        assert!(map_from_json(b"").is_empty());
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
+        assert_eq!(
+            map_from_json(br#"{"saml_metadata_url":7}"#)
+                .get("saml_metadata_url")
+                .map(String::as_str),
+            Some("")
+        );
     }
 
     #[test]
@@ -1175,25 +1089,17 @@ mod tests {
     }
 
     #[test]
-    fn reset_auth_data_params_null_is_a_missing_body() {
-        assert!(matches!(
-            decode_first_value(b"null", &RESET_AUTH_DATA_FIELDS),
-            Some(serde_json::Value::Null)
-        ));
-        let value = decode_first_value(
-            br#"{"DRY_RUN":true,"user_ids":[null,"a"]}"#,
-            &RESET_AUTH_DATA_FIELDS,
-        )
-        .unwrap();
-        let params: ResetAuthDataParams = serde_json::from_value(value).unwrap();
-        assert_eq!(params.dry_run, Some(true));
-        assert_eq!(params.user_ids.unwrap().len(), 2);
-        let value =
-            decode_first_value(br#"{"include_deleted":"x"}"#, &RESET_AUTH_DATA_FIELDS).unwrap();
-        assert!(serde_json::from_value::<ResetAuthDataParams>(value).is_err());
-        assert!(matches!(
-            decode_first_value(b"[]", &RESET_AUTH_DATA_FIELDS),
-            Some(serde_json::Value::Array(_))
-        ));
+    fn reset_auth_data_params_decode_as_go() {
+        let decode = |body: &[u8]| {
+            mm_model::utils::decode_one_from_json::<Option<ResetAuthDataParams>>(body)
+        };
+        assert!(decode(b"null").unwrap().is_none(), "a nil pointer");
+        let params = decode(br#"{"DRY_RUN":true,"user_ids":[null,"a"],"include_deleted":null}"#)
+            .unwrap()
+            .unwrap();
+        assert!(params.dry_run && !params.include_deleted);
+        assert_eq!(params.user_ids, vec!["", "a"]);
+        assert!(decode(br#"{"include_deleted":"x"}"#).is_err());
+        assert!(decode(b"[]").is_err());
     }
 }

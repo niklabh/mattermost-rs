@@ -1122,8 +1122,8 @@ mod go_parity {
         }
     }
 
-    /// The two documents Go accepts and we reject: `null` into a **scalar**. Listed by name
-    /// rather than detected, so adding a corpus case cannot silently join the exemption.
+    /// The two documents Go accepts and serde's derive alone rejects: `null` into a **scalar**.
+    /// Listed by name rather than detected, so adding a corpus case cannot silently join the list.
     const NULL_SCALAR_ONLY: [&str; 2] = [
         r#"{"terms":null,"modifier":null}"#,
         r#"{"ishashtag":null,"timezone_offset":null}"#,
@@ -1154,16 +1154,11 @@ mod go_parity {
     }
 
     /// [D-057]: Go's `encoding/json` leaves the destination untouched on `null` for **every**
-    /// type, not only slices and pointers. The slice fields are handled (`null_as_empty`),
-    /// because every other nullable slice in the crate decodes `null` via an `Option` and
-    /// leaving these out would be the inconsistency. The scalars are not, because no ported type
-    /// accepts a null scalar and fixing one type would be.
-    ///
-    /// Asserted rather than skipped: Go's answer for both documents is `{"modifier":""}`, so if
-    /// the crate ever gains a null-tolerant scalar convention this test fails and the exemption
-    /// can be deleted.
+    /// non-pointer type. serde's derive alone rejects a null scalar; the body decoder, which is
+    /// what a handler uses, gives Go's `{"modifier":""}` for both documents. The slice fields'
+    /// own `null_as_empty` predates it and still holds for a plain `serde_json` decode.
     #[test]
-    fn a_null_scalar_is_accepted_by_go_and_rejected_here() {
+    fn a_null_scalar_decodes_as_go_decodes_it() {
         let oracle = oracle();
         for input in NULL_SCALAR_ONLY {
             let case = section(&oracle, "wire")
@@ -1175,7 +1170,13 @@ mod go_parity {
             assert_eq!(case["out"].as_str().unwrap(), r#"{"modifier":""}"#);
             assert!(
                 serde_json::from_str::<SearchParams>(input).is_err(),
-                "{input}: we accepted it, so [D-057] can be closed"
+                "{input}: premise"
+            );
+            let ours: SearchParams = crate::utils::decode_one_from_json(input.as_bytes()).unwrap();
+            assert_eq!(
+                crate::utils::go_json_marshal(&ours).unwrap(),
+                case["out"].as_str().unwrap(),
+                "{input}"
             );
         }
 

@@ -1,0 +1,2506 @@
+{
+    "fix_config": [
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [],
+            "name": "nothing set",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_SITEURL",
+                    "http://env.example.com/"
+                ]
+            ],
+            "name": "site url from the environment loses one trailing slash",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://env.example.com"
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_SITEURL",
+                    "http://env.example.com///"
+                ]
+            ],
+            "name": "site url from the environment loses several trailing slashes",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://env.example.com"
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_SITEURL",
+                    "http://env.example.com"
+                ]
+            ],
+            "name": "site url from the environment without a slash is untouched",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://env.example.com"
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_SITEURL",
+                    "/"
+                ]
+            ],
+            "name": "site url from the environment that is only a slash becomes empty",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_SITEURL",
+                    "http://env.example.com/sub/path/"
+                ]
+            ],
+            "name": "site url from the environment keeps its path, not its slash",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://env.example.com/sub/path"
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_SITEURL",
+                    "http://env.example.com//sub"
+                ]
+            ],
+            "name": "site url from the environment keeps an inner doubled slash",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://env.example.com//sub"
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://doc.example.com//"
+                }
+            },
+            "env": [],
+            "name": "site url from the document loses its trailing slashes",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://doc.example.com"
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://doc.example.com"
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "///"
+                }
+            },
+            "env": [],
+            "name": "site url from the document that is only slashes becomes empty",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://doc.example.com/sub"
+                }
+            },
+            "env": [],
+            "name": "site url from the document without a slash is untouched",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://doc.example.com/sub"
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://doc.example.com/sub"
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://doc.example.com/"
+                }
+            },
+            "env": [
+                [
+                    "MM_SERVICESETTINGS_SITEURL",
+                    "http://env.example.com/"
+                ]
+            ],
+            "name": "site url from the environment overrides a slashed document",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://doc.example.com"
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": "http://env.example.com"
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_FILESETTINGS_DIRECTORY",
+                    "/srv/mattermost"
+                ]
+            ],
+            "name": "a local directory from the environment gains a slash",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "/srv/mattermost/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_FILESETTINGS_DIRECTORY",
+                    "/srv/mattermost/"
+                ]
+            ],
+            "name": "a local directory from the environment with a slash is untouched",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "/srv/mattermost/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_FILESETTINGS_DIRECTORY",
+                    "/srv/mattermost//"
+                ]
+            ],
+            "name": "a local directory from the environment with two slashes keeps both",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "/srv/mattermost//",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./files",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [],
+            "name": "a relative local directory from the document gains a slash",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./files/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./files/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "bucket-dir",
+                    "DriverName": "amazons3"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [],
+            "name": "an s3 directory from the document is untouched",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "bucket-dir",
+                    "DriverName": "amazons3"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "bucket-dir",
+                    "DriverName": "amazons3"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_FILESETTINGS_DRIVERNAME",
+                    "azureblob"
+                ],
+                [
+                    "MM_FILESETTINGS_DIRECTORY",
+                    "container-dir"
+                ],
+                [
+                    "MM_FILESETTINGS_AZURESTORAGEACCOUNT",
+                    "mmaccount1"
+                ],
+                [
+                    "MM_FILESETTINGS_AZURECONTAINER",
+                    "mmcontainer"
+                ]
+            ],
+            "name": "an azure directory from the environment is untouched",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "container-dir",
+                    "DriverName": "azureblob"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./files",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_FILESETTINGS_DRIVERNAME",
+                    "amazons3"
+                ]
+            ],
+            "name": "an s3 driver from the environment keeps the slash the document's local driver added",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./files/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./files/",
+                    "DriverName": "amazons3"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "bucket-dir",
+                    "DriverName": "amazons3"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_FILESETTINGS_DRIVERNAME",
+                    "local"
+                ]
+            ],
+            "name": "a local driver from the environment gives an s3 document directory its slash",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "bucket-dir",
+                    "DriverName": "amazons3"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "bucket-dir/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE",
+                    "de"
+                ]
+            ],
+            "name": "a supported server locale is kept",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "de"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE",
+                    "xx"
+                ]
+            ],
+            "name": "an unknown server locale is reset",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE",
+                    "am"
+                ]
+            ],
+            "name": "a shipped but unsupported server locale is reset",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE",
+                    "EN"
+                ]
+            ],
+            "name": "an upper-cased server locale is reset",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE",
+                    ""
+                ]
+            ],
+            "name": "an empty server locale is reset",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE",
+                    "pt-BR"
+                ]
+            ],
+            "name": "a regional server locale is kept",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "pt-BR"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE",
+                    "pt_BR"
+                ]
+            ],
+            "name": "a regional server locale with an underscore is reset",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE",
+                    "ja"
+                ]
+            ],
+            "name": "a supported client locale is kept",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "ja",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE",
+                    "klingon"
+                ]
+            ],
+            "name": "an unknown client locale is reset",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "hi",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [],
+            "name": "a shipped but unsupported client locale is reset",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "zh-cn",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [],
+            "name": "a lower-cased regional client locale is reset",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "zz",
+                    "DefaultServerLocale": "qq"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [],
+            "name": "both locales bad in the document",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de,en,fr"
+                ]
+            ],
+            "name": "available locales that include the client locale are kept",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,en,fr",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de,fr"
+                ]
+            ],
+            "name": "available locales without the client locale gain it",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,fr,en",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de,xx,fr"
+                ]
+            ],
+            "name": "available locales with an unsupported one are cleared",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "en,xx"
+                ]
+            ],
+            "name": "available locales with an unsupported one after the client are cleared",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de, fr"
+                ]
+            ],
+            "name": "available locales with a space are cleared",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de,,fr"
+                ]
+            ],
+            "name": "available locales with an empty piece are cleared",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de,en,"
+                ]
+            ],
+            "name": "available locales with a trailing comma are cleared",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de,fr,de,en,fr"
+                ]
+            ],
+            "name": "available locales lose duplicates",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,fr,en",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "ja,ja"
+                ]
+            ],
+            "name": "available locales lose duplicates and gain the client",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "ja,en",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de,fr"
+                ],
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE",
+                    "ko"
+                ]
+            ],
+            "name": "available locales gain a client locale from the environment",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,fr,ko",
+                    "DefaultClientLocale": "ko",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de"
+                ],
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE",
+                    "xx"
+                ]
+            ],
+            "name": "available locales gain en for a reset client locale",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,en",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "en"
+                ]
+            ],
+            "name": "a single available locale that is the client",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "en",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "en-AU"
+                ],
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE",
+                    "en"
+                ]
+            ],
+            "name": "available locales match the client exactly, not by prefix",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "en-AU,en",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de",
+                    "DefaultClientLocale": "fr",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE",
+                    "ja"
+                ]
+            ],
+            "name": "a document client locale and an environment client locale are both appended",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,fr",
+                    "DefaultClientLocale": "fr",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,fr,ja",
+                    "DefaultClientLocale": "ja",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,fr,de",
+                    "DefaultClientLocale": "fr",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE",
+                    "ru"
+                ]
+            ],
+            "name": "an environment client locale is appended to fixed document locales",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,fr",
+                    "DefaultClientLocale": "fr",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,fr,ru",
+                    "DefaultClientLocale": "ru",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de",
+                    "DefaultClientLocale": "fr",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "es,it"
+                ]
+            ],
+            "name": "environment available locales replace the fixed document ones",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,fr",
+                    "DefaultClientLocale": "fr",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "es,it,fr",
+                    "DefaultClientLocale": "fr",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "zz",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_AVAILABLELOCALES",
+                    "de"
+                ]
+            ],
+            "name": "a bad document client locale is reset before the environment available locales",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,en",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        },
+        {
+            "doc": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "de,xx",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "env": [
+                [
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE",
+                    "ja"
+                ]
+            ],
+            "name": "a bad document available list is cleared before an environment client locale",
+            "persisted": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "en",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            },
+            "want": {
+                "FileSettings": {
+                    "Directory": "./data/",
+                    "DriverName": "local"
+                },
+                "LocalizationSettings": {
+                    "AvailableLocales": "",
+                    "DefaultClientLocale": "ja",
+                    "DefaultServerLocale": "en"
+                },
+                "ServiceSettings": {
+                    "SiteURL": ""
+                }
+            }
+        }
+    ],
+    "supported_locales": [
+        "bg",
+        "de",
+        "en",
+        "en-AU",
+        "es",
+        "fa",
+        "fr",
+        "hu",
+        "it",
+        "ja",
+        "ko",
+        "nl",
+        "pl",
+        "pt-BR",
+        "ro",
+        "ru",
+        "sv",
+        "tr",
+        "uk",
+        "vi",
+        "zh-CN",
+        "zh-TW"
+    ]
+}

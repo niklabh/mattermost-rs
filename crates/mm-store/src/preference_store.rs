@@ -85,6 +85,19 @@ pub trait PreferenceStore {
         &self,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPreferenceStore.DeleteInvalidVisibleDmsGms` (preference_store.go:283): delete
+    /// at most 100 `sidebar_settings`/`limit_visible_dms_gms` rows whose value is outside 1..=40,
+    /// answering how many went.
+    ///
+    /// The comparison is **textual**: the value is left-padded with zeros to fifteen characters
+    /// (`SUBSTRING(CONCAT('000000000000000', Value), LENGTH(Value) + 1, 15)`) and compared as a
+    /// string with `'000000000000040'` and `'000000000000001'`. So a non-numeric value is judged
+    /// by its padded bytes — `abc` is above `…040` and goes, `-5` is below `…001` and goes — and a
+    /// value longer than fifteen characters is cut to its first fifteen.
+    fn delete_invalid_visible_dms_gms(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 /// One row of Go's `preferenceSelectQuery`, in its column order.
@@ -124,6 +137,37 @@ impl SqlPreferenceStore {
 }
 
 impl PreferenceStore for SqlPreferenceStore {
+    #[tracing::instrument(skip(self), fields(deleted))]
+    async fn delete_invalid_visible_dms_gms(&self) -> Result<i64, StoreError> {
+        let result = sqlx::query!(
+            r#"
+            DELETE FROM preferences
+             WHERE (userid, category, name) IN (
+                   SELECT userid, category, name
+                     FROM preferences
+                    WHERE category = $1
+                      AND name = $2
+                      AND (SUBSTRING(CONCAT('000000000000000', value), LENGTH(value) + 1, 15)
+                               > '000000000000040'
+                           OR SUBSTRING(CONCAT('000000000000000', value), LENGTH(value) + 1, 15)
+                               < '000000000000001')
+                    LIMIT 100
+             )
+            "#,
+            mm_model::preference::PREFERENCE_CATEGORY_SIDEBAR_SETTINGS,
+            mm_model::preference::PREFERENCE_LIMIT_VISIBLE_DMS_GMS,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete Preference".to_owned(),
+            source,
+        })?;
+        let deleted = i64::try_from(result.rows_affected()).unwrap_or(i64::MAX);
+        tracing::Span::current().record("deleted", deleted);
+        Ok(deleted)
+    }
+
     #[tracing::instrument(skip(self), fields(user_id = %user_id, category = %category))]
     async fn delete(&self, user_id: &str, category: &str, name: &str) -> Result<(), StoreError> {
         sqlx::query!(

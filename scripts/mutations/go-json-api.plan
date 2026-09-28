@@ -1,0 +1,5 @@
+# D-057/D-040/D-071 on the wire: parity::malformed_bodies.
+a_serde_rules	crates/mm-model/src/utils.rs	    let document = crate::go_decode::GoJson::deserialize(&mut deserializer)?;\n    crate::go_decode::from_go_json(&document)\n}\n\n/// [`decode_one_from_json`] for Go's	    let document = crate::go_decode::GoJson::deserialize(&mut deserializer)?;\n    serde_json::from_value(serde_json::to_value(&document)?)\n}\n\n/// [`decode_one_from_json`] for Go's	api	malformed_bodies
+a_users_search_forward_exact	crates/mm-api/src/users.rs	                .any(|name| mm_model::go_json::fold_name(name) == key)	                .any(|name| *name == key)	api	malformed_bodies
+control_a_emoji_turbofish	crates/mm-api/src/emoji.rs	        mm_model::utils::decode_one_value_from_json(&bytes).map_err(|err| {	        mm_model::utils::decode_one_value_from_json::<EmojiSearch>(&bytes).map_err(|err| {	api	malformed_bodies
+a_cpa_buffered_rules	crates/mm-model/src/custom_profile_attributes.rs	            crate::utils::from_value_go(&value).map_err(serde::de::Error::custom)?;	            serde_json::from_value(value).map_err(serde::de::Error::custom)?;	api	custom_profile_attributes

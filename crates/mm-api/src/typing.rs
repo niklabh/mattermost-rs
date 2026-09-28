@@ -12,7 +12,7 @@ use mm_model::permission::{
     PERMISSION_CREATE_POST, PERMISSION_MANAGE_SYSTEM, make_permission_error,
 };
 use mm_model::typing_request::TypingRequest;
-use mm_model::utils::{decode_one_from_json, is_valid_id};
+use mm_model::utils::{decode_one_value_from_json, is_valid_id};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -52,25 +52,12 @@ pub async fn publish_user_typing(
     }
 
     let body = read_body(request, "publishUserTyping").await?;
-    // `json.NewDecoder(r.Body).Decode(&typingRequest)` into a struct: `null` is accepted and
-    // leaves the zero value (so an empty `channel_id`, and the 403 below), while an array is
-    // "cannot unmarshal array into Go value" — which serde's derive would have accepted
-    // positionally. The `Value` round trip is the same one `viewChannel` and the token routes
-    // use for the same two reasons; a lone surrogate is folded by `decode_one_from_json`.
-    let decoded: Option<serde_json::Value> = decode_one_from_json(&body).map_err(|err| {
+    // `json.NewDecoder(r.Body).Decode(&typingRequest)` into a struct value: `null` is the zero
+    // value (so an empty `channel_id`, and the 403 below), an array is a decode error.
+    let typing: TypingRequest = decode_one_value_from_json(&body).map_err(|err| {
         tracing::debug!(error = %err, "the typing request body does not decode");
         ApiError::invalid_param("typing_request")
     })?;
-    let typing: TypingRequest = match decoded {
-        None => TypingRequest::default(),
-        Some(value @ serde_json::Value::Object(_)) => {
-            serde_json::from_value(value).map_err(|err| {
-                tracing::debug!(error = %err, "the typing request has the wrong field types");
-                ApiError::invalid_param("typing_request")
-            })?
-        }
-        Some(_) => return Err(ApiError::invalid_param("typing_request")),
-    };
 
     if user_id != session.0.user_id
         && !state

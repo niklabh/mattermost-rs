@@ -353,6 +353,7 @@ pub async fn get_incoming_hook(
     State(state): State<AppState>,
     Path(hook_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
     is_valid_id(&hook_id)
         .then_some(())
@@ -360,6 +361,8 @@ pub async fn get_incoming_hook(
 
     let hook = state.app.get_incoming_webhook(&hook_id).await?;
     tracing::Span::current().record("owner", &hook.user_id);
+    // Go's `"attempt"` comes after the hook is found and before its channel is.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let channel = state.app.get_channel(&hook.channel_id).await?;
     let restricted_channel = if channel.channel_type == CHANNEL_TYPE_OPEN {
@@ -382,6 +385,9 @@ pub async fn get_incoming_hook(
         .await
         || restricted_channel
     {
+        audit
+            .log(&state.app, Some(&session.0), "fail - bad permissions")
+            .await;
         return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS],
@@ -397,12 +403,16 @@ pub async fn get_incoming_hook(
         )
         .await;
     if refused_for_ownership(&session.0.user_id, &hook.user_id, manages_others) {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS],
         )));
     }
 
+    audit.log(&state.app, Some(&session.0), "success").await;
     encoded(&hook)
 }
 
@@ -418,6 +428,7 @@ pub async fn get_outgoing_hook(
     State(state): State<AppState>,
     Path(hook_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
     is_valid_id(&hook_id)
         .then_some(())
@@ -425,6 +436,7 @@ pub async fn get_outgoing_hook(
 
     let hook = state.app.get_outgoing_webhook(&hook_id).await?;
     tracing::Span::current().record("owner", &hook.creator_id);
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     if !state
         .app
@@ -450,14 +462,24 @@ pub async fn get_outgoing_hook(
         )
         .await;
     if refused_for_ownership(&session.0.user_id, &hook.creator_id, manages_others) {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS],
         )));
     }
 
+    audit.log(&state.app, Some(&session.0), "success").await;
     encoded(&hook)
 }
+
+/// The `ExtraInfo` of the second-rung refusals `LogAudit` records in webhook.go.
+const FAIL_PERMISSIONS: &str = "fail - inappropriate permissions";
+
+/// The `ExtraInfo` of an unreadable channel on the incoming-hook create and update.
+const FAIL_CHANNEL_PERMISSIONS: &str = "fail - bad channel permissions";
 
 /// `model.ChannelTypeOpen` (model/channel.go).
 const CHANNEL_TYPE_OPEN: &str = "O";
@@ -511,6 +533,7 @@ fn encoded<T: serde::Serialize>(value: &T) -> Result<Response, ApiError> {
 pub async fn create_incoming_hook(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
@@ -520,7 +543,7 @@ pub async fn create_incoming_hook(
             return ApiError::invalid_param("incoming_webhook").into_response();
         }
     };
-    let mut hook: IncomingWebhook = match serde_json::from_slice(&bytes) {
+    let mut hook: IncomingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(hook) => hook,
         Err(err) => {
             tracing::debug!(error = %err, "incoming_webhook body did not decode");
@@ -532,6 +555,8 @@ pub async fn create_incoming_hook(
         Ok(channel) => channel,
         Err(err) => return ApiError::from(err).into_response(),
     };
+    // `"attempt"` after the channel is found; the first permission refusal adds nothing to it.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     if !state
         .app
@@ -550,6 +575,9 @@ pub async fn create_incoming_hook(
         .session_has_permission_to_read_channel(&session.0, &channel)
         .await;
     if !can_read {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_CHANNEL_PERMISSIONS)
+            .await;
         return permission_error(&session, &PERMISSION_READ_CHANNEL_CONTENT);
     }
 
@@ -564,6 +592,9 @@ pub async fn create_incoming_hook(
             )
             .await
         {
+            audit
+                .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+                .await;
             return permission_error(&session, &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS);
         }
 
@@ -576,6 +607,9 @@ pub async fn create_incoming_hook(
             .validate_incoming_webhook_user(&session.0, &hook_user, &channel)
             .await
         {
+            audit
+                .log(&state.app, Some(&session.0), "fail - invalid webhook user")
+                .await;
             return ApiError::from(err).into_response();
         }
         user_id = hook.user_id.clone();
@@ -600,7 +634,10 @@ pub async fn create_incoming_hook(
         .create_incoming_webhook_for_channel(&user_id, &channel, &hook)
         .await
     {
-        Ok(saved) => created_json(&saved),
+        Ok(saved) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            created_json(&saved)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -620,11 +657,19 @@ pub async fn create_incoming_hook(
 ///
 /// The channel's team is then compared to the hook's, which is `SetInvalidParam("channel_id")`.
 /// Three id checks in a row, three different errors.
+///
+/// # A move is checked for the hook's owner
+///
+/// When the body names a different channel, the **old hook's owner** — not the caller — must be
+/// able to read it (`ValidateIncomingWebhookUserChannelAccess`), or the answer is 403
+/// `api.webhook.incoming.user_membership.app_error`: moving a hook must not attribute its owner's
+/// posts to a channel they cannot see. An update that keeps the channel is not checked.
 #[tracing::instrument(skip_all, fields(hook_id = %hook_id))]
 pub async fn update_incoming_hook(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(hook_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     if let Err(err) = require_hook_id(&hook_id) {
@@ -638,7 +683,7 @@ pub async fn update_incoming_hook(
             return ApiError::invalid_param("incoming_webhook").into_response();
         }
     };
-    let mut updated: IncomingWebhook = match serde_json::from_slice(&bytes) {
+    let mut updated: IncomingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(hook) => hook,
         Err(err) => {
             tracing::debug!(error = %err, "incoming_webhook body did not decode");
@@ -649,6 +694,7 @@ pub async fn update_incoming_hook(
     if updated.id != hook_id {
         return ApiError::invalid_param("hook_id").into_response();
     }
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let old_hook = match state.app.get_incoming_webhook(&hook_id).await {
         Ok(hook) => hook,
@@ -700,6 +746,9 @@ pub async fn update_incoming_hook(
             )
             .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return permission_error(&session, &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS);
     }
 
@@ -711,8 +760,27 @@ pub async fn update_incoming_hook(
             .session_has_permission_to_read_channel(&session.0, &channel)
             .await;
         if !can_read {
+            audit
+                .log(&state.app, Some(&session.0), FAIL_CHANNEL_PERMISSIONS)
+                .await;
             return permission_error(&session, &PERMISSION_READ_CHANNEL_CONTENT);
         }
+    }
+
+    // "Moving the hook must not attribute its owner's posts to a channel they cannot access"
+    // (webhook.go:176): only when the channel changes, and checked for the **old** hook's owner —
+    // not the caller, who passed their own read check above. Before the channel-lock rewrite, so
+    // it is the channel the body named.
+    if updated.channel_id != old_hook.channel_id
+        && let Err(err) = state
+            .app
+            .validate_incoming_webhook_user_channel_access(&old_hook.user_id, &channel)
+            .await
+    {
+        audit
+            .log(&state.app, Some(&session.0), "fail - invalid webhook user")
+            .await;
+        return ApiError::from(err).into_response();
     }
 
     if !state
@@ -729,7 +797,10 @@ pub async fn update_incoming_hook(
     }
 
     match state.app.update_incoming_webhook(&old_hook, &updated).await {
-        Ok(saved) => created_json(&saved),
+        Ok(saved) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            created_json(&saved)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -751,6 +822,7 @@ pub async fn delete_incoming_hook(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(hook_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     if let Err(err) = require_hook_id(&hook_id) {
         return err.into_response();
@@ -785,6 +857,10 @@ pub async fn delete_incoming_hook(
         .await
         || restricted_channel
     {
+        // No `"attempt"` and no `"success"` on this route: only its two refusals are audited.
+        audit
+            .log(&state.app, Some(&session.0), "fail - bad permissions")
+            .await;
         return permission_error(&session, &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS);
     }
 
@@ -798,6 +874,9 @@ pub async fn delete_incoming_hook(
             )
             .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return permission_error(&session, &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS);
     }
 
@@ -821,6 +900,7 @@ pub async fn delete_incoming_hook(
 pub async fn create_outgoing_hook(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
@@ -830,13 +910,14 @@ pub async fn create_outgoing_hook(
             return ApiError::invalid_param("outgoing_webhook").into_response();
         }
     };
-    let mut hook: OutgoingWebhook = match serde_json::from_slice(&bytes) {
+    let mut hook: OutgoingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(hook) => hook,
         Err(err) => {
             tracing::debug!(error = %err, "outgoing_webhook body did not decode");
             return ApiError::invalid_param("outgoing_webhook").into_response();
         }
     };
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     if !state
         .app
@@ -862,6 +943,9 @@ pub async fn create_outgoing_hook(
             )
             .await
         {
+            audit
+                .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+                .await;
             return permission_error(&session, &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS);
         }
         if let Err(err) = state.app.get_user(&hook.creator_id).await {
@@ -870,20 +954,29 @@ pub async fn create_outgoing_hook(
     }
 
     match state.app.create_outgoing_webhook(&hook).await {
-        Ok(saved) => created_json(&saved),
-        Err(err) => ApiError::from(err).into_response(),
+        Ok(saved) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            created_json(&saved)
+        }
+        Err(err) => {
+            audit.log(&state.app, Some(&session.0), "fail").await;
+            ApiError::from(err).into_response()
+        }
     }
 }
 
-/// Port of `updateOutgoingHook` (api4/webhook.go:610) —
+/// Port of `updateOutgoingHook` (api4/webhook.go:396) —
 /// `PUT /api/v4/hooks/outgoing/{hook_id}`.
 ///
-/// `200`, not the `201` its incoming sibling answers for the same shape of request.
+/// `200`, not the `201` its incoming sibling answers for the same shape of request. The team
+/// checks are the incoming route's: an empty `team_id` is the stored one, any other is the 400
+/// `api.webhook.team_mismatch.app_error`, after the fetch and before the permissions.
 #[tracing::instrument(skip_all, fields(hook_id = %hook_id))]
 pub async fn update_outgoing_hook(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(hook_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
     if let Err(err) = require_hook_id(&hook_id) {
@@ -897,7 +990,7 @@ pub async fn update_outgoing_hook(
             return ApiError::invalid_param("outgoing_webhook").into_response();
         }
     };
-    let updated: OutgoingWebhook = match serde_json::from_slice(&bytes) {
+    let mut updated: OutgoingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(hook) => hook,
         Err(err) => {
             tracing::debug!(error = %err, "outgoing_webhook body did not decode");
@@ -908,11 +1001,29 @@ pub async fn update_outgoing_hook(
     if updated.id != hook_id {
         return ApiError::invalid_param("hook_id").into_response();
     }
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     let old_hook = match state.app.get_outgoing_webhook(&hook_id).await {
         Ok(hook) => hook,
         Err(err) => return ApiError::from(err).into_response(),
     };
+
+    // The incoming route's pair of checks (webhook.go:425-432): an empty `team_id` is filled from
+    // the stored hook, and any other team is a 400 — so omitting the field is allowed and naming a
+    // different team is refused, where the app layer below would silently put the old team back.
+    if updated.team_id.is_empty() {
+        updated.team_id.clone_from(&old_hook.team_id);
+    }
+    if updated.team_id != old_hook.team_id {
+        return ApiError::from(AppError::new(
+            "updateOutgoingHook",
+            "api.webhook.team_mismatch.app_error",
+            None,
+            format!("user_id={}", session.0.user_id),
+            400,
+        ))
+        .into_response();
+    }
 
     if !state
         .app
@@ -936,11 +1047,17 @@ pub async fn update_outgoing_hook(
             )
             .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return permission_error(&session, &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS);
     }
 
     match state.app.update_outgoing_webhook(&old_hook, &updated).await {
-        Ok(saved) => encoded_json(StatusCode::OK, &saved),
+        Ok(saved) => {
+            audit.log(&state.app, Some(&session.0), "success").await;
+            encoded_json(StatusCode::OK, &saved)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -954,11 +1071,18 @@ pub async fn delete_outgoing_hook(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(hook_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
-    match outgoing_hook_the_caller_may_manage(&state, &session, &hook_id).await {
+    match outgoing_hook_the_caller_may_manage(&state, &session, &hook_id, &audit).await {
         Ok(hook) => match state.app.delete_outgoing_webhook(&hook.id).await {
-            Ok(()) => status_ok(),
-            Err(err) => ApiError::from(err).into_response(),
+            Ok(()) => {
+                audit.log(&state.app, Some(&session.0), "success").await;
+                status_ok()
+            }
+            Err(err) => {
+                audit.log(&state.app, Some(&session.0), "fail").await;
+                ApiError::from(err).into_response()
+            }
         },
         Err(response) => *response,
     }
@@ -974,10 +1098,14 @@ pub async fn regen_outgoing_hook_token(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(hook_id): Path<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
-    match outgoing_hook_the_caller_may_manage(&state, &session, &hook_id).await {
+    match outgoing_hook_the_caller_may_manage(&state, &session, &hook_id, &audit).await {
         Ok(hook) => match state.app.regen_outgoing_webhook_token(&hook).await {
-            Ok(saved) => encoded_json(StatusCode::OK, &saved),
+            Ok(saved) => {
+                audit.log(&state.app, Some(&session.0), "success").await;
+                encoded_json(StatusCode::OK, &saved)
+            }
             Err(err) => ApiError::from(err).into_response(),
         },
         Err(response) => *response,
@@ -987,10 +1115,14 @@ pub async fn regen_outgoing_hook_token(
 /// The preamble `deleteOutgoingHook` and `regenOutgoingHookToken` share: fetch, then
 /// `manage_own_outgoing_webhooks` on the hook's team, then `manage_others_…` when the caller is
 /// not its creator.
+///
+/// Writes Go's `"attempt"` once the hook is found, and `"fail - inappropriate permissions"` on the
+/// second rung; the first rung's refusal adds no row of its own.
 async fn outgoing_hook_the_caller_may_manage(
     state: &AppState,
     session: &AuthenticatedSession,
     hook_id: &str,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Result<OutgoingWebhook, Box<Response>> {
     if let Err(err) = require_hook_id(hook_id) {
         return Err(Box::new(err.into_response()));
@@ -1000,6 +1132,7 @@ async fn outgoing_hook_the_caller_may_manage(
         Ok(hook) => hook,
         Err(err) => return Err(Box::new(ApiError::from(err).into_response())),
     };
+    audit.log(&state.app, Some(&session.0), "attempt").await;
 
     if !state
         .app
@@ -1026,6 +1159,9 @@ async fn outgoing_hook_the_caller_may_manage(
             )
             .await
     {
+        audit
+            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)
+            .await;
         return Err(Box::new(permission_error(
             session,
             &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,

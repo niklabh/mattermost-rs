@@ -72,6 +72,12 @@ case "${1:-start}" in
     export MM_CONFIG="$DSN"
     export MM_SQLSETTINGS_DRIVERNAME=postgres
     export MM_SQLSETTINGS_DATASOURCE="$DSN"
+    # Only the stack's main Go server runs jobs. An oracle on the same database claims pending
+    # jobs too, and a job it runs publishes to its own hub and pushes with its own settings, so
+    # a job parity test could not tell what Go did (parity::persistent_notifications). Its
+    # schedulers are off too: a licensed oracle would queue licensed-only job types itself.
+    export MM_JOBSETTINGS_RUNJOBS=false
+    export MM_JOBSETTINGS_RUNSCHEDULER=false
     export MM_SERVICESETTINGS_SITEURL="http://localhost:$PORT"
     export MM_SERVICESETTINGS_LISTENADDRESS=":$PORT"
     export MM_TEAMSETTINGS_ENABLEOPENSERVER=true

@@ -170,10 +170,9 @@ pub(crate) fn first_value(body: &[u8]) -> Option<serde_json::Value> {
 /// where Go gives a 400). A literal `null` decodes without error in Go and leaves the pointer
 /// nil, which lands on the same `None`.
 pub(crate) fn decode_struct<T: serde::de::DeserializeOwned>(body: &[u8]) -> Option<T> {
-    match first_value(body)? {
-        object @ serde_json::Value::Object(_) => serde_json::from_value(object).ok(),
-        _ => None,
-    }
+    mm_model::utils::decode_one_from_json::<Option<T>>(body)
+        .ok()
+        .flatten()
 }
 
 /// `Decode(&v)` where `v` is a `map[string]json.RawMessage`, as both value handlers write it.
@@ -290,9 +289,8 @@ pub async fn create_cpa_field(
         Err(err) => return conversion_error("createCPAField", err).into_response(),
     };
 
-    let mut message = WebSocketEvent::new(WEBSOCKET_EVENT_CPA_FIELD_CREATED, "", "", "", None, "");
-    message.add("field", cpa_json(&cpa_field));
-    state.app.publish(message).await;
+    let message = WebSocketEvent::new(WEBSOCKET_EVENT_CPA_FIELD_CREATED, "", "", "", None, "");
+    publish_with_field(&state, message_with_field(message, &cpa_field)).await;
 
     encoded_with_status(StatusCode::CREATED, &cpa_field, "createCPAField")
 }
@@ -412,12 +410,11 @@ pub async fn patch_cpa_field(
     };
 
     let mut message = WebSocketEvent::new(WEBSOCKET_EVENT_CPA_FIELD_UPDATED, "", "", "", None, "");
-    message.add("field", cpa_json(&cpa_field));
     message.add(
         "delete_values",
         serde_json::Value::Bool(!update.cleared_field_ids.is_empty()),
     );
-    state.app.publish(message).await;
+    publish_with_field(&state, message_with_field(message, &cpa_field)).await;
 
     encoded(&cpa_field, "patchCPAField")
 }
@@ -768,9 +765,23 @@ pub(crate) fn is_options_only_patch(patch: &PropertyFieldPatch) -> bool {
     attrs.len() == 1 && attrs.contains_key(PROPERTY_FIELD_ATTRIBUTE_OPTIONS)
 }
 
-/// A CPA field as a websocket payload — `message.Add("field", cpaField)`, an object.
-fn cpa_json(field: &CPAField) -> serde_json::Value {
-    serde_json::to_value(field).unwrap_or(serde_json::Value::Null)
+/// `message.Add("field", cpaField)`: a **struct** in Go, so it goes on the wire in `CPAField`'s
+/// declaration order with `attrs` last — pre-serialised, because a `serde_json::Value` would sort
+/// it ([D-541]). `None` when it cannot be encoded, which is when Go's write pump skips the frame.
+fn message_with_field(mut message: WebSocketEvent, field: &CPAField) -> Option<WebSocketEvent> {
+    match message.add_struct("field", field) {
+        Ok(()) => Some(message),
+        Err(err) => {
+            tracing::warn!(error = %err, "Error in encoding websocket message");
+            None
+        }
+    }
+}
+
+async fn publish_with_field(state: &AppState, message: Option<WebSocketEvent>) {
+    if let Some(message) = message {
+        state.app.publish(message).await;
+    }
 }
 
 /// One of the refusals `api4/custom_profile_attributes.go` mints by hand, all of which carry an

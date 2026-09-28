@@ -726,15 +726,11 @@ pub(crate) fn normalized(
 }
 
 /// Drop the rows this server's *apparatus* writes rather than the route: the sessions
-/// `mm_api::go_cache` mints to reach Go, and the `Audits` row Go writes when that session asks it
-/// to revoke a probe (`/users/{id}/sessions/revoke`) — which is how a served deactivation makes Go
-/// forget the user's sessions ([D-870]).
+/// `mm_api::go_cache` mints to reach Go. The `Audits` row Go used to write for that purge is gone
+/// since [D-870] closed — `audits` is compared whole, so a returning apparatus row fails here.
 pub(crate) fn drop_apparatus(rows: &mut BTreeMap<String, Vec<String>>) {
-    for (table, lines) in rows.iter_mut() {
-        lines.retain(|line| {
-            !line.contains("mmrs_peer_cache")
-                && !(table == "audits" && line.contains("/sessions/revoke\""))
-        });
+    for lines in rows.values_mut() {
+        lines.retain(|line| !line.contains("mmrs_peer_cache"));
     }
 }
 

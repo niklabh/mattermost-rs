@@ -57,6 +57,17 @@
 //! `RolesGrantPermission`, and the twenty-one group methods from `GetGroup` to
 //! `DeleteGroupConstrainedMemberships`.
 //!
+//! And the command, plugin, upload-session, team-icon, profile-image, typing, toast, push,
+//! channel and cluster methods (`plugin_api/server.rs`, which says which answer a Go `error` and
+//! which are Go's own shortcuts): `CreateCommand`, `GetCommand`, `UpdateCommand`,
+//! `DeleteCommand`, `GetPlugins`, `GetPluginStatus`, `EnablePlugin`, `DisablePlugin`,
+//! `RemovePlugin`, `CreateUploadSession`, `GetUploadSession`, `GetTeamIcon`, `SetTeamIcon`,
+//! `RemoveTeamIcon`, `SetProfileImage`, `PublishUserTyping`, `SendToastMessage`,
+//! `SendPushNotification`, `AddUserToChannel`, `GetChannelOfType`, `RestoreChannel`,
+//! `CreateTeamMembersGracefully`, `PublishPluginClusterEvent`, `RegisterCollectionAndTopic`,
+//! `GetLDAPUserAttributes`, `RequestTrialLicense` (its refusals), `LogAuditRec` and
+//! `LogAuditRecWithLevel`.
+//!
 //! And the slash-command seven (`crate::plugin_commands`): `RegisterCommand`,
 //! `UnregisterCommand`, `ListPluginCommands`, `ListBuiltInCommands`, `ListCustomCommands`,
 //! `ListCommands` and `ExecuteSlashCommand`.
@@ -154,10 +165,13 @@ use crate::plugin_hooks::{
 use crate::post::PrepareError;
 use crate::reaction::ReactionWrite;
 
+mod access_control;
 mod auth;
 mod channels;
 mod files;
 mod http;
+mod properties;
+mod server;
 mod users;
 
 pub use files::{file_infos_options_from_wire, open_dialog_request_from_wire, send_mail_refusal};
@@ -328,6 +342,545 @@ fn render_fields(fields: &[(String, String)]) -> String {
 }
 
 impl mm_plugin::rpc::PluginApi for AppPluginApi {
+    // -- commands, plugins, uploads, icons, typing, toasts, push, cluster (plugin_api/server.rs) --
+
+    /// `PluginAPI.AddUserToChannel`; see [`AppPluginApi::server_add_user_to_channel`].
+    async fn add_user_to_channel(
+        &self,
+        args: api::Z_AddUserToChannelArgs,
+    ) -> Result<api::Z_AddUserToChannelReturns, NotImplemented> {
+        self.server_add_user_to_channel(args).await
+    }
+
+    /// `PluginAPI.GetChannelOfType`; see [`AppPluginApi::server_get_channel_of_type`].
+    async fn get_channel_of_type(
+        &self,
+        args: api::Z_GetChannelOfTypeArgs,
+    ) -> Result<api::Z_GetChannelOfTypeReturns, NotImplemented> {
+        self.server_get_channel_of_type(args).await
+    }
+
+    /// `PluginAPI.RestoreChannel`; see [`AppPluginApi::server_restore_channel`].
+    async fn restore_channel(
+        &self,
+        args: api::Z_RestoreChannelArgs,
+    ) -> Result<api::Z_RestoreChannelReturns, NotImplemented> {
+        self.server_restore_channel(args).await
+    }
+
+    /// `PluginAPI.CreateTeamMembersGracefully`; see [`AppPluginApi::server_create_team_members_gracefully`].
+    async fn create_team_members_gracefully(
+        &self,
+        args: api::Z_CreateTeamMembersGracefullyArgs,
+    ) -> Result<api::Z_CreateTeamMembersGracefullyReturns, NotImplemented> {
+        self.server_create_team_members_gracefully(args).await
+    }
+
+    /// `PluginAPI.GetTeamIcon`; see [`AppPluginApi::server_get_team_icon`].
+    async fn get_team_icon(
+        &self,
+        args: api::Z_GetTeamIconArgs,
+    ) -> Result<api::Z_GetTeamIconReturns, NotImplemented> {
+        self.server_get_team_icon(args).await
+    }
+
+    /// `PluginAPI.SetTeamIcon`; see [`AppPluginApi::server_set_team_icon`].
+    async fn set_team_icon(
+        &self,
+        args: api::Z_SetTeamIconArgs,
+    ) -> Result<api::Z_SetTeamIconReturns, NotImplemented> {
+        self.server_set_team_icon(args).await
+    }
+
+    /// `PluginAPI.RemoveTeamIcon`; see [`AppPluginApi::server_remove_team_icon`].
+    async fn remove_team_icon(
+        &self,
+        args: api::Z_RemoveTeamIconArgs,
+    ) -> Result<api::Z_RemoveTeamIconReturns, NotImplemented> {
+        self.server_remove_team_icon(args).await
+    }
+
+    /// `PluginAPI.SetProfileImage`; see [`AppPluginApi::server_set_profile_image`].
+    async fn set_profile_image(
+        &self,
+        args: api::Z_SetProfileImageArgs,
+    ) -> Result<api::Z_SetProfileImageReturns, NotImplemented> {
+        self.server_set_profile_image(args).await
+    }
+
+    /// `PluginAPI.PublishUserTyping`; see [`AppPluginApi::server_publish_user_typing`].
+    async fn publish_user_typing(
+        &self,
+        args: api::Z_PublishUserTypingArgs,
+    ) -> Result<api::Z_PublishUserTypingReturns, NotImplemented> {
+        self.server_publish_user_typing(args).await
+    }
+
+    /// `PluginAPI.SendToastMessage`; see [`AppPluginApi::server_send_toast_message`].
+    async fn send_toast_message(
+        &self,
+        args: api::Z_SendToastMessageArgs,
+    ) -> Result<api::Z_SendToastMessageReturns, NotImplemented> {
+        self.server_send_toast_message(args).await
+    }
+
+    /// `PluginAPI.SendPushNotification`; see [`AppPluginApi::server_send_push_notification`].
+    async fn send_push_notification(
+        &self,
+        args: api::Z_SendPushNotificationArgs,
+    ) -> Result<api::Z_SendPushNotificationReturns, NotImplemented> {
+        self.server_send_push_notification(args).await
+    }
+
+    /// `PluginAPI.GetLDAPUserAttributes`; see [`AppPluginApi::server_get_ldap_user_attributes`].
+    async fn get_ldap_user_attributes(
+        &self,
+        args: api::Z_GetLDAPUserAttributesArgs,
+    ) -> Result<api::Z_GetLDAPUserAttributesReturns, NotImplemented> {
+        self.server_get_ldap_user_attributes(args).await
+    }
+
+    /// `PluginAPI.RequestTrialLicense`; see [`AppPluginApi::server_request_trial_license`].
+    async fn request_trial_license(
+        &self,
+        args: api::Z_RequestTrialLicenseArgs,
+    ) -> Result<api::Z_RequestTrialLicenseReturns, NotImplemented> {
+        self.server_request_trial_license(args).await
+    }
+
+    /// `PluginAPI.GetPlugins`; see [`AppPluginApi::server_get_plugins`].
+    async fn get_plugins(
+        &self,
+        args: api::Z_GetPluginsArgs,
+    ) -> Result<api::Z_GetPluginsReturns, NotImplemented> {
+        self.server_get_plugins(args).await
+    }
+
+    /// `PluginAPI.GetPluginStatus`; see [`AppPluginApi::server_get_plugin_status`].
+    async fn get_plugin_status(
+        &self,
+        args: api::Z_GetPluginStatusArgs,
+    ) -> Result<api::Z_GetPluginStatusReturns, NotImplemented> {
+        self.server_get_plugin_status(args).await
+    }
+
+    /// `PluginAPI.EnablePlugin`; see [`AppPluginApi::server_enable_plugin`].
+    async fn enable_plugin(
+        &self,
+        args: api::Z_EnablePluginArgs,
+    ) -> Result<api::Z_EnablePluginReturns, NotImplemented> {
+        self.server_enable_plugin(args).await
+    }
+
+    /// `PluginAPI.DisablePlugin`; see [`AppPluginApi::server_disable_plugin`].
+    async fn disable_plugin(
+        &self,
+        args: api::Z_DisablePluginArgs,
+    ) -> Result<api::Z_DisablePluginReturns, NotImplemented> {
+        self.server_disable_plugin(args).await
+    }
+
+    /// `PluginAPI.RemovePlugin`; see [`AppPluginApi::server_remove_plugin`].
+    async fn remove_plugin(
+        &self,
+        args: api::Z_RemovePluginArgs,
+    ) -> Result<api::Z_RemovePluginReturns, NotImplemented> {
+        self.server_remove_plugin(args).await
+    }
+
+    /// `PluginAPI.CreateCommand`; see [`AppPluginApi::server_create_command`].
+    async fn create_command(
+        &self,
+        args: api::Z_CreateCommandArgs,
+    ) -> Result<api::Z_CreateCommandReturns, NotImplemented> {
+        self.server_create_command(args).await
+    }
+
+    /// `PluginAPI.GetCommand`; see [`AppPluginApi::server_get_command`].
+    async fn get_command(
+        &self,
+        args: api::Z_GetCommandArgs,
+    ) -> Result<api::Z_GetCommandReturns, NotImplemented> {
+        self.server_get_command(args).await
+    }
+
+    /// `PluginAPI.UpdateCommand`; see [`AppPluginApi::server_update_command`].
+    async fn update_command(
+        &self,
+        args: api::Z_UpdateCommandArgs,
+    ) -> Result<api::Z_UpdateCommandReturns, NotImplemented> {
+        self.server_update_command(args).await
+    }
+
+    /// `PluginAPI.DeleteCommand`; see [`AppPluginApi::server_delete_command`].
+    async fn delete_command(
+        &self,
+        args: api::Z_DeleteCommandArgs,
+    ) -> Result<api::Z_DeleteCommandReturns, NotImplemented> {
+        self.server_delete_command(args).await
+    }
+
+    /// `PluginAPI.CreateUploadSession`; see [`AppPluginApi::server_create_upload_session`].
+    async fn create_upload_session(
+        &self,
+        args: api::Z_CreateUploadSessionArgs,
+    ) -> Result<api::Z_CreateUploadSessionReturns, NotImplemented> {
+        self.server_create_upload_session(args).await
+    }
+
+    /// `PluginAPI.GetUploadSession`; see [`AppPluginApi::server_get_upload_session`].
+    async fn get_upload_session(
+        &self,
+        args: api::Z_GetUploadSessionArgs,
+    ) -> Result<api::Z_GetUploadSessionReturns, NotImplemented> {
+        self.server_get_upload_session(args).await
+    }
+
+    /// `PluginAPI.PublishPluginClusterEvent`; see [`AppPluginApi::server_publish_plugin_cluster_event`].
+    async fn publish_plugin_cluster_event(
+        &self,
+        args: api::Z_PublishPluginClusterEventArgs,
+    ) -> Result<api::Z_PublishPluginClusterEventReturns, NotImplemented> {
+        self.server_publish_plugin_cluster_event(args).await
+    }
+
+    /// `PluginAPI.RegisterCollectionAndTopic`; see [`AppPluginApi::server_register_collection_and_topic`].
+    async fn register_collection_and_topic(
+        &self,
+        args: api::Z_RegisterCollectionAndTopicArgs,
+    ) -> Result<api::Z_RegisterCollectionAndTopicReturns, NotImplemented> {
+        self.server_register_collection_and_topic(args).await
+    }
+
+    /// `PluginAPI.LogAuditRec`: `LogAuditRecWithLevel` at `LvlAuditCLI`; see
+    /// [`AppPluginApi::server_log_audit_rec`].
+    async fn log_audit_rec(
+        &self,
+        args: api::Z_LogAuditRecArgs,
+    ) -> Result<api::Z_LogAuditRecReturns, NotImplemented> {
+        self.server_log_audit_rec(args.a.as_deref(), "audit-cli");
+        Ok(api::Z_LogAuditRecReturns {})
+    }
+
+    /// `PluginAPI.LogAuditRecWithLevel`; see [`AppPluginApi::server_log_audit_rec`].
+    async fn log_audit_rec_with_level(
+        &self,
+        args: api::Z_LogAuditRecWithLevelArgs,
+    ) -> Result<api::Z_LogAuditRecWithLevelReturns, NotImplemented> {
+        self.server_log_audit_rec(args.a.as_deref(), &args.b.name);
+        Ok(api::Z_LogAuditRecWithLevelReturns {})
+    }
+    // -- access control ---------------------------------------------------------------------
+
+    /// `PluginAPI.EvaluateAccessControl`; see [`AppPluginApi::access_evaluate`].
+    async fn evaluate_access_control(
+        &self,
+        args: api::Z_EvaluateAccessControlArgs,
+    ) -> Result<api::Z_EvaluateAccessControlReturns, NotImplemented> {
+        self.access_evaluate(args).await
+    }
+
+    /// `PluginAPI.SaveAccessControlPolicy`; see [`AppPluginApi::access_save_policy`].
+    async fn save_access_control_policy(
+        &self,
+        _args: api::Z_SaveAccessControlPolicyArgs,
+    ) -> Result<api::Z_SaveAccessControlPolicyReturns, NotImplemented> {
+        self.access_save_policy().await
+    }
+
+    /// `PluginAPI.GetAccessControlPolicy`; see [`AppPluginApi::access_get_policy`].
+    async fn get_access_control_policy(
+        &self,
+        _args: api::Z_GetAccessControlPolicyArgs,
+    ) -> Result<api::Z_GetAccessControlPolicyReturns, NotImplemented> {
+        self.access_get_policy().await
+    }
+
+    /// `PluginAPI.DeleteAccessControlPolicy`; see [`AppPluginApi::access_delete_policy`].
+    async fn delete_access_control_policy(
+        &self,
+        _args: api::Z_DeleteAccessControlPolicyArgs,
+    ) -> Result<api::Z_DeleteAccessControlPolicyReturns, NotImplemented> {
+        self.access_delete_policy().await
+    }
+
+    /// `PluginAPI.CheckAccessControlExpression`; see [`AppPluginApi::access_check_expression`].
+    async fn check_access_control_expression(
+        &self,
+        args: api::Z_CheckAccessControlExpressionArgs,
+    ) -> Result<api::Z_CheckAccessControlExpressionReturns, NotImplemented> {
+        self.access_check_expression(args).await
+    }
+
+    /// `PluginAPI.QueryUsersForAccessControlExpression`; see [`AppPluginApi::access_query_users`].
+    async fn query_users_for_access_control_expression(
+        &self,
+        args: api::Z_QueryUsersForAccessControlExpressionArgs,
+    ) -> Result<api::Z_QueryUsersForAccessControlExpressionReturns, NotImplemented> {
+        self.access_query_users(args).await
+    }
+
+    /// `PluginAPI.GetAccessControlFieldsAutocomplete`; see
+    /// [`AppPluginApi::access_fields_autocomplete`].
+    async fn get_access_control_fields_autocomplete(
+        &self,
+        _args: api::Z_GetAccessControlFieldsAutocompleteArgs,
+    ) -> Result<api::Z_GetAccessControlFieldsAutocompleteReturns, NotImplemented> {
+        self.access_fields_autocomplete().await
+    }
+
+    /// `PluginAPI.GetAccessControlVisualAST`; see [`AppPluginApi::access_visual_ast`].
+    async fn get_access_control_visual_ast(
+        &self,
+        args: api::Z_GetAccessControlVisualASTArgs,
+    ) -> Result<api::Z_GetAccessControlVisualASTReturns, NotImplemented> {
+        self.access_visual_ast(args).await
+    }
+
+    // -- properties -------------------------------------------------------------------------
+
+    /// `PluginAPI.RegisterPropertyGroup`; see [`AppPluginApi::properties_register_group`].
+    async fn register_property_group(
+        &self,
+        args: api::Z_RegisterPropertyGroupArgs,
+    ) -> Result<api::Z_RegisterPropertyGroupReturns, NotImplemented> {
+        self.properties_register_group(args).await
+    }
+
+    /// `PluginAPI.GetPropertyGroup`; see [`AppPluginApi::properties_get_group`].
+    async fn get_property_group(
+        &self,
+        args: api::Z_GetPropertyGroupArgs,
+    ) -> Result<api::Z_GetPropertyGroupReturns, NotImplemented> {
+        self.properties_get_group(args).await
+    }
+
+    /// `PluginAPI.CreatePropertyField`; see [`AppPluginApi::properties_create_field`].
+    async fn create_property_field(
+        &self,
+        args: api::Z_CreatePropertyFieldArgs,
+    ) -> Result<api::Z_CreatePropertyFieldReturns, NotImplemented> {
+        self.properties_create_field(args).await
+    }
+
+    /// `PluginAPI.GetPropertyField`; see [`AppPluginApi::properties_get_field`].
+    async fn get_property_field(
+        &self,
+        args: api::Z_GetPropertyFieldArgs,
+    ) -> Result<api::Z_GetPropertyFieldReturns, NotImplemented> {
+        self.properties_get_field(args).await
+    }
+
+    /// `PluginAPI.GetPropertyFields`; see [`AppPluginApi::properties_get_fields`].
+    async fn get_property_fields(
+        &self,
+        args: api::Z_GetPropertyFieldsArgs,
+    ) -> Result<api::Z_GetPropertyFieldsReturns, NotImplemented> {
+        self.properties_get_fields(args).await
+    }
+
+    /// `PluginAPI.GetPropertyFieldByName`; see [`AppPluginApi::properties_get_field_by_name`].
+    async fn get_property_field_by_name(
+        &self,
+        args: api::Z_GetPropertyFieldByNameArgs,
+    ) -> Result<api::Z_GetPropertyFieldByNameReturns, NotImplemented> {
+        self.properties_get_field_by_name(args).await
+    }
+
+    /// `PluginAPI.SearchPropertyFields`; see [`AppPluginApi::properties_search_fields`].
+    async fn search_property_fields(
+        &self,
+        args: api::Z_SearchPropertyFieldsArgs,
+    ) -> Result<api::Z_SearchPropertyFieldsReturns, NotImplemented> {
+        self.properties_search_fields(args).await
+    }
+
+    /// `PluginAPI.CountPropertyFields`; see [`AppPluginApi::properties_count_fields`].
+    async fn count_property_fields(
+        &self,
+        args: api::Z_CountPropertyFieldsArgs,
+    ) -> Result<api::Z_CountPropertyFieldsReturns, NotImplemented> {
+        self.properties_count_fields(args).await
+    }
+
+    /// `PluginAPI.CountPropertyFieldsForTarget`; see [`AppPluginApi::properties_count_fields_for_target`].
+    async fn count_property_fields_for_target(
+        &self,
+        args: api::Z_CountPropertyFieldsForTargetArgs,
+    ) -> Result<api::Z_CountPropertyFieldsForTargetReturns, NotImplemented> {
+        self.properties_count_fields_for_target(args).await
+    }
+
+    /// `PluginAPI.UpdatePropertyField`; see [`AppPluginApi::properties_update_field`].
+    async fn update_property_field(
+        &self,
+        args: api::Z_UpdatePropertyFieldArgs,
+    ) -> Result<api::Z_UpdatePropertyFieldReturns, NotImplemented> {
+        self.properties_update_field(args).await
+    }
+
+    /// `PluginAPI.UpdatePropertyFields`; see [`AppPluginApi::properties_update_fields`].
+    async fn update_property_fields(
+        &self,
+        args: api::Z_UpdatePropertyFieldsArgs,
+    ) -> Result<api::Z_UpdatePropertyFieldsReturns, NotImplemented> {
+        self.properties_update_fields(args).await
+    }
+
+    /// `PluginAPI.DeletePropertyField`; see [`AppPluginApi::properties_delete_field`].
+    async fn delete_property_field(
+        &self,
+        args: api::Z_DeletePropertyFieldArgs,
+    ) -> Result<api::Z_DeletePropertyFieldReturns, NotImplemented> {
+        self.properties_delete_field(args).await
+    }
+
+    /// `PluginAPI.CreatePropertyValue`; see [`AppPluginApi::properties_create_value`].
+    async fn create_property_value(
+        &self,
+        args: api::Z_CreatePropertyValueArgs,
+    ) -> Result<api::Z_CreatePropertyValueReturns, NotImplemented> {
+        self.properties_create_value(args).await
+    }
+
+    /// `PluginAPI.GetPropertyValue`; see [`AppPluginApi::properties_get_value`].
+    async fn get_property_value(
+        &self,
+        args: api::Z_GetPropertyValueArgs,
+    ) -> Result<api::Z_GetPropertyValueReturns, NotImplemented> {
+        self.properties_get_value(args).await
+    }
+
+    /// `PluginAPI.GetPropertyValues`; see [`AppPluginApi::properties_get_values`].
+    async fn get_property_values(
+        &self,
+        args: api::Z_GetPropertyValuesArgs,
+    ) -> Result<api::Z_GetPropertyValuesReturns, NotImplemented> {
+        self.properties_get_values(args).await
+    }
+
+    /// `PluginAPI.SearchPropertyValues`; see [`AppPluginApi::properties_search_values`].
+    async fn search_property_values(
+        &self,
+        args: api::Z_SearchPropertyValuesArgs,
+    ) -> Result<api::Z_SearchPropertyValuesReturns, NotImplemented> {
+        self.properties_search_values(args).await
+    }
+
+    /// `PluginAPI.UpdatePropertyValue`; see [`AppPluginApi::properties_update_value`].
+    async fn update_property_value(
+        &self,
+        args: api::Z_UpdatePropertyValueArgs,
+    ) -> Result<api::Z_UpdatePropertyValueReturns, NotImplemented> {
+        self.properties_update_value(args).await
+    }
+
+    /// `PluginAPI.UpdatePropertyValues`; see [`AppPluginApi::properties_update_values`].
+    async fn update_property_values(
+        &self,
+        args: api::Z_UpdatePropertyValuesArgs,
+    ) -> Result<api::Z_UpdatePropertyValuesReturns, NotImplemented> {
+        self.properties_update_values(args).await
+    }
+
+    /// `PluginAPI.UpsertPropertyValue`; see [`AppPluginApi::properties_upsert_value`].
+    async fn upsert_property_value(
+        &self,
+        args: api::Z_UpsertPropertyValueArgs,
+    ) -> Result<api::Z_UpsertPropertyValueReturns, NotImplemented> {
+        let (a, b) = self.properties_upsert_value(args.a.as_deref()).await?;
+        Ok(api::Z_UpsertPropertyValueReturns { a, b })
+    }
+
+    /// `PluginAPI.UpsertPropertyValueWithOptions`: the scope matters only to the hooks.
+    async fn upsert_property_value_with_options(
+        &self,
+        args: api::Z_UpsertPropertyValueWithOptionsArgs,
+    ) -> Result<api::Z_UpsertPropertyValueWithOptionsReturns, NotImplemented> {
+        let (a, b) = self.properties_upsert_value(args.a.as_deref()).await?;
+        Ok(api::Z_UpsertPropertyValueWithOptionsReturns { a, b })
+    }
+
+    /// `PluginAPI.UpsertPropertyValues`; see [`AppPluginApi::properties_upsert_values`].
+    async fn upsert_property_values(
+        &self,
+        args: api::Z_UpsertPropertyValuesArgs,
+    ) -> Result<api::Z_UpsertPropertyValuesReturns, NotImplemented> {
+        let (a, b) = self.properties_upsert_values(&args.a).await?;
+        Ok(api::Z_UpsertPropertyValuesReturns { a, b })
+    }
+
+    /// `PluginAPI.UpsertPropertyValuesWithOptions`.
+    async fn upsert_property_values_with_options(
+        &self,
+        args: api::Z_UpsertPropertyValuesWithOptionsArgs,
+    ) -> Result<api::Z_UpsertPropertyValuesWithOptionsReturns, NotImplemented> {
+        let (a, b) = self.properties_upsert_values(&args.a).await?;
+        Ok(api::Z_UpsertPropertyValuesWithOptionsReturns { a, b })
+    }
+
+    /// `PluginAPI.DeletePropertyValue`; see [`AppPluginApi::properties_delete_value`].
+    async fn delete_property_value(
+        &self,
+        args: api::Z_DeletePropertyValueArgs,
+    ) -> Result<api::Z_DeletePropertyValueReturns, NotImplemented> {
+        let a = self.properties_delete_value(&args.a, &args.b).await?;
+        Ok(api::Z_DeletePropertyValueReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValueWithOptions`.
+    async fn delete_property_value_with_options(
+        &self,
+        args: api::Z_DeletePropertyValueWithOptionsArgs,
+    ) -> Result<api::Z_DeletePropertyValueWithOptionsReturns, NotImplemented> {
+        let a = self.properties_delete_value(&args.a, &args.b).await?;
+        Ok(api::Z_DeletePropertyValueWithOptionsReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValuesForTarget`.
+    async fn delete_property_values_for_target(
+        &self,
+        args: api::Z_DeletePropertyValuesForTargetArgs,
+    ) -> Result<api::Z_DeletePropertyValuesForTargetReturns, NotImplemented> {
+        let a = self
+            .properties_delete_values_for_target(&args.a, &args.b, &args.c)
+            .await?;
+        Ok(api::Z_DeletePropertyValuesForTargetReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValuesForTargetWithOptions`.
+    async fn delete_property_values_for_target_with_options(
+        &self,
+        args: api::Z_DeletePropertyValuesForTargetWithOptionsArgs,
+    ) -> Result<api::Z_DeletePropertyValuesForTargetWithOptionsReturns, NotImplemented> {
+        let a = self
+            .properties_delete_values_for_target(&args.a, &args.b, &args.c)
+            .await?;
+        Ok(api::Z_DeletePropertyValuesForTargetWithOptionsReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValuesForField`.
+    async fn delete_property_values_for_field(
+        &self,
+        args: api::Z_DeletePropertyValuesForFieldArgs,
+    ) -> Result<api::Z_DeletePropertyValuesForFieldReturns, NotImplemented> {
+        let a = self
+            .properties_delete_values_for_field(&args.a, &args.b)
+            .await?;
+        Ok(api::Z_DeletePropertyValuesForFieldReturns { a })
+    }
+
+    /// `PluginAPI.DeletePropertyValuesForFieldWithOptions`.
+    async fn delete_property_values_for_field_with_options(
+        &self,
+        args: api::Z_DeletePropertyValuesForFieldWithOptionsArgs,
+    ) -> Result<api::Z_DeletePropertyValuesForFieldWithOptionsReturns, NotImplemented> {
+        let a = self
+            .properties_delete_values_for_field(&args.a, &args.b)
+            .await?;
+        Ok(api::Z_DeletePropertyValuesForFieldWithOptionsReturns { a })
+    }
+
     // -- users ------------------------------------------------------------------------------
 
     /// Port of `PluginAPI.GetUser` (app/plugin_api.go:285): the store row, **unsanitised** —
@@ -493,7 +1046,7 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
     ) -> Result<api::Z_GetDirectChannelReturns, NotImplemented> {
         let answer = match self
             .app
-            .get_or_create_direct_channel(&HookContext::default(), &args.a, &args.b)
+            .get_or_create_direct_channel(&HookContext::default(), None, &args.a, &args.b)
             .await
         {
             Ok(ChannelCreate::Created(channel)) => api::Z_GetDirectChannelReturns {
@@ -517,10 +1070,18 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         &self,
         args: api::Z_GetGroupChannelArgs,
     ) -> Result<api::Z_GetGroupChannelReturns, NotImplemented> {
-        let result = self
+        // No creator, so never the shared-GM forward (`creator == nil` skips `ShareChannel`).
+        let result = match self
             .app
             .create_group_channel(&HookContext::default(), &args.a, "")
-            .await;
+            .await
+        {
+            Ok(ChannelCreate::Created(channel)) => Ok(*channel),
+            Ok(ChannelCreate::Forward(why)) => {
+                return Err(self.not_implemented("GetGroupChannel", why));
+            }
+            Err(err) => Err(err),
+        };
         let (a, b) = self.reply(result, |c| channel_to_wire(&c));
         Ok(api::Z_GetGroupChannelReturns { a, b })
     }
@@ -1219,6 +1780,35 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
     }
 
     /// `PluginAPI.DeleteChannel`; see [`AppPluginApi::channels_delete_channel`].
+    /// Port of `PluginAPI.RegisterChannelGuard` (app/plugin_api.go:602): the plugin's own id,
+    /// lower-cased. See [`crate::channel_guards`].
+    async fn register_channel_guard(
+        &self,
+        args: api::Z_RegisterChannelGuardArgs,
+    ) -> Result<api::Z_RegisterChannelGuardReturns, NotImplemented> {
+        let result = self
+            .app
+            .register_channel_guard(&args.a, &self.id.to_lowercase())
+            .await;
+        Ok(api::Z_RegisterChannelGuardReturns {
+            a: result.err().and_then(|err| self.wire(err)),
+        })
+    }
+
+    /// Port of `PluginAPI.UnregisterChannelGuard` (app/plugin_api.go:606).
+    async fn unregister_channel_guard(
+        &self,
+        args: api::Z_UnregisterChannelGuardArgs,
+    ) -> Result<api::Z_UnregisterChannelGuardReturns, NotImplemented> {
+        let result = self
+            .app
+            .unregister_channel_guard(&args.a, &self.id.to_lowercase())
+            .await;
+        Ok(api::Z_UnregisterChannelGuardReturns {
+            a: result.err().and_then(|err| self.wire(err)),
+        })
+    }
+
     async fn delete_channel(
         &self,
         args: api::Z_DeleteChannelArgs,
@@ -2425,7 +3015,7 @@ impl AppPluginApi {
                 .collect()),
             None => Err(self.not_implemented(
                 "ListBuiltInCommands",
-                "the built-in commands are held in English only, or /exportlink is undecidable",
+                "the built-in commands are held in English only",
             )),
         }
     }

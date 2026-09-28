@@ -212,6 +212,8 @@ fn path(user_id: &str, team_id: &str) -> String {
 /// The list is byte-identical, and it holds exactly the two drafts the join keeps.
 #[tokio::test]
 async fn the_draft_list_is_byte_identical() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -306,6 +308,8 @@ async fn no_drafts_is_null_with_a_newline() {
 /// The path's user id is never read: another user's id, and a segment that is no id at all.
 #[tokio::test]
 async fn the_path_user_is_ignored_entirely() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -337,6 +341,8 @@ async fn the_path_user_is_ignored_entirely() {
 /// `view_team` refuses a team the caller is not in.
 #[tokio::test]
 async fn a_team_the_caller_is_not_in_is_a_403() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -363,6 +369,8 @@ async fn a_team_the_caller_is_not_in_is_a_403() {
 /// has no team and belongs to every list.
 #[tokio::test]
 async fn a_team_that_does_not_exist_splits_by_caller() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }

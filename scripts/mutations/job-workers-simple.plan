@@ -1,0 +1,13 @@
+# job-workers-simple.plan — D-804 SimpleWorker bodies (active_users, mobile_session_metadata,
+# refresh_materialized_views) and the Go-faithful 15:04 parse of their DailyScheduler, 2026-09-25.
+# skip-poststats and skip-file-stats survived the first run (fixture ids reused: the stale views already
+# held them) and were caught after the per-run nonce. hour-24-accepted was equivalent (from_hms_opt
+# refuses 24) and its branch was removed.
+skip-poststats	crates/mm-app/src/job_workers.rs	                store\n                    .user()\n                    .refresh_post_stats_for_users(timeout)\n                    .await\n                    .map_err(WorkerError::from)	                Ok(())	api	job_workers_simple
+skip-file-stats	crates/mm-app/src/job_workers.rs	                store\n                    .file_info()\n                    .refresh_file_stats(timeout)\n                    .await\n                    .map_err(WorkerError::from)?;\n                store\n                    .user()	                store\n                    .user()	api	job_workers_simple
+bot-view-not-refreshed	crates/mm-store/src/post_store.rs	            "bot_posts_by_team_day",\n            timeout_seconds,	            "posts_by_team_day",\n            timeout_seconds,	api	job_workers_simple
+extra-text-accepted	crates/mm-app/src/job_workers.rs	if bytes.len() != rest + 3 {	if bytes.len() < rest + 3 {	unit	the_hhmm_parse_corpus
+active-users-always-on	crates/mm-app/src/job_workers.rs	|config| config.metrics_enable,\n        |app, _job| {	|_config| true,\n        |app, _job| {	unit	each_worker_is_enabled
+# no-op controls
+control-annotate-options	crates/mm-app/src/job_workers.rs	let options = UserCountOptions {	let options: UserCountOptions = UserCountOptions {	api	job_workers_simple
+control-clamp-millis	crates/mm-store/src/post_store.rs	let millis = timeout_seconds.saturating_mul(1000).max(1);	let millis = timeout_seconds.saturating_mul(1000).max(1).min(i64::MAX);	api	job_workers_simple

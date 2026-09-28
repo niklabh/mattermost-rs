@@ -69,6 +69,8 @@ async fn the_first_request_writes_a_row_and_the_second_for_the_feature_is_refuse
     if !stack_enabled() {
         return;
     }
+    // A notify-admin send in `parity::notify_jobs` deletes unsent rows.
+    let _rows = common::NOTIFY_ADMIN_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let team = create_team(&client, &token, "ntfa").await;
@@ -137,6 +139,8 @@ async fn an_invalid_plan_or_feature_is_the_generic_500_and_a_plugin_feature_is_n
     if !stack_enabled() {
         return;
     }
+    // A notify-admin send in `parity::notify_jobs` deletes unsent rows.
+    let _rows = common::NOTIFY_ADMIN_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let team = create_team(&client, &token, "ntfb").await;

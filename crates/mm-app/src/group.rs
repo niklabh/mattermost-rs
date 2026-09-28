@@ -206,6 +206,78 @@ impl App {
                 )
             })
     }
+
+    /// Port of `App.FilterNonGroupChannelMembers` (app/user.go:2666) and the `filterNonGroupUsers`
+    /// (:2676) it calls: of `user_ids`, the ones who are **neither a bot nor in a group linked to
+    /// the channel** — the people a group-constrained channel does not vouch for.
+    ///
+    /// The answer comes from `GetProfileByIds`, so it is in that query's username order, and an id
+    /// with no `Users` row is in neither list. The result is never nil: Go starts from
+    /// `[]string{}`, and `removeUserFromChannel` puts it in an error's params, where the empty list
+    /// renders as `[]`.
+    ///
+    /// # Errors
+    ///
+    /// Go returns a bare `error`, and two of its callers tell the two kinds apart:
+    /// `addChannelMember` passes an `*AppError` through and wraps anything else as its own 400.
+    /// The group-user read is `GetChannelGroupUsers`' 500 `app.user.get_profiles.app_error`
+    /// ([`NonGroupFilterError::GroupUsers`]); the profile read is the store's own error
+    /// ([`NonGroupFilterError::Profiles`]).
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, asked = user_ids.len(), non_members))]
+    pub async fn filter_non_group_channel_members(
+        &self,
+        user_ids: &[String],
+        channel: &mm_model::channel::Channel,
+    ) -> Result<Vec<String>, NonGroupFilterError> {
+        let group_users = self
+            .store
+            .user()
+            .get_channel_group_user_ids(&channel.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel group users could not be read");
+                NonGroupFilterError::GroupUsers(AppError::boxed(
+                    "GetChannelGroupUsers",
+                    "app.user.get_profiles.app_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+            })?;
+        let users = self
+            .store
+            .user()
+            .get_profile_by_ids(user_ids, 0)
+            .await
+            .map_err(NonGroupFilterError::Profiles)?;
+
+        let non_members = non_group_users(&users, &group_users);
+        tracing::Span::current().record("non_members", non_members.len());
+        Ok(non_members)
+    }
+}
+
+/// Why [`App::filter_non_group_channel_members`] failed: Go's `error` is either the
+/// `*AppError` `GetChannelGroupUsers` built or the profile store's own error, and
+/// `addChannelMember` answers the two differently.
+#[derive(Debug, thiserror::Error)]
+pub enum NonGroupFilterError {
+    /// `GetChannelGroupUsers`' 500, passed through as it is.
+    #[error("{0}")]
+    GroupUsers(Box<AppError>),
+    /// `GetProfileByIds` failed; no id of its own.
+    #[error("the profiles to filter could not be read: {0}")]
+    Profiles(#[source] StoreError),
+}
+
+/// `filterNonGroupUsers`' loop (app/user.go:2683): a user is a member when they are a **bot** or
+/// their id is among the group users'; everyone else is returned, in `users`' order.
+fn non_group_users(users: &[mm_model::user::User], group_user_ids: &[String]) -> Vec<String> {
+    users
+        .iter()
+        .filter(|user| !(user.is_bot || group_user_ids.contains(&user.id)))
+        .map(|user| user.id.clone())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -795,5 +867,44 @@ impl App {
         }
         tracing::Span::current().record("groups", groups_map.len());
         Ok(groups_map)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mm_model::user::User;
+
+    fn user(id: &str, is_bot: bool) -> User {
+        User {
+            id: id.to_owned(),
+            is_bot,
+            ..User::default()
+        }
+    }
+
+    /// `userIsMember := user.IsBot`, then the group scan: a bot is vouched for without being in
+    /// any group, a group member is vouched for, and only the rest come back — in the profile
+    /// read's order, not the group list's.
+    #[test]
+    fn a_bot_or_a_group_member_is_vouched_for_and_the_rest_are_returned_in_order() {
+        let users = [
+            user("zeta", false),
+            user("bot", true),
+            user("grouped", false),
+            user("alpha", false),
+        ];
+        let groups = ["grouped".to_owned(), "absent".to_owned()];
+        assert_eq!(non_group_users(&users, &groups), ["zeta", "alpha"]);
+        assert!(
+            non_group_users(&users[1..3], &groups).is_empty(),
+            "the bot and the group member are both members"
+        );
+        assert_eq!(
+            non_group_users(&[user("bot", true)], &[]),
+            Vec::<String>::new(),
+            "a bot needs no group"
+        );
+        assert_eq!(non_group_users(&[user("solo", false)], &[]), ["solo"]);
     }
 }

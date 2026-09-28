@@ -929,10 +929,12 @@ impl crate::channel_store::SqlChannelStore {
         tracing::Span::current().record("updated", rows.len());
         rows.into_iter()
             .map(|r| {
-                // `jsonb` NULL and JSON `null` both scan to a nil map in Go — see
-                // `channel_member_from_row` for the [D-135] history.
+                // `SelectBuilder(&[]*model.ChannelMember)` is sqlx: a SQL NULL leaves the
+                // allocated empty map and a jsonb `null` a nil one — see
+                // `channel_member_from_row` ([D-331]).
                 let notify_props = match r.notifyprops {
-                    None | Some(serde_json::Value::Null) => None,
+                    None => Some(mm_model::utils::StringMap::new()),
+                    Some(serde_json::Value::Null) => None,
                     Some(value) => Some(
                         serde_json::from_value::<mm_model::utils::StringMap>(value).map_err(
                             |source| StoreError::Decode {

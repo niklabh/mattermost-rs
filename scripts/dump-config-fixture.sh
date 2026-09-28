@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Regenerate fixtures/config_active.json from the running Go server's own configuration.
+# Regenerate fixtures/config_active.json (and fixtures/config_feature_flags.json) from the running
+# Go server's own configuration.
 #
 # The oracle for `mm_app::config::Config::from_document` is the document the **Go server** writes
 # into `Configurations.Value` — not `reference/dump`, which is where every other fixture in this
@@ -23,8 +24,8 @@
 # sections and seventeen keys while the Rust `Document` had grown to fourteen sections and
 # thirty-eight; the count assertion in `the_fixture_covers_every_document_sourced_setting` was
 # comparing the fixture against a hardcoded 17 rather than against the struct, so it agreed with
-# the stale list. The list below is now the struct's own keys, extracted from it rather than
-# maintained beside it, and the count in that test is the number this script writes.
+# the stale list. Since D-454 that test reads the expected keys from the Rust struct itself
+# (serde's own field lists), so a key missing here fails it by name.
 #
 #   ./scripts/dump-config-fixture.sh
 #
@@ -79,6 +80,8 @@ MODELLED = {
         # Both keys again, though this cascade has no `isUpdate` arm.
         "SessionLengthSSOInHours", "SessionLengthSSOInDays",
         "MaximumLoginAttempts", "EnableMultifactorAuthentication", "EnforceMultifactorAuthentication",
+        # basicSecurityChecks: the 414 on a request URI longer than this, on every web.Handler.
+        "MaximumURLLength",
         # The sole gate on `DELETE /api/v4/users/{user_id}?permanent=true`.
         "EnableAPIUserDeletion",
         # The first gate on POST /api/v4/users/trigger-notify-admin-posts.
@@ -105,11 +108,19 @@ MODELLED = {
         "EnableFileSearch",
         "EnableInsecureOutgoingConnections",
         "AllowCookiesForSubdomains",
+        # The headers utils.GetIPAddress walks for the client address (plugin hook contexts).
+        "TrustedProxyIPHeader",
+        # Added with D-454, when the coverage test began reading the key list from Document.
+        "WebserverMode", "TerminateSessionsOnPasswordChange", "CollapsedThreads", "ThreadAutoFollow",
+        "EnableChannelViewedMessages", "EnableUserAccessTokens", "EnableBotAccountCreation",
+        "EnableAPIChannelDeletion", "EnableAPITeamDeletion",
+        "ExperimentalEnableDefaultChannelLeaveJoinMessages",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
         # the fixture has to record that a real document *has* the key. The value is "" here and
         # is never read; it is projected so the presence is measured rather than asserted.
         "SiteURL",
+        "RefreshPostStatsRunTime",
     ],
     "ComplianceSettings": ["Enable"],
     # `EnableSharedChannels` here is the legacy key `ConnectedWorkspacesSettings` falls back to
@@ -118,7 +129,10 @@ MODELLED = {
     "ConnectedWorkspacesSettings": ["EnableSharedChannels"],
     "ImageProxySettings": ["Enable"],
     "FileSettings": [
-        "DriverName", "EnablePublicLink", "MaxFileSize",
+        "DriverName", "EnablePublicLink", "MaxFileSize", "InitialFont",
+        # The storage directories. PublicLinkSalt is modelled too but never projected: it is a
+        # secret generated at first boot, and the Rust test excludes it by name.
+        "Directory", "DedicatedExportStore", "ExportDriverName", "ExportDirectory",
         # The attachment switch and the pixel cap, read by the three file-writing routes.
         "EnableFileAttachments", "MaxImageResolution",
     ],
@@ -132,11 +146,16 @@ MODELLED = {
         # What GET and POST /plugins/marketplace and POST /plugins/install_from_url read.
         "EnableRemoteMarketplace", "MarketplaceURL", "AllowInsecureDownloadURL", "SignaturePublicKeyFiles",
     ],
+    # The password rules IsPasswordValidWithSettings reads.
+    "PasswordSettings": ["MinimumLength", "Lowercase", "Number", "Uppercase", "Symbol"],
+    "ExportSettings": ["Directory"],
+    "ImportSettings": ["Directory"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
     ],
-    "SqlSettings": ["DisableDatabaseSearch"],
+    "SqlSettings": ["DisableDatabaseSearch", "AnalyticsQueryTimeout"],
+    "MetricsSettings": ["Enable", "EnableClientMetrics"],
     "ElasticsearchSettings": ["EnableSearching", "EnableIndexing"],
     "AccessControlSettings": ["EnableAttributeBasedAccessControl", "EnableChannelPolicyIndicators"],
     "AIRecapSettings": ["Enable"],
@@ -151,6 +170,8 @@ MODELLED = {
         # Read twice by the notification pass behind `POST /api/v4/posts`: `>=` refuses
         # channel-wide mentions, `>` sends the author a notice.
         "MaxNotificationsPerChannel",
+        "EnableOpenServer", "EnableChannelCategorySorting", "MaxChannelsPerTeam", "MaxUsersPerTeam",
+        "ExperimentalDefaultChannels",
     ],
     "LdapSettings": ["PictureAttribute", "Enable", "ReAddRemovedMembers"],
     "SamlSettings": ["EnableSyncWithLdap", "Enable"],
@@ -222,3 +243,26 @@ sys.stdout.write("\n")
 ' >fixtures/config_active.json
 
 echo "wrote fixtures/config_active.json ($(wc -c <fixtures/config_active.json) bytes)"
+
+# FEATURE FLAGS: the running values, from the client config, because the row cannot hold them.
+#
+# The row has no FeatureFlags section (asserted above), so the flags mm_app::config models cannot
+# be projected from it. Go publishes every flag of the config it is RUNNING on as a
+# `FeatureFlag<Name>` key of the unauthenticated limited client config (config/client.go:458,
+# `FeatureFlags.ToMap`), which is Go's own reflection over the whole struct: SetDefaults, then the
+# MM_FEATUREFLAGS_* overlay of the Go process. The Rust test applies the same overlay the stack's
+# Go is started with (scripts/go-server.sh) before comparing, so the fixture is not a default list
+# typed by hand.
+: "${MMRS_GO_BASE:=$(bash -c 'source scripts/stack-env.sh >/dev/null 2>&1; echo "$MMRS_GO_BASE"')}"
+curl -fsS "$MMRS_GO_BASE/api/v4/config/client?format=old" | python3 -c '
+import json, sys
+client = json.load(sys.stdin)
+flags = {key[len("FeatureFlag"):]: value for key, value in client.items() if key.startswith("FeatureFlag")}
+if len(flags) < 40:
+    sys.stderr.write("error: the client config carries only %d FeatureFlag keys\n" % len(flags))
+    raise SystemExit(1)
+json.dump(flags, sys.stdout, indent=2, sort_keys=True)
+sys.stdout.write("\n")
+' >fixtures/config_feature_flags.json
+
+echo "wrote fixtures/config_feature_flags.json ($(wc -c <fixtures/config_feature_flags.json) bytes, from $MMRS_GO_BASE)"

@@ -88,9 +88,11 @@ pub async fn create_compliance_report(
         Ok(bytes) => bytes,
         Err(_) => return ApiError::invalid_param("compliance").into_response(),
     };
-    // `json.NewDecoder(r.Body).Decode(&model.Compliance)` — every field optional to Go's decoder,
-    // so only malformed JSON fails.
-    if serde_json::from_slice::<serde_json::Value>(&bytes).is_err() {
+    // `var job model.Compliance; json.NewDecoder(r.Body).Decode(&job)` (compliance.go:25): a
+    // value, so `null` is the zero report and an array, a scalar or a mistyped field fails.
+    if mm_model::utils::decode_one_value_from_json::<mm_model::compliance::Compliance>(&bytes)
+        .is_err()
+    {
         return ApiError::invalid_param("compliance").into_response();
     }
 

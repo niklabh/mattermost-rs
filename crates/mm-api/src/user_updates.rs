@@ -80,55 +80,19 @@ pub(crate) async fn split_body(
     Ok((rebuilt, bytes.to_vec()))
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507) — `json.NewDecoder(r.Body).Decode(&map[string]string)`
-/// with the error **discarded**, which is not the same thing as "an empty map on any problem".
-///
-/// Three behaviours the three existing one-line copies of this helper in the crate do not have,
-/// and that `updateUserRoles` can actually be handed:
-///
-/// 1. **A partial decode survives.** `encoding/json` records the first `UnmarshalTypeError` and
-///    keeps going, so `{"roles":"system_user","n":1}` leaves `roles` set. A
-///    `from_slice::<BTreeMap<String,String>>().unwrap_or_default()` returns the *empty* map for
-///    that body — and an empty map means `roles: ""`, which this route writes. The divergence is
-///    not a 400 versus a 200; it is one user keeping their roles versus having them erased.
-/// 2. **The offending key is still inserted, holding `""`.** Measured, not assumed: the fixture
-///    row for `{"roles":1}` is `{"roles":""}`, not `{}`, and `{"roles":null}` is the same. Go's
-///    decoder assigns the zero value and records the error rather than skipping the entry, so a
-///    port that *dropped* the key would agree on every `.get("roles")` and disagree on
-///    `len(props)` — and on any future reader of a second key.
-/// 3. **Trailing bytes after the first value are ignored** (`Decoder.Decode`, not `Unmarshal`),
-///    and a duplicate key is last-wins.
-/// 4. A non-object — `null`, an array, a number, a malformed body — leaves the map nil, which Go
-///    replaces with an empty one.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`], which is
+/// this module's former copy made shared: a partial decode survives with the mistyped key at `""`,
+/// and `updateUserRoles` would otherwise erase a user's roles on `{"roles":"…","n":1}`.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    use serde::Deserialize;
-
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    match serde_json::Value::deserialize(&mut deserializer) {
-        Ok(serde_json::Value::Object(map)) => map
-            .into_iter()
-            .map(|(key, value)| match value {
-                serde_json::Value::String(value) => (key, value),
-                _ => (key, String::new()),
-            })
-            .collect(),
-        _ => StringMap::new(),
-    }
+    mm_model::utils::map_from_json(bytes)
 }
 
-/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — the same call into a
-/// `map[string]any`, where every JSON value is assignable, so only a non-object top level
-/// produces the empty map. Trailing bytes are ignored for the same reason as above.
+/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — see
+/// [`mm_model::utils::string_interface_from_json`].
 pub(crate) fn string_interface_from_json(
     bytes: &[u8],
 ) -> serde_json::Map<String, serde_json::Value> {
-    use serde::Deserialize;
-
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    match serde_json::Value::deserialize(&mut deserializer) {
-        Ok(serde_json::Value::Object(map)) => map,
-        _ => serde_json::Map::new(),
-    }
+    mm_model::utils::string_interface_from_json(bytes)
 }
 
 /// Port of `web.ReturnStatusOK` (web/web.go:127) — `{"status":"OK"}` with **no trailing
@@ -285,6 +249,7 @@ pub async fn update_user(
     }
     tracing::Span::current().record("user_id", &user_id);
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request, "user").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -368,7 +333,11 @@ pub async fn update_user(
     }
 
     match state.app.update_user_as_user(&user).await {
-        Ok(ruser) => user_response("updateUser", &ruser),
+        Ok(ruser) => {
+            // `c.LogAudit("")`, on success only.
+            audit.log(&state.app, Some(&session.0), "").await;
+            user_response("updateUser", &ruser)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -417,6 +386,7 @@ pub async fn patch_user(
     }
     tracing::Span::current().record("user_id", &user_id);
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request, "user").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -527,6 +497,8 @@ pub async fn patch_user(
         tracing::error!(error = %err, "the auto-responder transition was not applied");
     }
 
+    // `c.LogAudit("")`, on success only.
+    audit.log(&state.app, Some(&session.0), "").await;
     user_response("patchUser", &ruser)
 }
 
@@ -573,6 +545,7 @@ pub async fn update_user_active(
     }
     tracing::Span::current().record("user_id", &user_id);
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request, "active").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -699,6 +672,15 @@ pub async fn update_user_active(
         }
     }
 
+    // `c.LogAudit(fmt.Sprintf("user_id=%s active=%v", user.Id, active))`, before the e-mail.
+    audit
+        .log(
+            &state.app,
+            Some(&session.0),
+            &format!("user_id={} active={active}", user.id),
+        )
+        .await;
+
     // `SendDeactivateAccountEmail` in a `Srv().Go` goroutine, to the address the account had
     // before the write; a failure is `LogErrorByCode` and nothing else.
     if is_self_deactivate {
@@ -772,6 +754,7 @@ pub async fn update_user_roles(
     }
     tracing::Span::current().record("user_id", &user_id);
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     // The parts are kept by `split_body` for a forward this route no longer makes.
     let (_request, bytes) = match split_body(request, "roles").await {
         Ok(pair) => pair,
@@ -826,7 +809,17 @@ pub async fn update_user_roles(
         .update_user_roles(&user_id, &new_roles, true)
         .await
     {
-        Ok(_) => status_ok(),
+        Ok(_) => {
+            // `c.LogAudit(fmt.Sprintf("user=%s roles=%s", c.Params.UserId, newRoles))`.
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("user={user_id} roles={new_roles}"),
+                )
+                .await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -928,18 +921,13 @@ mod tests {
     /// `json.NewDecoder(r.Body).Decode(&model.UserPatch)`, through the shared
     /// [`decode_go_struct`].
     ///
-    /// # One row is a known divergence and is asserted as one
-    ///
-    /// `{"USERNAME":"folded"}` sets `Username` in Go — `encoding/json` matches field names
-    /// case-insensitively ([D-040]) — and leaves it unset here, because no
-    /// `go_json::GoFields` schema exists for `UserPatch` or `User`. The test asserts the
-    /// *divergence* rather than skipping the row, so closing [D-460] will fail it and the
-    /// assertion has to be flipped deliberately.
+    /// The folded-key row (`{"USERNAME":"folded"}`) was asserted as a divergence until the body
+    /// decoders took Go's key fold ([D-460]); it is now pinned as agreement.
     #[test]
     fn user_patch_decoding_matches_go() {
         let rows = cases("patch_decode");
         assert!(rows.len() >= 17, "the corpus is populated");
-        let mut divergent = 0;
+        let mut folded = 0;
         for row in rows {
             let body = row["in"].as_str().expect("a body");
             let ours: Result<UserPatch, ApiError> = decode_go_struct(body.as_bytes(), "user");
@@ -951,24 +939,13 @@ mod tests {
             let ours = ours.unwrap_or_else(|_| panic!("Go accepts {body:?}"));
             let theirs: UserPatch =
                 serde_json::from_value(row["patch"].clone()).expect("the patch deserialises");
-
             if body == r#"{"USERNAME":"folded"}"# {
-                assert_eq!(
-                    theirs.username.as_deref(),
-                    Some("folded"),
-                    "Go folds the key"
-                );
-                assert_eq!(ours.username, None, "we do not — [D-460]");
-                divergent += 1;
-                continue;
+                assert_eq!(ours.username.as_deref(), Some("folded"), "Go folds the key");
+                folded += 1;
             }
-
             assert_eq!(ours, theirs, "UserPatch decode of {body:?}");
         }
-        assert_eq!(
-            divergent, 1,
-            "exactly one divergent row, and it is the folded key"
-        );
+        assert_eq!(folded, 1, "the folded-key row is in the corpus");
     }
 
     /// A JSON **array** decodes into a `#[serde(default)]` struct and not into a Go one. Pinned

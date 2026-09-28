@@ -509,8 +509,8 @@ This is route-sized work from here on, so the ledger counts it.
 - Port `public/plugin/environment.go`, `supervisor.go`, `health_check.go` and
   `hooks_timer_layer` (metrics), plus `app/plugin.go`, `plugin_install.go`,
   `plugin_signature.go`, `plugin_public_keys.go`, `plugin_statuses.go`,
-  `plugin_db_driver.go` (the Driver, with sqlx and dynamic binds producing gob `driver.Value`s)
-  and `plugin_requests.go`.
+  `plugin_db_driver.go` (the Driver — DONE 2026-09-25, over `gopq`, a port of lib/pq, rather
+  than sqlx) and `plugin_requests.go`.
 - Introduce `trait PluginRuntime`, with `Process` as its only implementation, so D2 has a seam.
 - Serve in this order: `GET /plugins/statuses`, `GET /plugins`, `GET /plugins/webapp`,
   enable/disable, `POST /plugins` (upload), remove, install_from_url, marketplace; then the 10
@@ -519,7 +519,19 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites — IN PROGRESS, 30 of 35 (2026-09-23)
+**The Driver: DONE 2026-09-25, 20 of 20 methods.** `mm_app::plugin_driver` answers every
+`db_rpc.go` method over `gopq`, a byte-exact port of the lib/pq connection Go's `*sql.Conn` wraps,
+so the protocol, the result formats, the decoded values and the error texts are lib/pq's. Each
+plugin is served through `DriverForPlugin`, and `ShutdownConns` runs when its process stops.
+`parity::plugin_driver` runs one script plugin under both hosts and compares 171 replies. One
+connection per `Conn` instead of Go's pool is [D-1340].
+
+### Phase 5 · Hook call sites — DONE, 34 of 35 (2026-09-25)
+
+**Closed 2026-09-25.** The notification pair is proven under both hosts, `JoinChannel`'s join hook
+fires from `/join`, guards are registered and cached, and the three websocket hooks fire. The 35th,
+`OnPluginClusterEvent`, is called only by the private cluster. What keeps D6's switch at `go` is
+Phase 6 and [D-1000]; see D-811.
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
@@ -727,6 +739,37 @@ name. The tranche runs its script twice, unlicensed and licensed. `RevokeSession
 session answers not-implemented ([D-283]); `DeleteGroupConstrainedMemberships` sweeps the whole
 installation and is compared only where it refuses ([D-1070]).
 
+**Then 204 of 258:** the command, plugin, upload-session, team-icon, profile-image, typing,
+toast, push, channel and cluster twenty-eight (`plugin_api/server.rs`): `CreateCommand`,
+`GetCommand`, `UpdateCommand`, `DeleteCommand`, `GetPlugins`, `GetPluginStatus`, `EnablePlugin`,
+`DisablePlugin`, `RemovePlugin`, `CreateUploadSession`, `GetUploadSession`, `GetTeamIcon`,
+`SetTeamIcon`, `RemoveTeamIcon`, `SetProfileImage`, `PublishUserTyping`, `SendToastMessage`,
+`SendPushNotification`, `AddUserToChannel`, `GetChannelOfType`, `RestoreChannel`,
+`CreateTeamMembersGracefully`, `PublishPluginClusterEvent`, `RegisterCollectionAndTopic`,
+`GetLDAPUserAttributes`, `RequestTrialLicense` (its refusals), `LogAuditRec` and
+`LogAuditRecWithLevel`. The command reads answer the store's own error text; `UpdateCommand`
+keeps the plugin's creator, so a command sent with one fails `IsValid`; `SetTeamIcon` is
+`App::set_team_icon_from_file`, new here and byte-identical to Go's encoder; the audit record
+goes to no audit log ([D-1330]). The tranche's script runs under both hosts from the same
+planted rows and compares every answer, hook and frame. `RequestTrialLicense` past its refusals
+(the licence server) answers not-implemented.
+
+**Then 232 of 258:** the property twenty-eight (`plugin_api/properties.rs`): `RegisterPropertyGroup`,
+`GetPropertyGroup`, the ten field methods (`CreatePropertyField` … `DeletePropertyField`,
+`UpdatePropertyFields` for one field), the eleven value methods, and the five `*WithOptions`
+variants. Every one answers a Go `error`. A group the property hooks manage (`access_control`,
+`session_attributes`) answers not-implemented, since the hooks' plugin-caller arms are not ported
+([D-1331]); every other group — the PSAv1 groups plugins register, `boards`, `post_attributes` —
+is answered whole, `json.RawMessage` bytes included. `UpdatePropertyFields` with more than one
+field answers not-implemented. The server tour now also calls `LogAuditRecWithLevel` and lists
+two plugins, active then inactive.
+
+**Then 240 of 258:** the eight access-control methods (`plugin_api/access_control.rs`), as Go's
+public build answers them: the resource type's format and owner, the action, the ids and the
+acting user in Go's order, then a nil engine's 501 — and for `EvaluateAccessControl` the raw
+store read `resolvePluginPolicyExistence` falls back on (`no_policy`, or 503 when a policy of the
+requested type exists). The engine itself is private (enterprise) code.
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,
@@ -758,7 +801,7 @@ world generated from the IDL, `PluginRuntime::Wasm`, and host-mediated DB access
 | `mm-model` structs lack gob-only fields (`json:"-"`) | The D5 generator fails on the gap; add the fields where the types live, with their JSON skip |
 | Gob merge-decode semantics mis-ported | Merge corpus in Phase 1; `MessageWillBePosted` gets its own conformance case |
 | Go version drift in gob's `time.Time` or `x509` encodings (see `client_rpc.go:419`) | The oracle is built with the pinned Go; the IDL records the Go version |
-| Plugins using `Driver` for arbitrary SQL against Postgres types sqlx doesn't bind dynamically | The Driver corpus in Phase 4 draws on the SQL real plugins send (Playbooks, Boards) |
+| Plugins using `Driver` for SQL whose values or errors differ from lib/pq's | The Driver is `gopq`, a port of lib/pq itself, proven by `parity::plugin_driver` against Go |
 | Scope creep into speculative API porting | Phase 6 is usage-ordered and each method is route-sized; unported methods are counted |
 | Two hosts running at once | D6's single switch, and a startup check in mm-api that refuses `rust` while Go reports active plugins |
 

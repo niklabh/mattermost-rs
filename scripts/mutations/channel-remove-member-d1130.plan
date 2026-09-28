@@ -1,0 +1,26 @@
+# Mutation plan for D-1130: removeUserFromChannel's guest eviction, group-constrained filter and
+# shared-channel forward decision, against parity::channel_member_removal.
+# 2026-09-24: 16 run, 13 caught, 3 survived — two controls, and `channel-read-ignored`, whose fixture
+# held a space beside the second channel; with the space planted only after the first removal it is
+# caught (re-run 2 of 2 with `space-read-ignored`).
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-remove-member-d1130.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+guest-branch-dropped	crates/mm-app/src/channel_member.rs	        if is_guest {\n            self.remove_guest_without_channels_from_team(	        if false && is_guest {\n            self.remove_guest_without_channels_from_team(	api	channel_member_removal
+channel-read-ignored	crates/mm-app/src/channel_member.rs	        if !self\n            .get_channel_members_for_user(team_id, user_id)\n            .await?\n            .is_empty()\n        {	        if false\n            && !self\n                .get_channel_members_for_user(team_id, user_id)\n                .await?\n                .is_empty()\n        {	api	channel_member_removal
+space-read-ignored	crates/mm-app/src/channel_member.rs	        if !spaces.0.is_empty() {\n            return Ok(());	        if false && !spaces.0.is_empty() {\n            return Ok(());	api	channel_member_removal
+team-member-not-removed	crates/mm-app/src/channel_member.rs	        self.remove_team_member(&mut member)\n            .await\n            .map_err(not_on_team)?;	        let _ = &mut member;	api	channel_member_removal
+post-process-skipped	crates/mm-app/src/channel_member.rs	        self.post_process_team_member_leave(&member, remover_user_id, hook_ctx)\n            .await\n    }	        let _ = (&member, remover_user_id, hook_ctx);\n        Ok(())\n    }	api	channel_member_removal
+group-vouch-inverted	crates/mm-app/src/channel_member.rs	            if non_members.is_empty() {	            if !non_members.is_empty() {	api	channel_member_removal
+group-self-removal-screened	crates/mm-app/src/channel_member.rs	        if channel.is_group_constrained() && user_id_to_remove != remover_user_id && !user.is_bot {	        if channel.is_group_constrained() && !user.is_bot {	api	channel_member_removal
+group-bot-screened	crates/mm-app/src/channel_member.rs	        if channel.is_group_constrained() && user_id_to_remove != remover_user_id && !user.is_bot {	        if channel.is_group_constrained() && user_id_to_remove != remover_user_id {	api	channel_member_removal
+group-denied-params-name-user	crates/mm-app/src/channel_member.rs	                    serde_json::Value::Array(Vec::new()),	                    serde_json::Value::Array(vec![serde_json::Value::String(user_id_to_remove.to_owned())]),	api	channel_member_removal
+group-membership-deleteat-ignored	crates/mm-store/src/user_store.rs	                      AND gm.deleteat = 0	                      AND gm.deleteat >= 0	api	channel_member_removal
+group-link-deleteat-ignored	crates/mm-store/src/user_store.rs	                      AND gc.deleteat = 0	                      AND gc.deleteat >= 0	api	channel_member_removal
+group-deleteat-ignored	crates/mm-store/src/user_store.rs	                      AND ug.deleteat = 0	                      AND ug.deleteat >= 0	api	channel_member_removal
+shared-never-forwards	crates/mm-app/src/channel_member.rs	        if channel.is_shared() {\n            match self.shared_channel_service_running().await {	        if false && channel.is_shared() {\n            match self.shared_channel_service_running().await {	api	channel_member_removal
+shared-always-forwards	crates/mm-app/src/channel_member.rs	                Ok(false) => {}	                Ok(false) => return Ok(MemberWrite::Forward("mutant")),	api	channel_member_removal
+control-group-log-text	crates/mm-app/src/channel_member.rs	                    tracing::error!(error = %err, "the group filter failed");	                    tracing::error!(error = %err, "the group filter failed (control)");	api	channel_member_removal
+control-eviction-log-text	crates/mm-app/src/channel_member.rs	            tracing::debug!(error = %err, "the guest's team membership could not be removed");	            tracing::debug!(error = %err, "the guest's team membership was not removed");	api	channel_member_removal

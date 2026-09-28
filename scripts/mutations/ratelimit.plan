@@ -1,0 +1,44 @@
+# Mutation plan for D-430: the rate limiter (throttled's GCRA and memstore, app.RateLimiter, and
+# its three placements — the route limiters, the global one, the per-user one).
+#
+#   MUTATE_PACKAGE=mm-api scripts/mutate-batch.sh scripts/mutations/ratelimit.plan
+#
+# Not planned, because they are equivalent: `now > tat` as `>=` (equal gives the same new TAT);
+# the `next > -emission` guard as `next > 0` (a next in between truncates to 0 either way); the
+# per-user query-token refusal (no route this server answers is reached with a non-OAuth query
+# token and a live session in any parity test — it would need `?access_token=` on a burst); the
+# global refusal with or without `WebOwnHeaders` (the global layer is outside `go_global_headers`,
+# so nothing reads the marker — measured: it survived the first run).
+
+# ---- the GCRA and the store (go_parity)
+rl-limit-no-plus-one	crates/mm-api/src/ratelimit.rs	limit: max_burst.saturating_add(1),	limit: max_burst,	lib	ratelimit::
+rl-dvt-no-plus-one	crates/mm-api/src/ratelimit.rs	period.saturating_mul(max_burst.saturating_add(1))	period.saturating_mul(max_burst)	lib	ratelimit::
+rl-retry-sign	crates/mm-api/src/ratelimit.rs	result.retry_after = -diff;	result.retry_after = diff.abs() + 1;	lib	ratelimit::
+rl-limited-ttl-new	crates/mm-api/src/ratelimit.rs	                tat - now\n	                new_tat - now\n	lib	ratelimit::
+rl-remaining-ceil	crates/mm-api/src/ratelimit.rs	result.remaining = next / self.emission_interval;	result.remaining = (next + self.emission_interval - 1) / self.emission_interval;	lib	ratelimit::
+rl-limited-still-stores	crates/mm-api/src/ratelimit.rs	            limited = true;	            limited = true;\n            store.set(key, new_tat);	lib	ratelimit::
+lru-read-no-refresh	crates/mm-api/src/ratelimit.rs	    fn get(&mut self, key: &str) -> Option<i64> {\n        self.touch(key);	    fn get(&mut self, key: &str) -> Option<i64> {	lib	ratelimit::
+lru-evicts-newest	crates/mm-api/src/ratelimit.rs	self.order.pop_first()	self.order.pop_last()	lib	ratelimit::
+lru-off-by-one	crates/mm-api/src/ratelimit.rs	if self.entries.len() > self.max_keys	if self.entries.len() >= self.max_keys	lib	ratelimit::
+
+# ---- headers and keys (go_parity)
+rl-seconds-rounded	crates/mm-api/src/ratelimit.rs	(whole + frac).ceil() as i64	(whole + frac).round() as i64	lib	ratelimit::
+rl-retry-always	crates/mm-api/src/ratelimit.rs	if result.retry_after >= 0 {	if result.retry_after >= -1 {	lib	ratelimit::
+key-empty-token-skipped	crates/mm-api/src/ratelimit.rs	if let Some((token, _)) = auth::parse_auth_token(parts) {	if let Some((token, _)) = auth::parse_auth_token(parts).filter(|(t, _)| !t.is_empty()) {	lib	ratelimit::
+key-header-case-kept	crates/mm-api/src/ratelimit.rs	.map(|v| String::from_utf8_lossy(v.as_bytes()).to_lowercase())	.map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())	lib	ratelimit::
+
+# ---- which limiters exist (unit)
+enable-none-is-on	crates/mm-api/src/ratelimit.rs	if settings.enable != Some(true) {	if settings.enable == Some(false) {	lib	ratelimit::
+route-trusts-config	crates/mm-api/src/ratelimit.rs	login: build(&Settings::route(5, 10), Vec::new()),	login: build(&Settings::route(5, 10), trusted_proxy_ip_header.to_vec()),	lib	ratelimit::
+login-quota-swapped	crates/mm-api/src/ratelimit.rs	login: build(&Settings::route(5, 10), Vec::new()),	login: build(&Settings::route(10, 5), Vec::new()),	api	ratelimit
+desktop-quota-login	crates/mm-api/src/ratelimit.rs	desktop_token: build(&Settings::route(2, 1), Vec::new()),	desktop_token: build(&Settings::route(5, 10), Vec::new()),	api	ratelimit
+
+# ---- placement and framing (parity::ratelimit)
+global-appended	crates/mm-api/src/ratelimit.rs	prepend(response.headers_mut(), &verdict.headers, forwarded);	add_headers(response.headers_mut(), &verdict.headers);	api	ratelimit
+route-refusal-dressed	crates/mm-api/src/ratelimit.rs	        return bare_limit_exceeded(&verdict.headers);\n    }\n    let mut response = next.run(Request::from_parts(parts, body)).await;\n    add_headers	        return limit_exceeded(&verdict.headers);\n    }\n    let mut response = next.run(Request::from_parts(parts, body)).await;\n    add_headers	api	ratelimit
+per-user-refusal-bare	crates/mm-api/src/ratelimit.rs	        return limit_exceeded(&verdict.headers);\n    }\n    let mut response = next.run(Request::from_parts(parts, body)).await;\n    add_headers(response.headers_mut(), &verdict.headers);\n    response\n}\n\n#[cfg(test)]	        return bare_limit_exceeded(&verdict.headers);\n    }\n    let mut response = next.run(Request::from_parts(parts, body)).await;\n    add_headers(response.headers_mut(), &verdict.headers);\n    response\n}\n\n#[cfg(test)]	api	ratelimit
+forwarded-keeps-gos	crates/mm-api/src/ratelimit.rs	if forwarded && !existing.is_empty() {	if false && forwarded && !existing.is_empty() {	lib	ratelimit::
+
+# ---- controls
+rl-control-map-or	crates/mm-api/src/ratelimit.rs	let tat = stored.unwrap_or(now);	let tat = stored.map_or(now, |t| t);	lib	ratelimit::
+rl-control-capacity	crates/mm-api/src/ratelimit.rs	let mut out = Vec::with_capacity(4);	let mut out = Vec::with_capacity(8);	api	ratelimit

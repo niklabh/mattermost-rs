@@ -605,6 +605,8 @@ async fn setting_another_users_custom_status_needs_edit_other_users() {
 /// The three `user_updated` events, plus the two `UpdatePreferences` publishes.
 #[tokio::test]
 async fn a_custom_status_publishes_the_same_events_on_both_servers() {
+    // The draft migrations delete across every user; see `common::DRAFT_ROWS`.
+    let _drafts = crate::common::DRAFT_ROWS.read().await;
     if !stack_enabled() {
         return;
     }
@@ -674,6 +676,32 @@ async fn a_custom_status_publishes_the_same_events_on_both_servers() {
     let rust_keys: Vec<&String> = rust_user.as_object().expect("a user").keys().collect();
     assert_eq!(go_keys, rust_keys, "the embedded user's keys differ");
     assert_eq!(rust_user["id"], me);
+
+    // The same frame as **bytes**, values masked ([D-541]): Go adds the user as a `*model.User`
+    // struct, so its keys go out in declaration order, which the key-set comparison above cannot
+    // see — `go_keys` came through a parsed, sorted map.
+    let skeleton_of = |socket: &SocketProbe, text: &str| -> Vec<String> {
+        socket
+            .raw_events_named("user_updated")
+            .into_iter()
+            .filter(|raw| {
+                let frame: serde_json::Value = serde_json::from_str(raw).expect("a frame");
+                !updates_for(vec![frame], me, text).is_empty()
+            })
+            .map(common::json_skeleton)
+            .collect()
+    };
+    let go_skeleton = skeleton_of(&go_socket, "go event");
+    assert_eq!(
+        go_skeleton.len(),
+        1,
+        "the raw frame is the one compared above"
+    );
+    assert_eq!(
+        go_skeleton,
+        skeleton_of(&rust_socket, "rust event"),
+        "the user_updated frame, as bytes"
+    );
     // `password` carries `omitempty` and `Sanitize` blanks it, so the key is **absent** on both
     // rather than present-and-empty — which the key-set comparison above already pinned, and
     // which this states outright because it is the thing that would matter if it changed.

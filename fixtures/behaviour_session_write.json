@@ -1,4 +1,300 @@
 {
+    "cloud_cookie": [
+        {
+            "site_url": "",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com/sub",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/sub; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com/sub",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/sub; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com:8443/",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com:8443/",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "https://cloud.mattermost.com",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "https://cloud.mattermost.com",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "https://a.example.cloud.mattermost.com",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "https://a.example.cloud.mattermost.com",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "http://localhost:8065",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=localhost; Path=/; Domain=localhost; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "http://localhost:8065",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=localhost; Path=/; Domain=localhost; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "http://localhost",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=localhost; Path=/; Domain=localhost; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "http://localhost",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=localhost; Path=/; Domain=localhost; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "http://mylocalhost.example.com",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=localhost; Path=/; Domain=mylocalhost.example.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "http://mylocalhost.example.com",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=localhost; Path=/; Domain=mylocalhost.example.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "http://my.localhost.example.com",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=localhost; Path=/; Domain=my.localhost.example.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "http://my.localhost.example.com",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=localhost; Path=/; Domain=my.localhost.example.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "http://127.0.0.1:8065",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=127; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "http://127.0.0.1:8065",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=127; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "http://1.2.3.4",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=1; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "http://1.2.3.4",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=1; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "http://[::1]:8065",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "http://[::1]:8065",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "https://EXAMPLE.Cloud.Mattermost.COM",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=EXAMPLE; Path=/; Domain=Mattermost.COM; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "https://EXAMPLE.Cloud.Mattermost.COM",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=EXAMPLE; Path=/; Domain=Mattermost.COM; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "https://a,b.cloud.mattermost.com",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=\"a,b\"; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "https://a,b.cloud.mattermost.com",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=\"a,b\"; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com.",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com.",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "https://.cloud.mattermost.com",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "https://.cloud.mattermost.com",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "https://example..mattermost.com",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "https://example..mattermost.com",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        },
+        {
+            "site_url": "mattermost",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "mattermost",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "http://%zz/sub",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "http://%zz/sub",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": ""
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com/a%2Fb",
+            "secure": false,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/a/b; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "site_url": "https://example.cloud.mattermost.com/a%2Fb",
+            "secure": true,
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "set_cookie": "MMCLOUDURL=example; Path=/a/b; Domain=mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; Secure"
+        }
+    ],
     "session_cookie": [
         {
             "name": "plain",
@@ -194,6 +490,383 @@
             "secure": false,
             "same_site_none": false,
             "set_cookie": "MMCSRF=f9jnw7z47fbbzmkxt9ba9naene; Path=/mattermost; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600"
+        },
+        {
+            "name": "domain leading dot",
+            "cookie_name": "MMCLOUDURL",
+            "http_only": false,
+            "token": "example",
+            "path": "/",
+            "domain": ".cloud.mattermost.com",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMCLOUDURL=example; Path=/; Domain=cloud.mattermost.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600"
+        },
+        {
+            "name": "domain ipv6 dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "::1",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain ipv4 kept",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "127.0.0.1",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Domain=127.0.0.1; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain ipv4 leading zero",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "127.0.0.01",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain ipv4 out of range",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "256.0.0.1",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain localhost",
+            "cookie_name": "MMCLOUDURL",
+            "http_only": false,
+            "token": "localhost",
+            "path": "/",
+            "domain": "localhost",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMCLOUDURL=localhost; Path=/; Domain=localhost; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600"
+        },
+        {
+            "name": "domain underscore dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "mm_1.example.com",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain dash after dot dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "mm.-example.com",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain trailing dash dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "mm.example-",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain dash before dot dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "mm-.example.com",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain inner dash kept",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "m-m.example.com",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Domain=m-m.example.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain double dot dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "mm..example.com",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain trailing dot kept",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "mm.example.com.",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Domain=mm.example.com.; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain digits only dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "123.456",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain one letter kept",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "1.a",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Domain=1.a; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain label 63 kept",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Domain=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain label 64 dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain last label 64 dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "a.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain 255 kept",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Domain=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain 256 dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain leading dot 255 kept",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": ".aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Domain=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain leading dot 256 dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": ".aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain bare dot dropped",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": ".",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "domain upper case kept",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "tok",
+            "path": "/",
+            "domain": "MM.Example.COM",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=tok; Path=/; Domain=MM.Example.COM; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; HttpOnly"
+        },
+        {
+            "name": "value comma quoted",
+            "cookie_name": "MMCLOUDURL",
+            "http_only": false,
+            "token": "a,b",
+            "path": "/",
+            "domain": "",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMCLOUDURL=\"a,b\"; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600"
+        },
+        {
+            "name": "value space quoted",
+            "cookie_name": "MMCLOUDURL",
+            "http_only": false,
+            "token": "a b",
+            "path": "/",
+            "domain": "",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMCLOUDURL=\"a b\"; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600"
+        },
+        {
+            "name": "value quote dropped",
+            "cookie_name": "MMCLOUDURL",
+            "http_only": false,
+            "token": "a\"b",
+            "path": "/",
+            "domain": "",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMCLOUDURL=ab; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600"
+        },
+        {
+            "name": "value backslash and semicolon dropped",
+            "cookie_name": "MMCLOUDURL",
+            "http_only": false,
+            "token": "a\\b;c",
+            "path": "/",
+            "domain": "",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMCLOUDURL=abc; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600"
+        },
+        {
+            "name": "value dropped byte then comma",
+            "cookie_name": "MMCLOUDURL",
+            "http_only": false,
+            "token": "a\u0001,",
+            "path": "/",
+            "domain": "",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMCLOUDURL=\"a,\"; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600"
         }
     ],
     "split_host_port": {

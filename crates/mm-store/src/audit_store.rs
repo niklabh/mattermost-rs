@@ -3,7 +3,8 @@
 //! Ported for `getUserAudits` (api4/user.go:2827) — the webapp's *View Access History* panel —
 //! and for `getAudits` (api4/system.go:44), the system console's server-wide audit log, which is
 //! the same store call with an **empty** user id. `PermanentDeleteByUser` is ported for
-//! `PermanentDeleteUser`; `Save` is not: nothing migrated writes an audit row.
+//! `PermanentDeleteUser`. `Save` is ported for `Context.LogAudit`, which the served routes are
+//! adopting one at a time ([D-270]); `moveChannel` is the first.
 
 use mm_model::audit::{Audit, Audits};
 use sqlx::PgPool;
@@ -38,6 +39,14 @@ pub trait AuditStore {
     fn permanent_delete_by_user(
         &self,
         user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlAuditStore.Save` (audit_store.go:40): mints `audit.id` and stamps
+    /// `audit.create_at` — overwriting whatever the caller set, as Go does — then inserts the
+    /// seven columns.
+    fn save(
+        &self,
+        audit: &mut Audit,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
@@ -175,6 +184,35 @@ impl AuditStore for SqlAuditStore {
                 source,
             })?;
         tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %audit.user_id, action = %audit.action))]
+    async fn save(&self, audit: &mut Audit) -> Result<(), StoreError> {
+        audit.id = mm_model::utils::new_id();
+        audit.create_at = mm_model::utils::get_millis();
+        sqlx::query!(
+            r#"
+            INSERT INTO audits (id, createat, userid, action, extrainfo, ipaddress, sessionid)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+            audit.id,
+            audit.create_at,
+            audit.user_id,
+            audit.action,
+            audit.extra_info,
+            audit.ip_address,
+            audit.session_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to save Audit with userId={} and action={}",
+                audit.user_id, audit.action
+            ),
+            source,
+        })?;
         Ok(())
     }
 }

@@ -930,7 +930,7 @@ impl App {
             }
         };
         let channel = match self
-            .get_or_create_direct_channel(hook_ctx, &session.user_id, &bot.user_id)
+            .get_or_create_direct_channel(hook_ctx, Some(session), &session.user_id, &bot.user_id)
             .await
         {
             Ok(crate::channel_create::ChannelCreate::Created(channel)) => channel,
@@ -1272,7 +1272,7 @@ impl App {
             POST_ACTION_INTEGRATION_FORMAT_MM_BLOCK
             | POST_ACTION_INTEGRATION_FORMAT_BLOCK
             | POST_ACTION_INTEGRATION_FORMAT_CARD => {
-                if !self.config().feature_flag_mm_blocks_enabled {
+                if !self.config().feature_flags.mm_blocks_enabled {
                     return Err(action_integration("mm_blocks are not enabled".to_owned()));
                 }
                 let spec = post.get_mm_blocks_action_spec(action_id);

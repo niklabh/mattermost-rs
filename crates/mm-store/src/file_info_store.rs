@@ -37,6 +37,13 @@ use crate::post_store::{
 
 /// Port of `store.FileInfoStore`, narrowed to what the served routes reach.
 pub trait FileInfoStore {
+    /// Port of `SqlFileInfoStore.RefreshFileStats` (file_info_store.go:815): `file_stats` under
+    /// an `analyticsContext` of `timeout_seconds`.
+    fn refresh_file_stats(
+        &self,
+        timeout_seconds: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlFileInfoStore.Save` (file_info_store.go:113) — the row an upload creates.
     ///
     /// `PreSave`, `IsValid` (returned as [`StoreError::Invalid`], which the app layer passes
@@ -205,6 +212,17 @@ impl SqlFileInfoStore {
 }
 
 impl FileInfoStore for SqlFileInfoStore {
+    #[tracing::instrument(skip(self))]
+    async fn refresh_file_stats(&self, timeout_seconds: i64) -> Result<(), StoreError> {
+        crate::post_store::refresh_materialized_view(
+            &self.pool,
+            "file_stats",
+            timeout_seconds,
+            "error refreshing materialized view file_stats",
+        )
+        .await
+    }
+
     #[tracing::instrument(skip_all, fields(file_id, name = %info.name))]
     async fn save(&self, mut info: FileInfo) -> Result<FileInfo, StoreError> {
         info.pre_save();

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE propertyvalues AS p\n               SET value = v.value::jsonb,\n                   deleteat = v.deleteat,\n                   updateat = $5,\n                   updatedby = v.updatedby\n              FROM unnest($1::text[], $2::text[], $3::bigint[], $4::text[])\n                   AS v(id, value, deleteat, updatedby)\n             WHERE p.id = v.id\n               AND ($6 = '' OR p.groupid = $6)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Int8Array",
+        "TextArray",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bef80962e835f73173e5f429a720a400794c7127a2a84ba4f7604b6c155695e2"
+}

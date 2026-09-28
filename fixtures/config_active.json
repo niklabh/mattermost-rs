@@ -48,10 +48,18 @@
     "LinkMetadataTimeoutMilliseconds": 5000,
     "RestrictSystemAdmin": false
   },
+  "ExportSettings": {
+    "Directory": "./export"
+  },
   "FileSettings": {
+    "DedicatedExportStore": false,
+    "Directory": "./data/",
     "DriverName": "local",
     "EnableFileAttachments": true,
     "EnablePublicLink": false,
+    "ExportDirectory": "./data/",
+    "ExportDriverName": "local",
+    "InitialFont": "nunito-bold.ttf",
     "MaxFileSize": 104857600,
     "MaxImageResolution": 33177600
   },
@@ -70,6 +78,9 @@
   "ImageProxySettings": {
     "Enable": false
   },
+  "ImportSettings": {
+    "Directory": "./import"
+  },
   "LdapSettings": {
     "Enable": false,
     "PictureAttribute": "",
@@ -87,11 +98,22 @@
   "MessageExportSettings": {
     "DownloadExportResults": false
   },
+  "MetricsSettings": {
+    "Enable": false,
+    "EnableClientMetrics": true
+  },
   "Office365Settings": {
     "Enable": false
   },
   "OpenIdSettings": {
     "Enable": false
+  },
+  "PasswordSettings": {
+    "Lowercase": false,
+    "MinimumLength": 8,
+    "Number": false,
+    "Symbol": false,
+    "Uppercase": false
   },
   "PluginSettings": {
     "AllowInsecureDownloadURL": false,
@@ -137,9 +159,14 @@
     "AllowSyncedDrafts": true,
     "AllowedUntrustedInternalConnections": "",
     "BurnOnReadDurationSeconds": 600,
+    "CollapsedThreads": "always_on",
+    "EnableAPIChannelDeletion": false,
+    "EnableAPITeamDeletion": false,
     "EnableAPITriggerAdminNotifications": false,
     "EnableAPIUserDeletion": false,
+    "EnableBotAccountCreation": false,
     "EnableBurnOnRead": true,
+    "EnableChannelViewedMessages": true,
     "EnableCommands": true,
     "EnableCustomEmoji": true,
     "EnableCustomGroups": true,
@@ -159,18 +186,22 @@
     "EnablePostSearch": true,
     "EnablePostUsernameOverride": false,
     "EnableTesting": false,
+    "EnableUserAccessTokens": false,
     "EnableUserStatuses": true,
     "EnforceMultifactorAuthentication": false,
     "ExperimentalEnableAuthenticationTransfer": true,
+    "ExperimentalEnableDefaultChannelLeaveJoinMessages": true,
     "ExperimentalEnableHardenedMode": false,
     "ExperimentalStrictCSRFEnforcement": false,
     "ExtendSessionLengthWithActivity": false,
     "GoroutineHealthThreshold": -1,
     "MaximumLoginAttempts": 10,
     "MaximumPersonalAccessTokenLifetimeDays": 0,
+    "MaximumURLLength": 2048,
     "OutgoingIntegrationRequestsTimeout": 30,
     "PostEditTimeLimit": -1,
     "PostPriority": true,
+    "RefreshPostStatsRunTime": "00:00",
     "RestrictLinkPreviews": "",
     "ScheduledPosts": true,
     "SessionIdleTimeoutInMinutes": 43200,
@@ -181,17 +212,27 @@
     "SessionLengthWebInDays": 180,
     "SessionLengthWebInHours": 4320,
     "SiteURL": "",
-    "UniqueEmojiReactionLimitPerPost": 50
+    "TerminateSessionsOnPasswordChange": false,
+    "ThreadAutoFollow": true,
+    "TrustedProxyIPHeader": [],
+    "UniqueEmojiReactionLimitPerPost": 50,
+    "WebserverMode": "gzip"
   },
   "SqlSettings": {
+    "AnalyticsQueryTimeout": 300,
     "DisableDatabaseSearch": false
   },
   "TeamSettings": {
+    "EnableChannelCategorySorting": true,
     "EnableCustomUserStatuses": true,
+    "EnableOpenServer": false,
     "EnableUserCreation": true,
     "EnableUserDeactivation": false,
+    "ExperimentalDefaultChannels": [],
     "LockProfileFieldsForEmailUsers": "none",
+    "MaxChannelsPerTeam": 2000,
     "MaxNotificationsPerChannel": 1000,
+    "MaxUsersPerTeam": 50,
     "RestrictCreationToDomains": "",
     "RestrictDirectMessage": "any",
     "UserStatusAwayTimeout": 300

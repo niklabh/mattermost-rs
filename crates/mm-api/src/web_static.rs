@@ -324,6 +324,78 @@ fn classify(setup: &StaticSetup, method: &Method, path: &str, raw_query: &str) -
     Route::Root
 }
 
+/// What kind of `web.Handler` Go's root router hands a request to, when it is one at all — the
+/// question `ServeHTTP`'s per-user rate limit (web/handlers.go:288) turns on, for every request
+/// this fallback sees, whether it is answered here or forwarded. [D-1150], [D-1151].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HandlerKind {
+    /// `w.APIHandler` and its siblings: the routes `web.InitOAuth`, `InitSaml`,
+    /// `InitMagicLink` and `InitWebhooks` register, and `GET /manualtest`.
+    Api,
+    /// `NewStaticHandler(root)`, the catch-all — `IsStatic`.
+    Static,
+}
+
+/// `{service:[A-Za-z0-9]+}`.
+fn is_service(segment: &str) -> bool {
+    !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// [`HandlerKind`] for a decoded, clean path, in gorilla's match order: the api4 tree (its routes
+/// are the API router's, and its catch-all is a bare `HandlerFunc`), the plugin subrouter, the
+/// static files, `robots.txt` and `unsupported_browser.js` (plain handlers), then the web routes by
+/// method (web/oauth.go:33-53, saml.go:22-23, magic_link.go:15, webhook.go:21-22, and api4's
+/// `/manualtest`), and last the catch-all for `GET` and `HEAD` — which is also where a web route's
+/// path lands under a method that route does not take.
+pub(crate) fn go_handler_kind(
+    setup: &StaticSetup,
+    method: &Method,
+    path: &str,
+) -> Option<HandlerKind> {
+    let rel = if setup.subpath == "/" {
+        path
+    } else if setup.subpath.is_empty() {
+        return None;
+    } else {
+        path.strip_prefix(setup.subpath.as_str())
+            .filter(|rest| rest.starts_with('/'))?
+    };
+    if rel.starts_with("/api/v4/") || crate::plugin_requests::plugin_route(rel).is_some() {
+        return None;
+    }
+    let get = *method == Method::GET;
+    let post = *method == Method::POST;
+    let segments: Vec<&str> = rel.split('/').skip(1).collect();
+    let api = match segments.as_slice() {
+        ["login", "one_time_link"] => get,
+        ["login", "sso", "saml"] => get || post,
+        ["oauth", "authorize"] => get || post,
+        ["oauth", "deauthorize"] | ["oauth", "access_token"] | ["oauth", "intune"] => post,
+        [
+            "oauth",
+            service,
+            "complete" | "login" | "mobile_login" | "signup",
+        ] => get && is_service(service),
+        ["api", "v3", "oauth", service, "complete"]
+        | ["signup", service, "complete"]
+        | ["login", service, "complete"] => get && is_service(service),
+        ["hooks", "commands", id] | ["hooks", id] => post && is_service(id),
+        ["manualtest"] => get && setup.enable_testing,
+        _ => get && rel.starts_with("/.well-known/oauth-authorization-server"),
+    };
+    if api {
+        return Some(HandlerKind::Api);
+    }
+    if setup.webserver_mode == "disabled"
+        || rel.starts_with("/static/")
+        || rel == "/robots.txt"
+        || rel == "/unsupported_browser.js"
+    {
+        return None;
+    }
+    (get || *method == Method::HEAD).then_some(HandlerKind::Static)
+}
+
 /// `/login/{service:[A-Za-z0-9]+}/complete` and its `/signup/` twin (web/oauth.go:52-53).
 fn is_oauth_complete(rel: &str, prefix: &str) -> bool {
     rel.strip_prefix(prefix)
@@ -342,7 +414,7 @@ fn with_query(path: &str, raw_query: &str) -> String {
 }
 
 /// Port of gorilla's `cleanPath` (mux.go:464): `path.Clean`, with a trailing slash put back.
-fn mux_clean_path(p: &str) -> String {
+pub(crate) fn mux_clean_path(p: &str) -> String {
     if p.is_empty() {
         return "/".to_owned();
     }
@@ -390,6 +462,86 @@ pub async fn fallback(State(state): State<AppState>, request: Request) -> Respon
         return proxy::forward_to_go(State(state), request).await;
     };
     let route = classify(setup, request.method(), &path, &url.raw_query);
+    let (parts, body) = request.into_parts();
+
+    // `ServeHTTP`'s per-user step, for a request Go hands to a `web.Handler` — counted here
+    // whether this server answers it or forwards it, so that this server's store is the one that
+    // decides ([D-1150], [D-1151]); Go's sees a subset and never refuses first. It follows
+    // `basicSecurityChecks`, so an over-long URL is not counted.
+    let kind = go_handler_kind(setup, &parts.method, &path);
+    let verdict = match kind {
+        Some(kind) if crate::ratelimit::per_user_enabled(&state).await => {
+            per_user_step(&state, setup, kind, &raw_target, &parts).await
+        }
+        _ => None,
+    };
+    let verdict = match verdict {
+        Some(Ok(verdict)) => Some(verdict),
+        Some(Err(refusal)) => return refusal,
+        None => None,
+    };
+    let request = Request::from_parts(parts, body);
+    // Cloned (an `Arc` bump) because `setup` borrows the original for the call.
+    let mut response =
+        fallback_route(state.clone(), setup, route, request, url, raw_target, path).await;
+    if let Some(verdict) = verdict {
+        crate::ratelimit::append_verdict(&mut response, &verdict);
+    }
+    response
+}
+
+/// The per-user step for a request of `kind`: `None` when it does not run, the verdict when it
+/// allows, and the refusal — dressed as `ServeHTTP` dresses it for that kind — when it does not.
+async fn per_user_step(
+    state: &AppState,
+    setup: &StaticSetup,
+    kind: HandlerKind,
+    raw_target: &str,
+    parts: &Parts,
+) -> Option<Result<crate::ratelimit::Verdict, Response>> {
+    let config = mm_app::config::load_model_config(state.app.store().config())
+        .await
+        .map_err(|err| tracing::warn!(error = %err, "could not read the configuration"))
+        .ok()?;
+    let max_url = config.service_settings.maximum_url_length.unwrap_or(2048);
+    if i64::try_from(raw_target.len()).unwrap_or(i64::MAX) > max_url {
+        return None;
+    }
+    let verdict = crate::ratelimit::per_user_verdict(state, parts).await?;
+    if !verdict.limited {
+        return Some(Ok(verdict));
+    }
+    let request_id = mm_model::utils::new_id();
+    let refusal = match kind {
+        HandlerKind::Static => {
+            let headers = static_handler_headers(state, setup, &config, &request_id)
+                .await
+                .unwrap_or_default();
+            crate::ratelimit::per_user_static_refusal(&verdict, headers)
+        }
+        HandlerKind::Api => {
+            let mut refusal = crate::ratelimit::per_user_refusal(&verdict);
+            if let Some(headers) = serve_http_headers(state, &config, &request_id).await {
+                for (name, value) in &headers {
+                    refusal.headers_mut().insert(name.clone(), value.clone());
+                }
+            }
+            refusal
+        }
+    };
+    Some(Err(refusal))
+}
+
+/// [`fallback`] once the per-user step has run: the route's own answer.
+async fn fallback_route(
+    state: AppState,
+    setup: &StaticSetup,
+    route: Route,
+    request: Request,
+    url: GoUrl,
+    raw_target: String,
+    path: String,
+) -> Response {
     // `InitStatic` is skipped when the web server is disabled; the plugin routes are not
     // (they are registered by `NewChannels`).
     if setup.webserver_mode == "disabled" && !matches!(route, Route::Plugin(_)) {
@@ -434,7 +586,7 @@ pub async fn fallback(State(state): State<AppState>, request: Request) -> Respon
 
 /// Gorilla's redirect to the clean path: `Location` and a 301, nothing else — it runs before any
 /// handler, so none of their headers are set.
-fn mux_clean_redirect(url: &GoUrl, cleaned: String, method: &Method) -> Response {
+pub(crate) fn mux_clean_redirect(url: &GoUrl, cleaned: String, method: &Method) -> Response {
     let mut target = url.clone();
     target.path = cleaned.into_bytes();
     let mut headers = HeaderMap::new();
@@ -447,7 +599,7 @@ fn mux_clean_redirect(url: &GoUrl, cleaned: String, method: &Method) -> Response
 /// An empty body framed as `net/http` frames it: `Content-Length: 0` on a `GET` whose handler
 /// wrote nothing, **no length at all** on a `HEAD` (chunkWriter.writeHeader's
 /// `!isHEAD || len(p) > 0`).
-fn empty_body(method: &Method) -> Body {
+pub(crate) fn empty_body(method: &Method) -> Body {
     if *method == Method::HEAD {
         Body::from_stream(futures_util::stream::empty::<
             Result<Bytes, std::convert::Infallible>,
@@ -890,18 +1042,8 @@ async fn root(
         Preamble::Forward | Preamble::Error(_) => return None,
     }
 
-    let mut headers = serve_http_headers(state, &config, &mm_model::utils::new_id()).await?;
-    set_header(&mut headers, "x-frame-options", "SAMEORIGIN");
-    set_header(
-        &mut headers,
-        "content-security-policy",
-        &format!(
-            "frame-ancestors 'self' {}; script-src 'self'{}{}",
-            service.frame_ancestors.as_deref().unwrap_or_default(),
-            setup.csp_sha_directive,
-            generate_dev_csp(service.developer_flags.as_deref().unwrap_or_default()),
-        ),
-    );
+    let mut headers =
+        static_handler_headers(state, setup, &config, &mm_model::utils::new_id()).await?;
 
     // `root` itself.
     let user_agent = parts
@@ -996,7 +1138,7 @@ pub(crate) async fn session_preamble(state: &AppState, parts: &Parts) -> Preambl
     match state.app.get_session(&token).await {
         Err(err) if err.status_code == 500 => Preamble::Error(err),
         Err(_) => Preamble::Continue,
-        Ok(_) if state.app.config().feature_flag_session_attributes => Preamble::Forward,
+        Ok(_) if state.app.config().feature_flags.session_attributes => Preamble::Forward,
         Ok(session) if !session.is_oauth && location == crate::auth::TokenLocation::QueryString => {
             Preamble::Error(mm_model::utils::AppError::boxed(
                 "ServeHTTP",
@@ -1008,6 +1150,30 @@ pub(crate) async fn session_preamble(state: &AppState, parts: &Parts) -> Preambl
         }
         Ok(_) => Preamble::Continue,
     }
+}
+
+/// [`serve_http_headers`] plus the `IsStatic` pair `ServeHTTP` adds for `NewStaticHandler`
+/// (web/handlers.go:245-257): `X-Frame-Options` and the content security policy.
+async fn static_handler_headers(
+    state: &AppState,
+    setup: &StaticSetup,
+    config: &mm_model::config::Config,
+    request_id: &str,
+) -> Option<HeaderMap> {
+    let service = &config.service_settings;
+    let mut headers = serve_http_headers(state, config, request_id).await?;
+    set_header(&mut headers, "x-frame-options", "SAMEORIGIN");
+    set_header(
+        &mut headers,
+        "content-security-policy",
+        &format!(
+            "frame-ancestors 'self' {}; script-src 'self'{}{}",
+            service.frame_ancestors.as_deref().unwrap_or_default(),
+            setup.csp_sha_directive,
+            generate_dev_csp(service.developer_flags.as_deref().unwrap_or_default()),
+        ),
+    );
+    Some(headers)
 }
 
 /// The headers `ServeHTTP` sets on every response once `basicSecurityChecks` has passed
@@ -1145,7 +1311,7 @@ fn is_api_call(path: &str, subpath: &str) -> bool {
 /// Its message is the one `NewAppError` set at construction, which is `i18n.T`: the
 /// **`DefaultServerLocale`** translation, not the caller's. This page never sees an
 /// `Accept-Language`, because `handleContextError` is exactly what it does not go through.
-fn handle_404(server_locale: &str, mut headers: HeaderMap, path: &str) -> Response {
+pub(crate) fn handle_404(server_locale: &str, mut headers: HeaderMap, path: &str) -> Response {
     let mut err =
         mm_model::utils::AppError::new("Handle404", "api.context.404.app_error", None, "", 404);
     if let Some(bundle) = mm_app::i18n::loaded() {
@@ -1202,6 +1368,97 @@ mod tests {
             enable_testing: false,
             host_plugins: false,
         }
+    }
+
+    /// Which requests Go hands to a `web.Handler`, and which kind — every web route by method, the
+    /// catch-all for `GET`/`HEAD` (including a web route's path under a method it does not take),
+    /// and none for the api4 tree, the plugin subrouter and the three plain handlers.
+    #[test]
+    fn go_handler_kind_follows_gorillas_match_order() {
+        use HandlerKind::{Api, Static};
+        let s = setup("/");
+        let (get, head, post, put) = (Method::GET, Method::HEAD, Method::POST, Method::PUT);
+        for (method, path, want) in [
+            (&get, "/", Some(Static)),
+            (&head, "/", Some(Static)),
+            (&post, "/", None),
+            (&get, "/team/channels/town-square", Some(Static)),
+            (&get, "/api/v4", Some(Static)),
+            (&get, "/api/v5/x", Some(Static)),
+            (&get, "/api/v4/users/me", None),
+            (&get, "/api/v4/oauth_test", None),
+            (&get, "/plugins/com.x/y", None),
+            (&post, "/plugins/com.x", None),
+            (&get, "/plugins/", Some(Static)),
+            (&get, "/static/main.js", None),
+            (&get, "/static", Some(Static)),
+            (&get, "/robots.txt", None),
+            (&get, "/unsupported_browser.js", None),
+            (&get, "/login/one_time_link", Some(Api)),
+            (&post, "/login/one_time_link", None),
+            (&get, "/login/sso/saml", Some(Api)),
+            (&post, "/login/sso/saml", Some(Api)),
+            (&put, "/login/sso/saml", None),
+            (&get, "/oauth/authorize", Some(Api)),
+            (&post, "/oauth/authorize", Some(Api)),
+            (&post, "/oauth/deauthorize", Some(Api)),
+            (&get, "/oauth/deauthorize", Some(Static)),
+            (&post, "/oauth/access_token", Some(Api)),
+            (&get, "/oauth/access_token", Some(Static)),
+            (&post, "/oauth/intune", Some(Api)),
+            (&get, "/oauth/gitlab/login", Some(Api)),
+            (&get, "/oauth/gitlab/mobile_login", Some(Api)),
+            (&get, "/oauth/git-lab/login", Some(Static)),
+            (&head, "/oauth/gitlab/login", Some(Static)),
+            (&get, "/oauth/gitlab/login/", Some(Static)),
+            (&get, "/api/v3/oauth/gitlab/complete", Some(Api)),
+            (&get, "/signup/gitlab/complete", Some(Api)),
+            (&get, "/login/gitlab/complete", Some(Api)),
+            (&post, "/hooks/abc", Some(Api)),
+            (&post, "/hooks/commands/abc", Some(Api)),
+            (&post, "/hooks/a_b", None),
+            (&get, "/hooks/abc", Some(Static)),
+            (&get, "/.well-known/oauth-authorization-server", Some(Api)),
+            (&get, "/.well-known/oauth-authorization-serverx", Some(Api)),
+            (
+                &head,
+                "/.well-known/oauth-authorization-server",
+                Some(Static),
+            ),
+            (&get, "/manualtest", Some(Static)),
+        ] {
+            assert_eq!(go_handler_kind(&s, method, path), want, "{method} {path}");
+        }
+        let testing = StaticSetup {
+            enable_testing: true,
+            ..setup("/")
+        };
+        assert_eq!(go_handler_kind(&testing, &get, "/manualtest"), Some(Api));
+        assert_eq!(
+            go_handler_kind(&testing, &head, "/manualtest"),
+            Some(Static)
+        );
+        let disabled = StaticSetup {
+            webserver_mode: "disabled".to_owned(),
+            ..setup("/")
+        };
+        assert_eq!(go_handler_kind(&disabled, &get, "/"), None);
+        assert_eq!(
+            go_handler_kind(&disabled, &get, "/oauth/gitlab/login"),
+            Some(Api)
+        );
+        let sub = setup("/mm");
+        assert_eq!(go_handler_kind(&sub, &get, "/mm/"), Some(Static));
+        assert_eq!(
+            go_handler_kind(&sub, &get, "/mm/oauth/authorize"),
+            Some(Api)
+        );
+        assert_eq!(
+            go_handler_kind(&sub, &get, "/oauth/authorize"),
+            None,
+            "the redirect"
+        );
+        assert_eq!(go_handler_kind(&setup(""), &get, "/"), None);
     }
 
     #[test]
@@ -1478,6 +1735,26 @@ mod go_parity {
                 "{ua}"
             );
         }
+    }
+
+    /// `GetStaticScriptHashes(subpath, cfg.FeatureFlags.EnableConcurrentReact)`
+    /// (web/handlers.go:58): the flag, read from the running config (`load_model_config`), picks
+    /// which loader script's hash the CSP carries.
+    #[test]
+    fn the_csp_hash_follows_the_concurrent_react_flag() {
+        let setup = |on: bool| {
+            let mut flags = mm_model::feature_flags::FeatureFlags::default();
+            flags.set_defaults();
+            flags.enable_concurrent_react = on;
+            let config: mm_model::config::Config = serde_json::from_value(serde_json::json!({
+                "FeatureFlags": serde_json::to_value(&flags).unwrap(),
+            }))
+            .unwrap();
+            StaticSetup::from_config(&config, "/".to_owned()).csp_sha_directive
+        };
+        assert_eq!(setup(true), get_static_script_hashes("/", true));
+        assert_eq!(setup(false), get_static_script_hashes("/", false));
+        assert_ne!(setup(true), setup(false));
     }
 
     #[test]

@@ -12,6 +12,8 @@ mm-model.workspace = true
 mm-plugin.workspace = true
 # `gobwire::Interface`: the plugin API's log methods read the `[]any` pairs a plugin sends.
 gobwire = { path = "../gobwire" }
+# lib/pq's connection, which the plugin database driver answers with.
+gopq.workspace = true
 # Go's `html/template`, which every e-mail body is rendered with (`crate::email`).
 gotemplate = { path = "../gotemplate" }
 tar.workspace = true
@@ -19,10 +21,13 @@ flate2.workspace = true
 mm-markdown.workspace = true
 # Byte-exact ports of Go's image codecs and the imaging libraries (BSD-3-Clause AND MIT).
 goimage.workspace = true
+gofont.workspace = true
 # Byte-exact ports of net/mail, net/smtp, mime and go-mail's writer (MIT AND BSD-3-Clause), and
 # of jaytaylor/html2text — what `mail.rs` (platform/shared/mail) drives.
 gomail = { path = "../gomail" }
 gohtml2text = { path = "../gohtml2text" }
+goqr = { path = "../goqr" }
+sha1.workspace = true
 # Byte-exact port of goldmark (MIT): push-notification text and notification e-mail HTML
 # (`crate::markdown_utils`).
 gogoldmark = { path = "../gogoldmark" }

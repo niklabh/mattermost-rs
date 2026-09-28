@@ -341,7 +341,8 @@ mod go_parity {
         serde_json::from_str(include_str!("../../../fixtures/behaviour_draft.json")).unwrap()
     }
 
-    /// The one document Go accepts and we reject: `null` into a scalar. See [D-057].
+    /// The one document Go accepts and serde's derive alone rejects: `null` into a scalar.
+    /// [D-057]; see `a_null_scalar_decodes_as_go_decodes_it`.
     const NULL_SCALAR_ONLY: &str = "null_scalars";
 
     /// Rebuilds a case's draft, substituting the padding the fixture describes rather than
@@ -418,9 +419,10 @@ mod go_parity {
         assert_eq!(checked, cases.len() - 1, "every case but the null one");
     }
 
-    /// [D-057]: Go leaves a scalar untouched on `null`, serde rejects the document.
+    /// [D-057], closed: Go leaves a scalar untouched on `null`. serde's derive alone still rejects
+    /// the document; the body decoder, which is what a handler uses, agrees with Go.
     #[test]
-    fn a_null_scalar_is_accepted_by_go_and_rejected_here() {
+    fn a_null_scalar_decodes_as_go_decodes_it() {
         let oracle = oracle();
         let case = oracle["wire"]
             .as_array()
@@ -431,14 +433,12 @@ mod go_parity {
 
         let doc = case["in"].as_str().unwrap();
         assert!(case["err"].is_null(), "Go rejected {doc}");
+        assert!(serde_json::from_str::<Draft>(doc).is_err(), "the premise");
+        let ours: Draft = crate::utils::decode_one_from_json(doc.as_bytes()).unwrap();
         assert_eq!(
+            go_json_marshal(&ours).unwrap(),
             case["out"].as_str().unwrap(),
-            go_json_marshal(&Draft::default()).unwrap(),
-            "Go decoded it to the zero value"
-        );
-        assert!(
-            serde_json::from_str::<Draft>(doc).is_err(),
-            "{doc}: we accepted it, so [D-057] can be closed"
+            "{doc}"
         );
     }
 

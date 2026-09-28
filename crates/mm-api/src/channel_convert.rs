@@ -46,16 +46,13 @@ pub async fn convert_group_message_to_channel(
         .await
         .unwrap_or_default();
     // `json.NewDecoder(r.Body).Decode(&ptr)`: only an object decodes into the struct — a
-    // `null` leaves the pointer nil, and a list or a scalar is a decode error — and serde would
-    // otherwise accept `[]` as an all-default struct.
-    let conversion = match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(value @ serde_json::Value::Object(_)) => {
-            match serde_json::from_value::<GroupMessageConversionRequestBody>(value) {
-                Ok(conversion) => conversion,
-                Err(_) => return ApiError::invalid_param("body").into_response(),
-            }
-        }
-        _ => return ApiError::invalid_param("body").into_response(),
+    // `null` leaves the pointer nil, and a list or a scalar is a decode error.
+    let conversion = match mm_model::utils::decode_one_from_json::<
+        Option<GroupMessageConversionRequestBody>,
+    >(&bytes)
+    {
+        Ok(Some(conversion)) => conversion,
+        Ok(None) | Err(_) => return ApiError::invalid_param("body").into_response(),
     };
 
     let user = match state.app.get_user(&session.0.user_id).await {

@@ -270,9 +270,9 @@ pub async fn create_scheme(
         }
     };
 
-    // `json.NewDecoder(r.Body).Decode(&scheme)` — a `model.Scheme` with every field optional, so
-    // `{}` decodes and only malformed JSON fails.
-    if serde_json::from_slice::<mm_model::scheme::Scheme>(&bytes).is_err() {
+    // `var scheme model.Scheme; json.NewDecoder(r.Body).Decode(&scheme)` (scheme.go:25) — a value
+    // with every field optional, so `{}` and `null` decode and an array or a scalar does not.
+    if mm_model::utils::decode_one_value_from_json::<mm_model::scheme::Scheme>(&bytes).is_err() {
         return ApiError::invalid_param("scheme").into_response();
     }
 
@@ -310,7 +310,9 @@ pub async fn patch_scheme(
             return ApiError::invalid_param("scheme").into_response();
         }
     };
-    if serde_json::from_slice::<serde_json::Value>(&bytes).is_err() {
+    // `var patch model.SchemePatch; Decode` (scheme.go:192): a value, so `null` is an empty patch.
+    if mm_model::utils::decode_one_value_from_json::<mm_model::scheme::SchemePatch>(&bytes).is_err()
+    {
         // `SetInvalidParamWithErr("scheme", …)` — note the parameter is `scheme`, not
         // `scheme_patch`, even though the type is `model.SchemePatch`.
         return ApiError::invalid_param("scheme").into_response();

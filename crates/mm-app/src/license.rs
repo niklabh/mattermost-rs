@@ -530,6 +530,30 @@ impl App {
         Ok(state)
     }
 
+    /// Whether Go's shared-channel sync service is running, judged from the licence and config
+    /// rather than read: `startInterClusterServices` (app/server.go:674) starts it only under a
+    /// licence that `HasSharedChannels` **and** `ConnectedWorkspacesSettings.EnableSharedChannels`
+    /// on. Its remote-cluster prerequisite adds nothing — `HasSharedChannels` implies
+    /// `HasRemoteClusterService`, and the shared-channel setting satisfies that service's own
+    /// config gate — so those two facts are the whole condition.
+    ///
+    /// When it is true, whatever the service does — a sync task queued in the Go process — is
+    /// state only Go holds, and the caller forwards. When it is false, `GetSharedChannelService()`
+    /// is nil and Go's `if scs != nil` skips the call: there is nothing to port.
+    ///
+    /// Go decides at startup and on a licence change; this reads the current licence and config,
+    /// so a setting flipped on a running Go without a restart reads as running here.
+    #[tracing::instrument(skip_all, fields(running))]
+    pub async fn shared_channel_service_running(&self) -> AppResult<bool> {
+        let running = self
+            .license()
+            .await?
+            .is_some_and(|license| license.has_shared_channels())
+            && self.config().enable_shared_channels;
+        tracing::Span::current().record("running", running);
+        Ok(running)
+    }
+
     /// Port of `Server.ClientLicense()` (platform/license.go:303): the full client map.
     pub async fn client_license(&self) -> AppResult<BTreeMap<String, String>> {
         Ok(client_license(self.license().await?.as_deref()))

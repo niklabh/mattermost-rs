@@ -142,6 +142,8 @@ async fn main() -> anyhow::Result<()> {
     // set while Go runs them too (see `mm_app::plugins`). Started before the config poll, whose
     // reloads drive it from then on, as Go's config listeners do.
     app = app.with_plugin_host(mm_app::plugins::plugin_host_from_env());
+    // `NewChannels`' guard-cache load (app/channels.go:244), before the plugins start.
+    app.load_guard_cache().await;
     if app.plugin_host().hosted() {
         let config = app.config();
         tracing::info!(
@@ -261,9 +263,14 @@ async fn main() -> anyhow::Result<()> {
     if job_workers_enabled() {
         let app = app.clone();
         let workers = std::sync::Arc::new(mm_app::job_runtime::registered_workers());
-        let watcher = mm_app::job_runtime::Watcher::new(
-            mm_app::job_runtime::DEFAULT_WATCHER_POLLING_INTERVAL_MS,
-        );
+        // `MM_API_JOB_WATCHER_INTERVAL_MS` lowers the poll for the parity suite, which needs
+        // this server's watcher to claim a job before the Go server's fifteen-second poll does.
+        // Go's own interval is a `var` "so tests can lower" it, for the same reason.
+        let interval = std::env::var("MM_API_JOB_WATCHER_INTERVAL_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(mm_app::job_runtime::DEFAULT_WATCHER_POLLING_INTERVAL_MS);
+        let watcher = mm_app::job_runtime::Watcher::new(interval);
         tracing::info!(
             workers = workers.len(),
             "job workers enabled; the watcher will poll Jobs for pending rows"

@@ -377,57 +377,30 @@ mod go_parity {
         let cases = oracle["decode"].as_array().unwrap();
         assert_eq!(cases.len(), 20, "the decode corpus changed size");
 
-        // `null` into a **bool** is [D-057]: Go leaves `false`, we reject the document. `null`
-        // into `page` is not — that field is a pointer in Go too, so `Option<i64>` matches it.
-        const NULL_SCALAR: &str = "bool_null";
-        // `null` as an element of `[]string`: Go stores `""`, we reject. See [D-075].
-        const NULL_ELEMENT: &str = "team_ids_null_element";
-        // Go folds case against the tag; the tag here already carries the underscores ([D-040]).
-        const FOLDED_KEY: &str = "folded_key";
+        // Three rows serde's derive alone gets wrong, and the body decoder gets right: `null` into
+        // a bool ([D-057]), `null` as a `[]string` element ([D-075]), a folded key ([D-040]).
+        const SERDE_ALONE_DIFFERS: [&str; 3] = ["bool_null", "team_ids_null_element", "folded_key"];
 
         for case in cases {
             let name = case["name"].as_str().unwrap();
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let got = serde_json::from_str::<ChannelSearch>(doc);
+            let got = crate::utils::decode_one_from_json::<ChannelSearch>(doc.as_bytes());
             let go_ok = case["ok"].as_bool().unwrap();
 
-            if name == NULL_SCALAR {
-                assert!(go_ok && !case["public"].as_bool().unwrap());
-                assert!(got.is_err(), "{name}: expected the [D-057] divergence");
-                continue;
-            }
-
-            if name == NULL_ELEMENT {
-                assert!(go_ok, "{name}: Go used to accept it");
-                assert_eq!(
-                    case["team_ids_len"].as_u64().unwrap(),
-                    1,
-                    "Go kept the slot"
-                );
+            if SERDE_ALONE_DIFFERS.contains(&name) {
+                let plain = serde_json::from_str::<ChannelSearch>(doc);
+                let same = match (&plain, &got) {
+                    (Ok(plain), Ok(got)) => {
+                        go_json_marshal(plain).unwrap() == go_json_marshal(got).unwrap()
+                    }
+                    _ => false,
+                };
                 assert!(
-                    case["json_after"]
-                        .as_str()
-                        .unwrap()
-                        .contains(r#""team_ids":[""]"#),
-                    "Go filled it with the empty string"
+                    !same,
+                    "{name}: the premise — serde's derive alone differs from Go"
                 );
-                assert!(got.is_err(), "{name}: expected the [D-075] divergence");
-                continue;
-            }
-
-            if name == FOLDED_KEY {
-                assert!(
-                    case["exclude_default_channels"].as_bool().unwrap(),
-                    "Go folded it"
-                );
-                let got = got.unwrap_or_else(|e| panic!("{name}: {e}"));
-                assert!(
-                    !got.exclude_default_channels,
-                    "{name}: expected the [D-040] divergence"
-                );
-                continue;
             }
 
             assert_eq!(got.is_ok(), go_ok, "{name}: {doc}");

@@ -325,11 +325,11 @@ mod go_parity {
         );
     }
 
-    /// `Audits` is `[]Audit`, so there is no [D-033] here — but `[null]` is still a divergence,
-    /// and a different one: Go builds a **zero-valued `Audit`** where a pointer slice would have
+    /// `Audits` is `[]Audit`, so there is no [D-033] here — but `[null]` is a divergence for
+    /// serde's derive alone, and a different one: Go builds a **zero-valued `Audit`** where a pointer slice would have
     /// stored nil. That is [D-075] widened from `[]string` to any non-pointer element.
     #[test]
-    fn a_null_element_becomes_a_zero_audit_in_go() {
+    fn a_null_element_becomes_a_zero_audit_as_in_go() {
         let oracle = oracle();
         let case = &oracle["null_element"];
         assert!(!case["panicked"].as_bool().unwrap());
@@ -350,7 +350,13 @@ mod go_parity {
 
         assert!(
             serde_json::from_str::<Audits>("[null]").is_err(),
-            "expected the documented [D-075] divergence"
+            "the premise"
+        );
+        // The body decoder builds the zero `Audit` Go builds ([D-075]).
+        let ours: Audits = crate::utils::decode_one_from_json(b"[null]").unwrap();
+        assert_eq!(
+            crate::utils::go_json_marshal(&ours).unwrap(),
+            case["json_after"].as_str().unwrap()
         );
     }
 }

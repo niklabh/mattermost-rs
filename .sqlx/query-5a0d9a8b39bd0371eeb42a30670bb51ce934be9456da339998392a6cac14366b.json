@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT postid AS \"post_id!\",\n                   createat AS \"create_at!\",\n                   lastsentat AS \"last_sent_at!\",\n                   deleteat AS \"delete_at!\",\n                   sentcount AS \"sent_count!\"\n              FROM persistentnotifications\n             WHERE deleteat = 0\n               AND createat <= $1\n               AND lastsentat <= $1\n               AND sentcount < $2\n             LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_sent_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "sent_count!",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5a0d9a8b39bd0371eeb42a30670bb51ce934be9456da339998392a6cac14366b"
+}

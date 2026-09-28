@@ -307,36 +307,13 @@ fn oauth_refusal(
 /// Everything else — a string, a number, a bool, an empty body, a field of the wrong type — is an
 /// error on both sides.
 fn decode_go_struct<T: serde::de::DeserializeOwned + Default>(bytes: &[u8]) -> Result<T, String> {
-    let first = serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<serde_json::Value>()
-        .next();
-
-    match first {
-        // Go's `Decode` on an empty body is `io.EOF`, which is still an error.
-        None => Err("EOF".to_owned()),
-        Some(Err(err)) => Err(err.to_string()),
-        Some(Ok(serde_json::Value::Null)) => Ok(T::default()),
-        Some(Ok(value @ serde_json::Value::Object(_))) => {
-            serde_json::from_value(value).map_err(|err| err.to_string())
-        }
-        Some(Ok(other)) => Err(format!(
-            "cannot unmarshal {} into a struct",
-            match other {
-                serde_json::Value::Array(_) => "array",
-                serde_json::Value::String(_) => "string",
-                serde_json::Value::Bool(_) => "bool",
-                _ => "number",
-            }
-        )),
-    }
+    mm_model::utils::decode_one_value_from_json(bytes).map_err(|err| err.to_string())
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507) — **every** decode failure is an empty map.
-///
-/// The three single-token routes read `token_id` out of this, so a body that is not an object, or
-/// not JSON at all, is indistinguishable from `{}` and lands on the empty-`token_id` path below.
-fn map_from_json(bytes: &[u8]) -> std::collections::HashMap<String, String> {
-    serde_json::from_slice(bytes).unwrap_or_default()
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
+fn map_from_json(bytes: &[u8]) -> mm_model::utils::StringMap {
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// Port of `createUserAccessToken` (user.go:2970) — `POST /api/v4/users/{user_id}/tokens`.
@@ -392,6 +369,7 @@ pub async fn create_user_access_token(
         return oauth_refusal(&session.0, &PERMISSION_CREATE_USER_ACCESS_TOKEN).into_response();
     }
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -412,6 +390,8 @@ pub async fn create_user_access_token(
     if access_token.description.is_empty() {
         return ApiError::invalid_param("description").into_response();
     }
+    // `c.LogAudit("")` between the description check and the three permission checks.
+    audit.log(&state.app, Some(&session.0), "").await;
 
     if !state
         .app
@@ -460,6 +440,13 @@ pub async fn create_user_access_token(
         Err(err) => return ApiError::from(err).into_response(),
     };
     tracing::Span::current().record("token_id", &token.id);
+    audit
+        .log(
+            &state.app,
+            Some(&session.0),
+            &format!("success - token_id={}", token.id),
+        )
+        .await;
 
     encoded_with_newline(&token, "createUserAccessToken")
 }
@@ -564,6 +551,9 @@ pub async fn revoke_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
+    // `c.LogAudit("")` on entry, before the OAuth refusal, so every answer carries it.
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
+    audit.log(&state.app, Some(&session.0), "").await;
     let bytes = body_or_empty(request).await;
     let token = match token_lifecycle(
         &state,
@@ -578,7 +568,16 @@ pub async fn revoke_user_access_token(
     };
 
     match state.app.revoke_user_access_token(&token).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("success - token_id={}", token.id),
+                )
+                .await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -593,6 +592,9 @@ pub async fn disable_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
+    // `c.LogAudit("")` on entry, before the OAuth refusal, so every answer carries it.
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
+    audit.log(&state.app, Some(&session.0), "").await;
     let bytes = body_or_empty(request).await;
     let token = match token_lifecycle(
         &state,
@@ -607,7 +609,16 @@ pub async fn disable_user_access_token(
     };
 
     match state.app.disable_user_access_token(&token).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("success - token_id={}", token.id),
+                )
+                .await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -624,6 +635,9 @@ pub async fn enable_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
+    // `c.LogAudit("")` on entry, before the OAuth refusal, so every answer carries it.
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
+    audit.log(&state.app, Some(&session.0), "").await;
     let bytes = body_or_empty(request).await;
     let token = match token_lifecycle(
         &state,
@@ -638,7 +652,16 @@ pub async fn enable_user_access_token(
     };
 
     match state.app.enable_user_access_token(&token.id).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("success - token_id={}", token.id),
+                )
+                .await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -679,6 +702,7 @@ pub async fn rotate_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let bytes = match read_body(request, "rotate_user_access_token").await {
         Ok(bytes) => bytes,
         Err(err) => return err.into_response(),
@@ -696,6 +720,8 @@ pub async fn rotate_user_access_token(
     if props.token_id.is_empty() {
         return ApiError::invalid_param("token_id").into_response();
     }
+    // `c.LogAudit("")` once the body has a `token_id`; the two 400s above write nothing.
+    audit.log(&state.app, Some(&session.0), "").await;
 
     if session.0.is_oauth {
         return oauth_refusal(&session.0, &PERMISSION_CREATE_USER_ACCESS_TOKEN).into_response();
@@ -779,7 +805,17 @@ pub async fn rotate_user_access_token(
         .rotate_user_access_token(token, props.expires_at)
         .await
     {
-        Ok(rotated) => encoded_with_newline(&rotated, "rotateUserAccessToken"),
+        Ok(rotated) => {
+            // The **new** token's id.
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("success - token_id={}", rotated.id),
+                )
+                .await;
+            encoded_with_newline(&rotated, "rotateUserAccessToken")
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -1017,19 +1053,27 @@ mod tests {
     /// indistinguishable from `{}` — and both land on the empty-`token_id` path, which is a 404
     /// rather than the 400 the unreachable `SetInvalidParam` would have given.
     #[test]
-    fn a_malformed_lifecycle_body_is_an_empty_map() {
-        for raw in [&b"[]"[..], b"\"x\"", b"", b"{\"token_id\": 5}", b"not json"] {
+    fn a_lifecycle_body_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
             assert!(
                 map_from_json(raw).is_empty(),
-                "{:?} must decode to an empty map",
+                "{}",
                 String::from_utf8_lossy(raw)
             );
         }
-
-        let props = map_from_json(br#"{"token_id":"j1x3z8ynqjbstd4c4k6qy1p7ph"}"#);
+        let mixed = map_from_json(br#"{"token_id":"j1x3z8ynqjbstd4c4k6qy1p7ph","n":5} trailing"#);
         assert_eq!(
-            props.get("token_id").map(String::as_str),
+            mixed.get("token_id").map(String::as_str),
             Some("j1x3z8ynqjbstd4c4k6qy1p7ph")
+        );
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
+        assert_eq!(
+            map_from_json(br#"{"token_id":7}"#)
+                .get("token_id")
+                .map(String::as_str),
+            Some("")
         );
     }
 

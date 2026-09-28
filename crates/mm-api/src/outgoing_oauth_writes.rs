@@ -28,7 +28,8 @@
 //! request the guard would govern) — is unreachable and not ported.
 //!
 //! `RequireOutgoingOAuthConnectionId` runs **after** the gate on the two id routes and the body
-//! is decoded after it, so no request shape reaches a 400 here. The audit records are log lines.
+//! is decoded after it, so no request shape reaches a 400 here. Each handler's first statement is
+//! `c.LogAudit("attempt")`, one `Audits` row on every answer; none reaches `"success"`.
 
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
@@ -58,7 +59,12 @@ fn interface_refusal(enable_outgoing_oauth_connections: bool) -> ApiError {
 
 /// `checkOutgoingOAuthConnectionWritePermissions` (:50) then the interface gate — the prefix
 /// every one of the four handlers shares, and on this build the whole of each.
-async fn gate(state: &AppState, session: &AuthenticatedSession) -> Response {
+async fn gate(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    audit: &crate::audit_log::AuditRequest,
+) -> Response {
+    audit.log(&state.app, Some(&session.0), "attempt").await;
     if !state
         .app
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OUTGOING_OAUTH_CONNECTIONS)
@@ -78,8 +84,9 @@ async fn gate(state: &AppState, session: &AuthenticatedSession) -> Response {
 pub async fn create_outgoing_oauth_connection(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
-    gate(&state, &session).await
+    gate(&state, &session, &audit).await
 }
 
 /// Port of `validateOutgoingOAuthConnectionCredentials` (:357) —
@@ -88,8 +95,9 @@ pub async fn create_outgoing_oauth_connection(
 pub async fn validate_outgoing_oauth_connection_credentials(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
-    gate(&state, &session).await
+    gate(&state, &session, &audit).await
 }
 
 /// Port of `updateOutgoingOAuthConnection` (:250) —
@@ -99,9 +107,10 @@ pub async fn update_outgoing_oauth_connection(
     State(state): State<AppState>,
     Path(connection_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     let _ = &connection_id;
-    gate(&state, &session).await
+    gate(&state, &session, &audit).await
 }
 
 /// Port of `deleteOutgoingOAuthConnection` (:316) —
@@ -111,9 +120,10 @@ pub async fn delete_outgoing_oauth_connection(
     State(state): State<AppState>,
     Path(connection_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     let _ = &connection_id;
-    gate(&state, &session).await
+    gate(&state, &session, &audit).await
 }
 
 #[cfg(test)]

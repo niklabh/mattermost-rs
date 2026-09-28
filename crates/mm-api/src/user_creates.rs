@@ -60,13 +60,10 @@ use crate::channels::{ME, require_id};
 use crate::error::ApiError;
 use crate::proxy;
 
-/// Port of `model.MapFromJSON` (utils.go:507) — every failure is an empty map.
-///
-/// The fourth copy of this two-liner in the crate, for the reason `auth_writes` states: several
-/// agents edit this workspace at once, and a shared two-line helper is a worse merge risk than a
-/// copy.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    serde_json::from_slice::<StringMap>(bytes).unwrap_or_default()
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// Port of `web.ReturnStatusOK` (web/web.go:127) — `{"status":"OK"}` with **no trailing
@@ -137,25 +134,10 @@ pub(crate) fn decode_go_struct<T: Default + serde::de::DeserializeOwned>(
     bytes: &[u8],
     parameter: &'static str,
 ) -> Result<T, ApiError> {
-    use serde::Deserialize;
-
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    let value = serde_json::Value::deserialize(&mut deserializer).map_err(|err| {
-        tracing::warn!(error = %err, parameter, "the body is not JSON");
+    mm_model::utils::decode_one_value_from_json(bytes).map_err(|err| {
+        tracing::warn!(error = %err, parameter, "the body did not decode");
         ApiError::invalid_param(parameter)
-    })?;
-
-    match value {
-        serde_json::Value::Null => Ok(T::default()),
-        serde_json::Value::Object(_) => serde_json::from_value(value).map_err(|err| {
-            tracing::warn!(error = %err, parameter, "the body did not decode");
-            ApiError::invalid_param(parameter)
-        }),
-        _ => {
-            tracing::warn!(parameter, "the body is not a JSON object");
-            Err(ApiError::invalid_param(parameter))
-        }
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -380,9 +362,11 @@ pub async fn send_verification_email(
 #[tracing::instrument(skip_all, fields(hardened, outcome))]
 pub async fn send_password_reset(
     State(state): State<AppState>,
-    _csrf: crate::auth::CsrfGuard,
+    // The token checks `CsrfGuard` made, plus the session a `"sent="` row is written under.
+    session: crate::auth_writes::OptionalSession,
     request: Request,
 ) -> Response {
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (_request, bytes) = match split_body(request, "email").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -435,8 +419,14 @@ pub async fn send_password_reset(
     // `c.App.GetSiteURL()` — the live `ServiceSettings.SiteURL`.
     let site_url = state.app.live_site_url().await.unwrap_or_default();
     match state.app.send_password_reset_to(&user, &site_url).await {
-        Ok(_sent) => {
+        Ok(sent) => {
             tracing::Span::current().record("outcome", "sent");
+            // `if sent { c.LogAudit("sent=" + email) }`.
+            if sent {
+                audit
+                    .log(&state.app, session.0.as_ref(), &format!("sent={email}"))
+                    .await;
+            }
             status_ok()
         }
         Err(err) => {
@@ -482,6 +472,7 @@ pub async fn verify_user_email_without_token(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     let user_id = if user_id == ME {
         session.0.user_id.clone()
@@ -513,6 +504,10 @@ pub async fn verify_user_email_without_token(
     if let Err(err) = state.app.verify_user_email(&user.id, &user.email).await {
         return ApiError::from(err).into_response();
     }
+    // `c.LogAudit("user verified")`, after the write.
+    audit
+        .log(&state.app, Some(&session.0), "user verified")
+        .await;
 
     state.app.sanitize_profile(&mut user, true);
 
@@ -581,15 +576,24 @@ mod tests {
     /// consequence is that `{"email": 7}` is an empty map here *and* on Go (`MapFromJSON` returns
     /// the zero map on any error), so both answer the missing-`email` 400.
     #[test]
-    fn a_mixed_object_decodes_to_an_empty_map() {
-        assert!(map_from_json(br#"{"email": 7}"#).is_empty());
-        assert!(map_from_json(b"not json").is_empty());
-        assert!(map_from_json(b"").is_empty());
+    fn a_mixed_object_keeps_its_string_members() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"email":"A@B.C","n":5} trailing"#);
+        assert_eq!(mixed.get("email").map(String::as_str), Some("A@B.C"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(br#"{"email":"A@B.C"}"#)
+            map_from_json(br#"{"email":7}"#)
                 .get("email")
                 .map(String::as_str),
-            Some("A@B.C")
+            Some("")
         );
     }
 

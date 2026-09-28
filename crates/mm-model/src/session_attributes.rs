@@ -224,11 +224,13 @@ impl<'de> Deserialize<'de> for SAField {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
         let attrs: SAAttrs = match value.get("attrs") {
-            Some(raw) => serde_json::from_value(raw.clone()).map_err(serde::de::Error::custom)?,
+            Some(raw) => crate::utils::from_value_go(raw).map_err(serde::de::Error::custom)?,
             None => SAAttrs::default(),
         };
+        // Go's rules on the buffered document too: an array is not a field, a `null` member or a
+        // folded key decodes as `encoding/json` decodes it.
         let property_field: PropertyField =
-            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+            crate::utils::from_value_go(&value).map_err(serde::de::Error::custom)?;
         Ok(SAField {
             property_field,
             attrs,
@@ -254,7 +256,8 @@ impl SAField {
             return Ok(sa);
         }
 
-        sa.attrs = serde_json::from_value(serde_json::Value::Object(map.clone()))
+        // Marshal then `json.Unmarshal` in Go (session_attributes.go:168): its decoding rules.
+        sa.attrs = crate::utils::from_value_go(&serde_json::Value::Object(map.clone()))
             .map_err(|e| SessionAttributeError::Attrs(e.to_string()))?;
 
         Ok(sa)

@@ -504,7 +504,7 @@ impl AppPluginApi {
     }
 
     /// Port of `PluginAPI.UpdateChannelSidebarCategories` (app/plugin_api.go:626). A change to a
-    /// category's `muted` leaves its channels' memberships alone here, as on REST ([D-224]).
+    /// category's `muted` mutes or unmutes its channels' memberships, as on REST.
     pub(super) async fn channels_update_channel_sidebar_categories(
         &self,
         args: api::Z_UpdateChannelSidebarCategoriesArgs,
@@ -643,6 +643,7 @@ impl AppPluginApi {
             .app
             .search_posts_for_user(
                 &HookContext::default(),
+                None,
                 &search.terms,
                 &args.b,
                 &args.a,

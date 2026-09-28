@@ -17,7 +17,8 @@
 //! `SqlBotStore.Get` rather than `GetBot`. Both are on the wire, so both are reproduced verbatim.
 
 use mm_model::bot::{
-    Bot, BotGetOptions, BotList, BotPatch, make_bot_not_found_error, user_from_bot,
+    BOT_SYSTEM_BOT_USERNAME, Bot, BotGetOptions, BotList, BotPatch, make_bot_not_found_error,
+    user_from_bot,
 };
 use mm_model::user::User;
 use mm_model::utils::{AppError, AppResult, get_millis};
@@ -29,7 +30,101 @@ use crate::plugin_hooks::HookContext;
 /// `app.MissingAccountError` (channels/app/constants.go:7).
 const MISSING_ACCOUNT_ERROR: &str = "app.user.missing_account.const";
 
+/// The decision in [`App::is_bot_exempt_from_dm_restrictions`] once the bot is loaded, without
+/// a database. `available_plugin_ids` is only called when the rule gets that far and this process
+/// hosts the plugins.
+pub(crate) fn bot_exemption(
+    bot: &Bot,
+    session_user_id: Option<&str>,
+    plugins_hosted_here: bool,
+    plugins_enabled: bool,
+    available_plugin_ids: impl FnOnce() -> AppResult<Vec<String>>,
+) -> AppResult<BotExemption> {
+    if bot.username == BOT_SYSTEM_BOT_USERNAME {
+        return Ok(BotExemption::Exempt);
+    }
+    if session_user_id.is_some_and(|user_id| user_id == bot.owner_id) {
+        return Ok(BotExemption::Exempt);
+    }
+    if !plugins_hosted_here {
+        return Ok(if plugins_enabled {
+            BotExemption::Undecidable
+        } else {
+            BotExemption::NotExempt
+        });
+    }
+    let ids = available_plugin_ids()?;
+    Ok(if ids.contains(&bot.owner_id) {
+        BotExemption::Exempt
+    } else {
+        BotExemption::NotExempt
+    })
+}
+
+/// What [`App::is_bot_exempt_from_dm_restrictions`] could determine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BotExemption {
+    Exempt,
+    NotExempt,
+    /// The answer is "is the owner a plugin in Go's plugin directory", and Go hosts the plugins
+    /// (`MMRS_PLUGIN_HOST=go`) with plugins enabled. The caller forwards.
+    Undecidable,
+}
+
 impl App {
+    /// Port of `App.IsBotExemptFromDMRestrictions` (bot.go:359) — whether a bot may DM across
+    /// `TeamSettings.RestrictDirectMessage = "team"`.
+    ///
+    /// In Go's order: `GetBot` (a deactivated bot is its **404**, which the caller returns), the
+    /// system bot by username, a bot the **session's** user owns, then "is the owner the id of an
+    /// available plugin" — every bundle in the plugin directory, running or not.
+    ///
+    /// # The plugin half depends on which process hosts plugins
+    ///
+    /// Under `MMRS_PLUGIN_HOST=rust` the environment is ours and the rule is ported whole: no
+    /// environment (plugins off, or not started) is `NotExempt`, a directory that cannot be listed
+    /// is Go's 500. Under the Go host, Go's environment is nil exactly when `PluginSettings.Enable`
+    /// is off — the one config both processes read — so that case is decided here too; with
+    /// plugins on, the directory is Go's, and the answer is [`BotExemption::Undecidable`].
+    ///
+    /// `session_user_id` is `None` where Go's context has no user (the plugin API): its
+    /// `session.UserId` is `""`, which owns no bot.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
+    pub async fn is_bot_exempt_from_dm_restrictions(
+        &self,
+        session_user_id: Option<&str>,
+        user_id: &str,
+    ) -> AppResult<BotExemption> {
+        let bot = self.get_bot(user_id, false).await?;
+        bot_exemption(
+            &bot,
+            session_user_id,
+            self.plugin_host().hosted(),
+            self.config().plugin_enable,
+            || match self.plugins_environment() {
+                None => Ok(Vec::new()),
+                Some(environment) => environment
+                    .available()
+                    .map(|bundles| {
+                        bundles
+                            .into_iter()
+                            .filter_map(|bundle| bundle.manifest.map(|manifest| manifest.id))
+                            .collect()
+                    })
+                    .map_err(|err| {
+                        tracing::error!(error = %err, "listing the available plugins failed");
+                        AppError::boxed(
+                            "IsBotExemptFromDMRestrictions",
+                            "app.plugin.get_plugins.app_error",
+                            None,
+                            String::new(),
+                            500,
+                        )
+                    }),
+            },
+        )
+    }
+
     /// Port of `App.GetBot` (bot.go:333).
     ///
     /// **The not-found error is the same one the handler raises for a permission failure.** Go's
@@ -1138,5 +1233,92 @@ mod tests {
             err.params.as_ref().and_then(|p| p.get("user_id")),
             Some(&serde_json::json!("abcdefghijklmnopqrstuvwxyz"))
         );
+    }
+}
+
+#[cfg(test)]
+mod dm_exemption_tests {
+    use super::*;
+
+    fn bot(username: &str, owner: &str) -> Bot {
+        Bot {
+            user_id: "botid".to_owned(),
+            username: username.to_owned(),
+            owner_id: owner.to_owned(),
+            ..Bot::default()
+        }
+    }
+
+    fn never() -> AppResult<Vec<String>> {
+        Err(AppError::boxed(
+            "t",
+            "the plugin list was consulted",
+            None,
+            "",
+            500,
+        ))
+    }
+
+    /// The system bot is exempt first — before the owner, before the plugin host is asked.
+    #[test]
+    fn the_system_bot_is_exempt_whoever_asks() {
+        let system = bot(BOT_SYSTEM_BOT_USERNAME, "plugin.x");
+        for hosted in [true, false] {
+            assert_eq!(
+                bot_exemption(&system, None, hosted, true, never).expect("decided"),
+                BotExemption::Exempt
+            );
+        }
+    }
+
+    /// A bot the **session's** user owns is exempt; no session owns nothing.
+    #[test]
+    fn the_sessions_own_bot_is_exempt() {
+        let owned = bot("helper", "owner1");
+        assert_eq!(
+            bot_exemption(&owned, Some("owner1"), true, true, never).expect("decided"),
+            BotExemption::Exempt
+        );
+        assert_eq!(
+            bot_exemption(&owned, Some("someone"), false, false, never).expect("decided"),
+            BotExemption::NotExempt
+        );
+        assert_eq!(
+            bot_exemption(&owned, None, false, false, never).expect("decided"),
+            BotExemption::NotExempt
+        );
+    }
+
+    /// Under the Go host the plugin half is Go's: decided only when plugins are off.
+    #[test]
+    fn under_the_go_host_only_plugins_off_is_decided() {
+        let plugin_bot = bot("pbot", "com.example.p");
+        assert_eq!(
+            bot_exemption(&plugin_bot, Some("u"), false, false, never).expect("decided"),
+            BotExemption::NotExempt
+        );
+        assert_eq!(
+            bot_exemption(&plugin_bot, Some("u"), false, true, never).expect("decided"),
+            BotExemption::Undecidable
+        );
+    }
+
+    /// Hosted here: the owner must be the id of an available plugin, and a listing failure is
+    /// the error.
+    #[test]
+    fn hosted_here_the_owner_must_be_an_available_plugin() {
+        let plugin_bot = bot("pbot", "com.example.p");
+        let listed = || Ok(vec!["com.other".to_owned(), "com.example.p".to_owned()]);
+        assert_eq!(
+            bot_exemption(&plugin_bot, Some("u"), true, true, listed).expect("decided"),
+            BotExemption::Exempt
+        );
+        let others = || Ok(vec!["com.other".to_owned()]);
+        assert_eq!(
+            bot_exemption(&plugin_bot, Some("u"), true, true, others).expect("decided"),
+            BotExemption::NotExempt
+        );
+        let err = bot_exemption(&plugin_bot, Some("u"), true, true, never).expect_err("listing");
+        assert_eq!(err.id, "the plugin list was consulted");
     }
 }

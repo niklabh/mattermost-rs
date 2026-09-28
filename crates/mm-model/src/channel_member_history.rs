@@ -374,46 +374,30 @@ mod go_parity {
     }
 
     /// [D-040] at its widest: with no `json:` tags, Go's case-insensitive fallback means every
-    /// key of this type has three spellings we reject and it accepts.
+    /// key of this type has three spellings serde's derive alone ignores. The body decoder folds
+    /// them as Go does; punctuation is not folded on either side.
     #[test]
-    fn only_the_declared_key_casing_decodes_here() {
+    fn the_key_casing_decodes_as_go_decodes_it() {
         let oracle = oracle();
         let cases = oracle["key_casing_decode"].as_array().unwrap();
         assert_eq!(cases.len(), 6, "the casing corpus changed size");
 
-        let (mut divergent, mut agreed) = (0, 0);
+        let mut serde_alone_differs = 0;
         for case in cases {
             let name = case["name"].as_str().unwrap();
             assert!(!case["panicked"].as_bool().unwrap(), "{name}: Go panicked");
 
             let doc = case["in"].as_str().unwrap();
-            let decoded: ChannelMemberHistory =
-                serde_json::from_str(doc).unwrap_or_else(|e| panic!("{name}: {e}"));
-
-            let ours = !decoded.channel_id.is_empty();
+            let decoded: ChannelMemberHistory = crate::utils::decode_one_from_json(doc.as_bytes())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
             let theirs = case["populated"].as_bool().unwrap();
+            assert_eq!(!decoded.channel_id.is_empty(), theirs, "{name}: {doc}");
 
-            if name == "declared" {
-                assert!(
-                    ours && theirs,
-                    "the declared spelling must work on both sides"
-                );
-                agreed += 1;
-            } else if theirs {
-                // Go's case-insensitive fallback.
-                assert!(
-                    !ours,
-                    "{name}: we accepted a spelling [D-040] says we reject"
-                );
-                divergent += 1;
-            } else {
-                // Go rejects it too: the fallback folds case, not punctuation.
-                assert!(!ours, "{name}");
-                agreed += 1;
+            let plain: ChannelMemberHistory = serde_json::from_str(doc).unwrap();
+            if plain.channel_id.is_empty() == theirs {
+                serde_alone_differs += 1;
             }
         }
-
-        assert_eq!(divergent, 3, "the [D-040] spellings changed count");
-        assert_eq!(agreed, 3, "declared, plus the two Go also rejects");
+        assert_eq!(serde_alone_differs, 3, "the folded spellings changed count");
     }
 }

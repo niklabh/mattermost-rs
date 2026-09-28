@@ -11,6 +11,13 @@ use crate::error::StoreError;
 
 /// The subset of Go's `store.UserStore` (store/store.go:448-550) that is ported.
 pub trait UserStore {
+    /// Port of `SqlUserStore.RefreshPostStatsForUsers` (user_store.go:2438): `poststats` under an
+    /// `analyticsContext` of `timeout_seconds`.
+    fn refresh_post_stats_for_users(
+        &self,
+        timeout_seconds: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlUserStore.Get` (user_store.go:609).
     /// Port of `SqlUserStore.GetUnreadCount` (user_store.go:1583) — the mobile badge: the sum of
     /// `MentionCount` (or `MentionCountRoot` under collapsed threads) over the user's memberships
@@ -193,6 +200,19 @@ pub trait UserStore {
         ids: &[String],
         since: i64,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetChannelGroupUsers` (user_store.go:2142), projected to the user
+    /// ids: every user in a live group linked to `channel_id` by a live `GroupChannels` row.
+    ///
+    /// Go selects whole sanitized users through `applyChannelGroupConstrainedFilter`
+    /// (user_store.go:778); its one caller, `FilterNonGroupChannelMembers`, compares ids only, so
+    /// the id is what is read here. **Three `DeleteAt = 0` predicates**, one per join — the link,
+    /// the group and the membership — and no predicate on `Users.DeleteAt`: a deactivated group
+    /// member is still a group member.
+    fn get_channel_group_user_ids(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetProfileByGroupChannelIdsForUser` (user_store.go:1209): the other
     /// members of each named group channel, keyed by channel id.
@@ -436,6 +456,15 @@ pub trait UserStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlUserStore.ResetLastPictureUpdate` (user_store.go:390): `LastPictureUpdate` set
+    /// to **minus** the current millis and `UpdateAt` to the same instant. The sign is the whole
+    /// point — a negative value marks a generated avatar, which the next username change may
+    /// regenerate, where a positive one marks an upload that must be kept.
+    fn reset_last_picture_update(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlUserStore.UpdatePassword` (user_store.go:410).
     ///
     /// **Six columns, not one.** The statement is
@@ -616,6 +645,38 @@ pub trait UserStore {
         user_id: &str,
         attempts: i32,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.UpdateMfaSecret` (user_store.go:547): the secret, **and** the replay
+    /// list reset to `[]`, and `UpdateAt` bumped. `DeactivateMfa` calls it with `""`.
+    fn update_mfa_secret(
+        &self,
+        user_id: &str,
+        secret: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.UpdateMfaActive` (user_store.go:557): the flag and `UpdateAt`.
+    fn update_mfa_active(
+        &self,
+        user_id: &str,
+        active: bool,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.StoreMfaUsedTimestamps` (user_store.go:567): the replay list as a
+    /// JSON array of **decimal strings** (`model.StringArray`), and `UpdateAt`.
+    fn store_mfa_used_timestamps(
+        &self,
+        user_id: &str,
+        ts: &[i64],
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetMfaUsedTimestamps` (user_store.go:580): the list parsed back with
+    /// `strconv.Atoi`. No row, a column that is not an array of strings, or an entry that is not
+    /// an integer is an error; SQL `NULL` and JSON `null` are the empty list, as `StringArray.Scan`
+    /// makes them. Never `None`: the caller relies on a non-nil slice to keep replay protection on.
+    fn get_mfa_used_timestamps(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<i64>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.TryIncrementFailedPasswordAttempts` (user_store.go:434).
     ///
@@ -985,6 +1046,27 @@ pub(crate) struct UserRow {
     pub(crate) botlasticonupdate: i64,
 }
 
+/// `SqlUserStore.Get` and `GetAllProfilesInChannel` (user_store.go:608, :962) scan the three JSON
+/// columns into `[]byte` and `json.Unmarshal` each one unconditionally, and a SQL NULL is a nil
+/// slice: `unexpected end of JSON input`, a failed read. A jsonb `null` is four bytes and decodes.
+/// `props` is checked first, then `notifyprops`, then `timezone` — Go's order.
+pub(crate) fn require_manual_scan_columns(row: &UserRow) -> Result<(), StoreError> {
+    for (column, value) in [
+        ("props", &row.props),
+        ("notifyprops", &row.notifyprops),
+        ("timezone", &row.timezone),
+    ] {
+        if value.is_none() {
+            return Err(StoreError::Decode {
+                entity: "User",
+                column,
+                source: serde::de::Error::custom("unexpected end of JSON input"),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// The row-to-model mapping both lookups share.
 ///
 /// Go unmarshals the three JSON columns unconditionally and returns the error, so a malformed
@@ -997,12 +1079,27 @@ pub(crate) struct UserRow {
 /// shapes mean "absent" and only a *type* mismatch is an error. Treating JSON null as a decode
 /// failure made `GET /users/me` a 500 for every user except the one the parity tests happen to
 /// log in as — see [D-135].
+///
+/// # SQL NULL and jsonb `null` are two different answers ([D-331], [D-158])
+///
+/// Every Go read but two scans into `*model.User` through sqlx, whose `reflectx.FieldByIndexes`
+/// allocates a nil map before scanning into it. `StringMap.Scan` returns early on a SQL NULL,
+/// leaving that **empty** map — `"timezone":{}` — while a jsonb `null` reaches `json.Unmarshal`,
+/// which sets the map back to nil — `"timezone":null`. (`props` and `notify_props` are
+/// `omitempty`, so only `timezone` shows the difference on the wire.) The other two reads —
+/// `Get` and `GetAllProfilesInChannel` — scan into `[]byte` and unmarshal by hand, and a SQL NULL
+/// fails there instead; see [`require_manual_scan_columns`].
+///
+/// Go's user cache re-encodes a nil map as an empty one (msgp), so a *cached* `null` comes back
+/// as `{}`. That is Go process state this server does not have; the uncached answer is the one
+/// reproduced.
 pub(crate) fn user_from_row(row: UserRow) -> Result<User, StoreError> {
     let decode_map = |value: Option<serde_json::Value>,
                       column: &'static str|
      -> Result<Option<StringMap>, StoreError> {
         match value {
-            None | Some(serde_json::Value::Null) => Ok(None),
+            None => Ok(Some(StringMap::new())),
+            Some(serde_json::Value::Null) => Ok(None),
             Some(value) => Ok(Some(serde_json::from_value::<StringMap>(value).map_err(
                 |source| StoreError::Decode {
                     entity: "User",
@@ -1071,6 +1168,17 @@ pub(crate) fn user_from_row(row: UserRow) -> Result<User, StoreError> {
 }
 
 impl UserStore for SqlUserStore {
+    #[tracing::instrument(skip(self))]
+    async fn refresh_post_stats_for_users(&self, timeout_seconds: i64) -> Result<(), StoreError> {
+        crate::post_store::refresh_materialized_view(
+            &self.pool,
+            "poststats",
+            timeout_seconds,
+            "users_refresh_post_stats_exec",
+        )
+        .await
+    }
+
     #[tracing::instrument(skip(self), fields(user_id = %user_id))]
     async fn get_unread_count(
         &self,
@@ -1447,6 +1555,7 @@ impl UserStore for SqlUserStore {
         };
         tracing::Span::current().record("found", true);
 
+        require_manual_scan_columns(&row)?;
         user_from_row(row)
     }
 
@@ -1723,6 +1832,44 @@ impl UserStore for SqlUserStore {
         tracing::Span::current().record("found", rows.len());
 
         rows.into_iter().map(user_from_row).collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, found))]
+    async fn get_channel_group_user_ids(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        // `usersQuery` (a `LEFT JOIN Bots`, which filters nothing) under
+        // `applyChannelGroupConstrainedFilter`'s `Users.Id IN (…)`. Go's `if channelId == ""`
+        // short-circuit returns the unfiltered query — every user — but its only caller passes a
+        // loaded channel's id, which is never empty.
+        let ids = sqlx::query_scalar!(
+            r#"
+            SELECT u.id
+              FROM users u
+             WHERE u.id IN (
+                   SELECT gm.userid
+                     FROM channels c
+                     JOIN groupchannels gc ON gc.channelid = c.id
+                     JOIN usergroups ug ON ug.id = gc.groupid
+                     JOIN groupmembers gm ON gm.groupid = ug.id
+                    WHERE c.id = $1
+                      AND gc.deleteat = 0
+                      AND ug.deleteat = 0
+                      AND gm.deleteat = 0
+                    GROUP BY gm.userid
+             )
+            "#,
+            channel_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", ids.len());
+        Ok(ids)
     }
 
     /// Port of `SqlUserStore.GetProfileByGroupChannelIdsForUser` (user_store.go:1209).
@@ -2255,6 +2402,7 @@ impl UserStore for SqlUserStore {
 
         rows.into_iter()
             .map(|row| {
+                require_manual_scan_columns(&row)?;
                 let mut user = user_from_row(row)?;
                 user.sanitize(&std::collections::HashMap::new());
                 Ok((user.id.clone(), user))
@@ -3392,6 +3540,25 @@ impl UserStore for SqlUserStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(updated))]
+    async fn reset_last_picture_update(&self, user_id: &str) -> Result<(), StoreError> {
+        let cur_time = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            "UPDATE users SET lastpictureupdate = $1, updateat = $2 WHERE id = $3",
+            -cur_time,
+            cur_time,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
     async fn update_password(
         &self,
         user_id: &str,
@@ -3752,6 +3919,98 @@ impl UserStore for SqlUserStore {
         // visible in the answer.
         tracing::Span::current().record("updated", result.rows_affected());
         Ok(user_id.to_owned())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn update_mfa_secret(&self, user_id: &str, secret: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE users SET mfasecret = $1, mfausedtimestamps = '[]'::jsonb, updateat = $2 \
+             WHERE id = $3",
+            secret,
+            mm_model::utils::get_millis(),
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, active))]
+    async fn update_mfa_active(&self, user_id: &str, active: bool) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE users SET mfaactive = $1, updateat = $2 WHERE id = $3",
+            active,
+            mm_model::utils::get_millis(),
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn store_mfa_used_timestamps(&self, user_id: &str, ts: &[i64]) -> Result<(), StoreError> {
+        let strings: Vec<String> = ts.iter().map(i64::to_string).collect();
+        sqlx::query!(
+            "UPDATE users SET mfausedtimestamps = $1, updateat = $2 WHERE id = $3",
+            serde_json::json!(strings),
+            mm_model::utils::get_millis(),
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn get_mfa_used_timestamps(&self, user_id: &str) -> Result<Vec<i64>, StoreError> {
+        let context = || format!("failed to get MFA used timestamps for user with ID {user_id}");
+        let row =
+            sqlx::query_scalar!("SELECT mfausedtimestamps FROM users WHERE id = $1", user_id,)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: context(),
+                    source,
+                })?;
+        // `Get` on no row is `sql.ErrNoRows`: an error, not an empty list.
+        let Some(column) = row else {
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: format!("userId={user_id}"),
+            });
+        };
+        let strings: Vec<String> = match column {
+            None | Some(serde_json::Value::Null) => Vec::new(),
+            Some(value) => serde_json::from_value(value).map_err(|source| StoreError::Decode {
+                entity: "User",
+                column: "mfausedtimestamps",
+                source,
+            })?,
+        };
+        strings
+            .iter()
+            .map(|t| {
+                // `strconv.Atoi`: an optional sign, then decimal digits, within `int`.
+                t.parse::<i64>().map_err(|_| StoreError::InvalidInput {
+                    entity: "User",
+                    field: "MfaUsedTimestamps",
+                    value: t.clone(),
+                })
+            })
+            .collect()
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, attempts, updated))]
