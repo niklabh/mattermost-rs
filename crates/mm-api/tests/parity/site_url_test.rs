@@ -105,7 +105,9 @@ async fn a_reachable_ping_is_ok_and_everything_else_is_its_own_400() {
     .await;
     for url in [
         "http://127.0.0.1:1".to_owned(),
-        format!("{GO}/nowhere"),
+        // Under `/api/v4/`, so the ping is the API router's 404 — a path outside it is the
+        // webapp's `index.html`, a 200, whenever the Go run directory has a `client/`.
+        format!("{GO}/api/v4/nowhere"),
         "not a url".to_owned(),
     ] {
         both(

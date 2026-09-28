@@ -317,6 +317,18 @@ fn mask_diagnostics(yaml: &str) -> Vec<String> {
         .collect()
 }
 
+/// `warning.txt`'s points, or `None` when the packet has none.
+///
+/// Whether a stack produces the log-path warning at all depends on **where its Go was launched**:
+/// `config.ValidateLogFilePath` resolves symlinks on the file but not on the logging root, so a
+/// server started through a worktree's symlinked `reference/.build` finds its own log "outside"
+/// the root and one started from the main checkout does not. The two servers agree either way.
+fn warnings(packet: &Packet) -> Option<BTreeSet<String>> {
+    packet
+        .file("warning.txt")
+        .map(|_| warning_points(&packet.text("warning.txt")))
+}
+
 /// `warning.txt`'s points, with the log file's path — each server's own run directory —
 /// replaced, so the two lists say the same thing in the same words.
 pub(crate) fn warning_points(text: &str) -> BTreeSet<String> {
@@ -545,10 +557,7 @@ async fn the_licensed_packet_matches_go() {
     assert_eq!(rd, gd, "diagnostics.yaml, process values masked");
 
     // warning.txt: the same points, the log path aside.
-    assert_eq!(
-        warning_points(&rs.text("warning.txt")),
-        warning_points(&go.text("warning.txt"))
-    );
+    assert_eq!(warnings(&rs), warnings(&go), "warning.txt");
 
     // The response around it.
     for header in [
@@ -587,7 +596,8 @@ async fn the_licensed_packet_matches_go() {
     );
 }
 
-/// `basic_server_logs=false` leaves the log out, and with it the one warning a stack produces.
+/// `basic_server_logs=false` leaves the log out, and with it the log-path warning when the stack
+/// produces one (see [`warnings`]).
 #[tokio::test]
 async fn basic_server_logs_false_leaves_the_log_out() {
     if !stack_enabled() {
@@ -617,10 +627,7 @@ async fn basic_server_logs_false_leaves_the_log_out() {
     // Anything but the exact word keeps the logs — `FormValue(…) == "false"`.
     let go = fetch(&client, &pair.go, &admin, "?basic_server_logs=False").await;
     let rs = fetch(&client, &pair.rust, &admin, "?basic_server_logs=False").await;
-    assert_eq!(
-        warning_points(&rs.text("warning.txt")),
-        warning_points(&go.text("warning.txt"))
-    );
+    assert_eq!(warnings(&rs), warnings(&go), "?basic_server_logs=False");
 }
 
 /// A user without `manage_system` is the permission error on both, before the licence is read.
