@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              JOIN teammembers tm ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)\n              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $2)\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE cm.userid IS NULL\n             ORDER BY u.username ASC\n             OFFSET $3 LIMIT $4\n            ",
+  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              LEFT JOIN teammembers tm ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE tm.userid IS NULL\n               AND NOT $4::boolean\n               AND (cardinality($5::text[]) = 0 OR EXISTS (\n                     SELECT 1 FROM teammembers rtm\n                      WHERE rtm.userid = u.id\n                        AND rtm.deleteat = 0\n                        AND rtm.teamid = ANY($5::text[])))\n               AND (cardinality($6::text[]) = 0 OR EXISTS (\n                     SELECT 1 FROM channelmembers rcm\n                      WHERE rcm.userid = u.id\n                        AND rcm.channelid = ANY($6::text[])))\n             ORDER BY u.username ASC\n             OFFSET $2 LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -162,9 +162,11 @@
     "parameters": {
       "Left": [
         "Text",
-        "Text",
         "Int8",
-        "Int8"
+        "Int8",
+        "Bool",
+        "TextArray",
+        "TextArray"
       ]
     },
     "nullable": [
@@ -201,5 +203,5 @@
       null
     ]
   },
-  "hash": "614821e7ca90721e89147587a97c7b9ec5b7b3f1acdb12437c72998febe272e2"
+  "hash": "f5529656c086536530038011120c64f92ca58cb36b81e3d6579b9e6ece7bac85"
 }

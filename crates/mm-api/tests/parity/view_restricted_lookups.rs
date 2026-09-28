@@ -74,6 +74,38 @@ async fn get(http: &reqwest::Client, base: &str, path: &str, token: &str) -> (u1
     (status, served, response.text().await.unwrap_or_default())
 }
 
+/// `(status, Etag header, body)`, with the served-here marker asserted for this server.
+async fn get_with_etag(
+    http: &reqwest::Client,
+    base: &str,
+    path: &str,
+    token: &str,
+) -> (u16, Option<String>, String) {
+    let response = http
+        .get(format!("{base}{path}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{base} unreachable: {e}"));
+    let status = response.status().as_u16();
+    if base == RUST {
+        assert_eq!(
+            response
+                .headers()
+                .get("x-mmrs-served-by")
+                .and_then(|v| v.to_str().ok()),
+            Some("rust"),
+            "{path}: served here"
+        );
+    }
+    let etag = response
+        .headers()
+        .get("etag")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    (status, etag, response.text().await.unwrap_or_default())
+}
+
 /// `(username, email)` of a user, read by the admin.
 async fn identity(http: &reqwest::Client, admin: &str, user_id: &str) -> (String, String) {
     let (status, _, body) = get(http, GO, &format!("/api/v4/users/{user_id}"), admin).await;
@@ -499,11 +531,12 @@ async fn a_restricted_callers_user_lists_are_gos() {
         .expect("the synthetic role is removed");
 }
 
-/// `POST /users/search` and `GET /users/autocomplete` for a restricted caller: every arm's query
+/// `POST /users/search`, `GET /users/autocomplete` and `GET /users` for a restricted caller: every
+/// arm's query
 /// keeps only the users it can see (`performSearch` applies the filter last), and both halves of
 /// the channel arm are filtered. Every body is compared byte for byte.
 #[tokio::test]
-async fn a_restricted_callers_searches_are_gos() {
+async fn a_restricted_callers_searches_and_lists_are_gos() {
     if !stack_enabled() {
         return;
     }
@@ -516,6 +549,8 @@ async fn a_restricted_callers_searches_are_gos() {
     let away = create_team(&http, &admin, "vrqaway").await;
     let first = create_channel_typed(&http, &admin, &team, "vrq", "O").await;
     let second = create_channel_typed(&http, &admin, &team, "vrqsecond", "O").await;
+    // A channel neither caller is in.
+    let third = create_channel_typed(&http, &admin, &team, "vrqthird", "O").await;
 
     let guest = create_plain_user(&http, &admin, &team, "vrqguest").await;
     let granted = create_plain_user(&http, &admin, &team, "vrqgranted").await;
@@ -530,6 +565,10 @@ async fn a_restricted_callers_searches_are_gos() {
     // In the first channel, but gone from the team: the in-channel half's team filter drops it
     // for the team-granted caller, and only its.
     let leaver = create_plain_user(&http, &admin, &team, "vrqleaver").await;
+    // On the team and in a channel — only not one of the callers'. "In a permitted channel" and
+    // "in any channel" differ on this user alone: every other member with a channel shares
+    // town-square with the callers, and the teammate has none.
+    let hidden = create_plain_user(&http, &admin, &team, "vrqhidden").await;
     for user in [&guest.id, &granted.id, &inside.id, &leaver.id] {
         add_user_to_channel(&http, &admin, &first, user).await;
     }
@@ -583,11 +622,14 @@ async fn a_restricted_callers_searches_are_gos() {
             .await
             .expect("the memberships are dropped");
     }
-    sqlx::query("DELETE FROM channelmembers WHERE userid = $1")
-        .bind(&teammate.id)
-        .execute(&pool)
-        .await
-        .expect("the teammate's channel memberships are dropped");
+    for user in [&teammate.id, &hidden.id] {
+        sqlx::query("DELETE FROM channelmembers WHERE userid = $1")
+            .bind(user)
+            .execute(&pool)
+            .await
+            .expect("the default channel memberships are dropped");
+    }
+    add_user_to_channel(&http, &admin, &third, &hidden.id).await;
     sqlx::query("UPDATE teammembers SET deleteat = 1701355041000 WHERE userid = $1")
         .bind(&leaver.id)
         .execute(&pool)
@@ -603,6 +645,15 @@ async fn a_restricted_callers_searches_are_gos() {
         "/api/v4/users/autocomplete?name=vrq".to_owned(),
         format!("/api/v4/users/autocomplete?in_team={team}&name=vrq"),
         format!("/api/v4/users/autocomplete?in_team={team}&in_channel={first}&name=vrq"),
+    ];
+    // `GET /users`, one path per served arm. The in-channel arm is Go's unfiltered one.
+    let lists = [
+        "/api/v4/users?per_page=200".to_owned(),
+        format!("/api/v4/users?in_team={team}&per_page=200"),
+        format!("/api/v4/users?in_channel={first}&per_page=200"),
+        format!("/api/v4/users?in_team={team}&not_in_channel={second}&per_page=200"),
+        // The callers' own team: `view_team` on another would make this arm a 403 for all three.
+        format!("/api/v4/users?not_in_team={team}&per_page=200"),
     ];
     for (caller, token) in [
         ("guest", &guest.token),
@@ -639,6 +690,51 @@ async fn a_restricted_callers_searches_are_gos() {
                 );
             }
         }
+        for path in &lists {
+            let case = format!("{caller}, {path}");
+            let (go_status, go_etag, go_body) = get_with_etag(&http, GO, path, token).await;
+            let (rust_status, rust_etag, rust_body) = get_with_etag(&http, RUST, path, token).await;
+            assert_eq!(
+                rust_status, go_status,
+                "{case}: Go {go_body}, we {rust_body}"
+            );
+            if go_status == 200 {
+                assert_eq!(rust_body, go_body, "{case}: byte for byte");
+                // Go's etag carries two pointer addresses (see `App::get_users_in_team_etag`);
+                // its last component is the restrictions hash, and that must agree.
+                let hash = |etag: &Option<String>| {
+                    etag.as_deref()
+                        .map(|e| e.rsplit('.').next().unwrap_or("").to_owned())
+                };
+                assert_eq!(
+                    hash(&rust_etag),
+                    hash(&go_etag),
+                    "{case}: the restrictions hash"
+                );
+                // The guest's: the team-granted caller's is `[]`, since with both lists set only
+                // users on its team are visible, and this arm lists those off it.
+                if path.contains("not_in_team=") && caller == "guest" {
+                    assert!(
+                        rust_body.len() > 2,
+                        "{case}: the not-in-team arm answers somebody"
+                    );
+                }
+                if path.contains("?in_team=") && !path.contains("not_in_channel") {
+                    let go_hash = hash(&go_etag).expect("the in-team arm has an etag");
+                    assert_eq!(
+                        go_hash.len(),
+                        64,
+                        "{case}: a restricted caller's etag ends in a hash"
+                    );
+                }
+            } else {
+                assert_error_bodies_match_except_known_gaps(
+                    go_body.as_bytes(),
+                    rust_body.as_bytes(),
+                    &case,
+                );
+            }
+        }
         for path in &autocompletes {
             let case = format!("{caller}, {path}");
             let (go_status, _, go_body) = get(&http, GO, path, token).await;
@@ -669,6 +765,7 @@ async fn a_restricted_callers_searches_are_gos() {
         &teammate.id,
         &stranger.id,
         &leaver.id,
+        &hidden.id,
     ] {
         common::delete_plain_user(&http, &admin, user).await;
     }

@@ -8,7 +8,7 @@ use axum::extract::{Path, Request, State};
 use axum::http::header::{ETAG, IF_NONE_MATCH};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use mm_app::user::UserPage;
+use mm_app::user::{UserPage, ViewUsersRestrictions};
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL,
     PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,
@@ -1349,10 +1349,11 @@ fn forward_reason(
 /// 2. **`not_in_channel` without `in_team` is `invalid_url_param` naming `team_id`** — the
 ///    *url*-param id for a query parameter, and it names a parameter the caller did not send.
 ///    This is the only 400 this handler can produce.
-/// 3. **The restrictions fast path**, `getUser`'s rule: a caller without user-based
-///    `view_members` has non-nil `ViewUsersRestrictions`, which every store query below would
-///    have to join on, so the whole request is forwarded. Checked before the permission gates
-///    because Go computes the restrictions before the dispatch.
+/// 3. **The restrictions**, asked before the permission gates because Go computes them before
+///    the dispatch. A caller without `view_members` gets them applied to the all, in-team,
+///    not-in-channel and not-in-team queries and hashed into the two etags. **The in-channel
+///    arm is not filtered** — Go's `GetProfilesInChannel` has no `applyViewRestrictionsFilter`,
+///    so `read_channel` is the only guard there. `parity::view_restricted_lookups`.
 ///
 /// # The etag is on two arms, and one of them reads the wrong parameter
 ///
@@ -1408,15 +1409,13 @@ pub async fn get_users(
         return ApiError::invalid_url_param("team_id").into_response();
     }
 
-    if !state
-        .app
-        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
-        .await
-    {
-        tracing::Span::current().record("forwarded", "view_restrictions");
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
     tracing::Span::current().record("forwarded", false);
+
+    // `GetViewUsersRestrictions`, after the parameter checks and before every arm's gate.
+    let restrictions = match state.app.view_users_restrictions(&session.0.user_id).await {
+        Ok(restrictions) => restrictions,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
 
     match serve_users(
         &state,
@@ -1425,6 +1424,7 @@ pub async fn get_users(
         &parsed,
         branch,
         GetUsersVariant::Http,
+        restrictions.as_ref(),
     )
     .await
     {
@@ -1470,8 +1470,13 @@ pub(crate) async fn serve_users(
     query: &GetUsersQuery,
     branch: Branch,
     variant: GetUsersVariant,
+    view_restrictions: Option<&ViewUsersRestrictions>,
 ) -> Result<Response, ApiError> {
     let gated = variant == GetUsersVariant::Http;
+    // `restrictions.Hash()`: `""` for nil.
+    let restrictions_hash = view_restrictions
+        .map(ViewUsersRestrictions::hash)
+        .unwrap_or_default();
     let page = UserPage {
         page: query.page,
         per_page: query.per_page,
@@ -1501,7 +1506,12 @@ pub(crate) async fn serve_users(
             }
             let users = state
                 .app
-                .get_users_not_in_channel_page(&query.in_team, &query.not_in_channel, page)
+                .get_users_not_in_channel_page(
+                    &query.in_team,
+                    &query.not_in_channel,
+                    page,
+                    view_restrictions,
+                )
                 .await?;
             (users, None)
         }
@@ -1528,6 +1538,7 @@ pub(crate) async fn serve_users(
                     &query.in_team,
                     state.show_full_name(),
                     state.show_email_address(),
+                    &restrictions_hash,
                 )
                 .await;
             if etag_matches(headers, &etag) {
@@ -1535,7 +1546,7 @@ pub(crate) async fn serve_users(
             }
             let users = state
                 .app
-                .get_users_not_in_team_page(&query.not_in_team, page)
+                .get_users_not_in_team_page(&query.not_in_team, page, view_restrictions)
                 .await?;
             (users, Some(etag))
         }
@@ -1561,6 +1572,7 @@ pub(crate) async fn serve_users(
                     &query.in_team,
                     state.show_full_name(),
                     state.show_email_address(),
+                    &restrictions_hash,
                 )
                 .await;
             if etag_matches(headers, &etag) {
@@ -1568,7 +1580,7 @@ pub(crate) async fn serve_users(
             }
             let users = state
                 .app
-                .get_users_in_team_page(&query.in_team, page)
+                .get_users_in_team_page(&query.in_team, page, view_restrictions)
                 .await?;
             (users, Some(etag))
         }
@@ -1597,9 +1609,12 @@ pub(crate) async fn serve_users(
                 .await?;
             (users, None)
         }
-        // `RestrictUsersGetByPermissions` only fills in the restrictions, and a caller whose
-        // restrictions are non-nil was forwarded before this function ran.
-        Branch::All => (state.app.get_users_page(page).await?, None),
+        // `RestrictUsersGetByPermissions` asks `GetViewUsersRestrictions` a second time and fills
+        // in what the handler already holds; the answer cannot differ within one request.
+        Branch::All => (
+            state.app.get_users_page(page, view_restrictions).await?,
+            None,
+        ),
         // Forwarded by `forward_reason`; forwarding again rather than panicking keeps the
         // impossible case a working request instead of a 500.
         Branch::WithoutTeam | Branch::InGroup | Branch::NotInGroup => {

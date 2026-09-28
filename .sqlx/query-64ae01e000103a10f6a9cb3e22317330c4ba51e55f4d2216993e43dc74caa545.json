@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              LEFT JOIN teammembers tm ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE tm.userid IS NULL\n             ORDER BY u.username ASC\n             OFFSET $2 LIMIT $3\n            ",
+  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              JOIN teammembers tm ON (tm.userid = u.id AND tm.deleteat = 0)\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE tm.teamid = $1\n               AND ($4::bool IS NULL\n                    OR ($4 AND u.deleteat != 0)\n                    OR (NOT $4 AND u.deleteat = 0))\n               AND NOT $5::boolean\n               AND (cardinality($6::text[]) = 0 OR EXISTS (\n                     SELECT 1 FROM teammembers rtm\n                      WHERE rtm.userid = u.id\n                        AND rtm.deleteat = 0\n                        AND rtm.teamid = ANY($6::text[])))\n               AND (cardinality($7::text[]) = 0 OR EXISTS (\n                     SELECT 1 FROM channelmembers rcm\n                      WHERE rcm.userid = u.id\n                        AND rcm.channelid = ANY($7::text[])))\n             ORDER BY u.username ASC\n             OFFSET $2 LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -163,7 +163,11 @@
       "Left": [
         "Text",
         "Int8",
-        "Int8"
+        "Int8",
+        "Bool",
+        "Bool",
+        "TextArray",
+        "TextArray"
       ]
     },
     "nullable": [
@@ -200,5 +204,5 @@
       null
     ]
   },
-  "hash": "030a2b26dd3dafd9370dc9a1daba40647f3aca89f313a432a3d8367092ae6923"
+  "hash": "64ae01e000103a10f6a9cb3e22317330c4ba51e55f4d2216993e43dc74caa545"
 }

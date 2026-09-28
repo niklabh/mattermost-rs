@@ -328,10 +328,14 @@ impl App {
     /// (`u.Sanitize(map[string]bool{})`) and once in `sanitizeProfiles`; the first is wholly
     /// subsumed by the second, which clears the same four fields plus more, so it is not ported.
     #[tracing::instrument(skip_all, fields(page = page.page, per_page = page.per_page))]
-    pub async fn get_users_page(&self, page: UserPage) -> AppResult<Vec<User>> {
+    pub async fn get_users_page(
+        &self,
+        page: UserPage,
+        view_restrictions: Option<&ViewUsersRestrictions>,
+    ) -> AppResult<Vec<User>> {
         self.store()
             .user()
-            .get_all_profiles(page.page, page.per_page, page.deleted())
+            .get_all_profiles(page.page, page.per_page, page.deleted(), view_restrictions)
             .await
             .map_err(|err| get_profiles_error("GetUsersPage", err))
     }
@@ -342,10 +346,17 @@ impl App {
         &self,
         team_id: &str,
         page: UserPage,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> AppResult<Vec<User>> {
         self.store()
             .user()
-            .get_profiles_in_team(team_id, page.page, page.per_page, page.deleted())
+            .get_profiles_in_team(
+                team_id,
+                page.page,
+                page.per_page,
+                page.deleted(),
+                view_restrictions,
+            )
             .await
             .map_err(|err| get_profiles_error("GetUsersInTeamPage", err))
     }
@@ -379,7 +390,7 @@ impl App {
         let mut users = self
             .store()
             .user()
-            .get_all_profiles(page.page, page.per_page, page.deleted())
+            .get_all_profiles(page.page, page.per_page, page.deleted(), None)
             .await
             .map_err(|err| get_profiles_error("GetUsers", err))?;
         store_sanitize(&mut users);
@@ -414,7 +425,7 @@ impl App {
         let mut users = self
             .store()
             .user()
-            .get_profiles_in_team(team_id, page.page, page.per_page, page.deleted())
+            .get_profiles_in_team(team_id, page.page, page.per_page, page.deleted(), None)
             .await
             .map_err(|err| get_profiles_error("GetUsersInTeam", err))?;
         store_sanitize(&mut users);
@@ -467,10 +478,17 @@ impl App {
         team_id: &str,
         channel_id: &str,
         page: UserPage,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> AppResult<Vec<User>> {
         self.store()
             .user()
-            .get_profiles_not_in_channel(team_id, channel_id, page.offset(), page.per_page)
+            .get_profiles_not_in_channel(
+                team_id,
+                channel_id,
+                page.offset(),
+                page.per_page,
+                view_restrictions,
+            )
             .await
             .map_err(|err| get_profiles_error("GetUsersNotInChannel", err))
     }
@@ -481,10 +499,11 @@ impl App {
         &self,
         team_id: &str,
         page: UserPage,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> AppResult<Vec<User>> {
         self.store()
             .user()
-            .get_profiles_not_in_team(team_id, page.offset(), page.per_page)
+            .get_profiles_not_in_team(team_id, page.offset(), page.per_page, view_restrictions)
             .await
             .map_err(|err| get_profiles_error("GetUsersNotInTeamPage", err))
     }
@@ -492,10 +511,8 @@ impl App {
     /// Port of `UserService.GetUsersInTeamEtag` (app/users/users.go:183).
     ///
     /// `fmt.Sprintf("%v.%v.%v.%v", storeEtag, ShowFullName, ShowEmailAddress, restrictionsHash)`.
-    /// The restrictions hash is **always the empty string** here —
-    /// `(*ViewUsersRestrictions).Hash()` returns `""` for nil (model/user.go:281) and the api
-    /// layer forwards every caller whose restrictions are not nil — so every etag this server
-    /// mints ends in a dot.
+    /// `restrictions_hash` is `(*ViewUsersRestrictions).Hash()` — `""` for nil (model/user.go:281),
+    /// so an unrestricted caller's etag ends in a dot.
     ///
     /// # This etag cannot match Go's, and it is Go that is wrong
     ///
@@ -519,9 +536,10 @@ impl App {
         team_id: &str,
         show_full_name: bool,
         show_email_address: bool,
+        restrictions_hash: &str,
     ) -> String {
         let store_etag = self.store().user().get_etag_for_profiles(team_id).await;
-        format!("{store_etag}.{show_full_name}.{show_email_address}.")
+        format!("{store_etag}.{show_full_name}.{show_email_address}.{restrictions_hash}")
     }
 
     /// Port of `UserService.GetUsersNotInTeamEtag` (app/users/users.go:187).
@@ -539,13 +557,14 @@ impl App {
         team_id: &str,
         show_full_name: bool,
         show_email_address: bool,
+        restrictions_hash: &str,
     ) -> String {
         let store_etag = self
             .store()
             .user()
             .get_etag_for_profiles_not_in_team(team_id)
             .await;
-        format!("{store_etag}.{show_full_name}.{show_email_address}.")
+        format!("{store_etag}.{show_full_name}.{show_email_address}.{restrictions_hash}")
     }
 }
 
@@ -1619,17 +1638,19 @@ mod tests {
         };
 
         let errors = vec![
-            app.get_users_page(page).await.expect_err("unreachable"),
-            app.get_users_in_team_page("t", page)
+            app.get_users_page(page, None)
+                .await
+                .expect_err("unreachable"),
+            app.get_users_in_team_page("t", page, None)
                 .await
                 .expect_err("unreachable"),
             app.get_users_in_channel_page("c", page)
                 .await
                 .expect_err("unreachable"),
-            app.get_users_not_in_channel_page("t", "c", page)
+            app.get_users_not_in_channel_page("t", "c", page, None)
                 .await
                 .expect_err("unreachable"),
-            app.get_users_not_in_team_page("t", page)
+            app.get_users_not_in_team_page("t", page, None)
                 .await
                 .expect_err("unreachable"),
         ];

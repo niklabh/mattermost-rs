@@ -322,6 +322,8 @@ async fn local_get_users(
         &parsed,
         branch,
         GetUsersVariant::Local,
+        // `localGetUsers` builds its options with no `ViewRestrictions`.
+        None,
     )
     .await
     {

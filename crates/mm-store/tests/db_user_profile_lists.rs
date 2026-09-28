@@ -220,7 +220,7 @@ async fn in_team_excludes_a_left_member_and_the_active_filter_is_on_the_user_row
     let store = SqlUserStore::new(pool.clone());
 
     let all = store
-        .get_profiles_in_team(TEAM, 0, 60, None)
+        .get_profiles_in_team(TEAM, 0, 60, None, None)
         .await
         .expect("query runs");
     assert_eq!(
@@ -236,7 +236,7 @@ async fn in_team_excludes_a_left_member_and_the_active_filter_is_on_the_user_row
     );
 
     let live = store
-        .get_profiles_in_team(TEAM, 0, 60, Some(false))
+        .get_profiles_in_team(TEAM, 0, 60, Some(false), None)
         .await
         .expect("query runs");
     assert_eq!(
@@ -246,7 +246,7 @@ async fn in_team_excludes_a_left_member_and_the_active_filter_is_on_the_user_row
     );
 
     let gone = store
-        .get_profiles_in_team(TEAM, 0, 60, Some(true))
+        .get_profiles_in_team(TEAM, 0, 60, Some(true), None)
         .await
         .expect("query runs");
     assert_eq!(
@@ -257,7 +257,7 @@ async fn in_team_excludes_a_left_member_and_the_active_filter_is_on_the_user_row
     );
 
     let empty = store
-        .get_profiles_in_team(OTHER_TEAM, 0, 60, None)
+        .get_profiles_in_team(OTHER_TEAM, 0, 60, None, None)
         .await
         .expect("query runs");
     assert_eq!(usernames(&empty), vec!["mmrsulist-eve"]);
@@ -277,15 +277,15 @@ async fn paging_is_offset_page_times_per_page_and_per_page_zero_is_an_empty_page
     let store = SqlUserStore::new(pool.clone());
 
     let first = store
-        .get_profiles_in_team(TEAM, 0, 2, None)
+        .get_profiles_in_team(TEAM, 0, 2, None, None)
         .await
         .expect("query runs");
     let second = store
-        .get_profiles_in_team(TEAM, 1, 2, None)
+        .get_profiles_in_team(TEAM, 1, 2, None, None)
         .await
         .expect("query runs");
     let third = store
-        .get_profiles_in_team(TEAM, 2, 2, None)
+        .get_profiles_in_team(TEAM, 2, 2, None, None)
         .await
         .expect("query runs");
     assert_eq!(usernames(&first), vec!["mmrsulist-amy", "mmrsulist-dan"]);
@@ -299,7 +299,7 @@ async fn paging_is_offset_page_times_per_page_and_per_page_zero_is_an_empty_page
     // Squirrel emits `LIMIT 0` for `per_page=0` here — unlike the channel-member store, whose
     // `Limit > 0` guard turns it into "no limit". Same query parameter, opposite meaning.
     let none = store
-        .get_profiles_in_team(TEAM, 0, 0, None)
+        .get_profiles_in_team(TEAM, 0, 0, None, None)
         .await
         .expect("query runs");
     assert!(none.is_empty(), "per_page=0 is LIMIT 0 on this route");
@@ -435,7 +435,7 @@ async fn not_in_channel_is_an_anti_join_scoped_to_the_team_and_keeps_deactivated
     let store = SqlUserStore::new(pool.clone());
 
     let users = store
-        .get_profiles_not_in_channel(TEAM, CHANNEL, 0, 60)
+        .get_profiles_not_in_channel(TEAM, CHANNEL, 0, 60, None)
         .await
         .expect("query runs");
     assert_eq!(
@@ -449,7 +449,7 @@ async fn not_in_channel_is_an_anti_join_scoped_to_the_team_and_keeps_deactivated
     // The anti-join's two halves: the channel id belongs to the LEFT JOIN condition, so a
     // channel nobody is in returns the whole team rather than nothing.
     let unknown_channel = store
-        .get_profiles_not_in_channel(TEAM, "mmrsulist000000000000nochn", 0, 60)
+        .get_profiles_not_in_channel(TEAM, "mmrsulist000000000000nochn", 0, 60, None)
         .await
         .expect("query runs");
     assert_eq!(
@@ -463,7 +463,7 @@ async fn not_in_channel_is_an_anti_join_scoped_to_the_team_and_keeps_deactivated
     );
 
     let paged = store
-        .get_profiles_not_in_channel(TEAM, CHANNEL, 1, 1)
+        .get_profiles_not_in_channel(TEAM, CHANNEL, 1, 1, None)
         .await
         .expect("query runs");
     assert_eq!(
@@ -526,7 +526,7 @@ async fn not_in_team_pages(store: &SqlUserStore) -> Vec<mm_model::user::User> {
     let mut all = Vec::new();
     for page in 0..50 {
         let mut chunk = store
-            .get_profiles_not_in_team(TEAM, page * PER_PAGE, PER_PAGE)
+            .get_profiles_not_in_team(TEAM, page * PER_PAGE, PER_PAGE, None)
             .await
             .expect("query runs");
         let short = (chunk.len() as i64) < PER_PAGE;
@@ -556,7 +556,7 @@ async fn all_profiles_pages(
     let mut all = Vec::new();
     for page in 0..50 {
         let mut chunk = store
-            .get_all_profiles(page, PER_PAGE, deleted)
+            .get_all_profiles(page, PER_PAGE, deleted, None)
             .await
             .expect("query runs");
         let short = (chunk.len() as i64) < PER_PAGE;

@@ -255,6 +255,7 @@ pub trait UserStore {
         page: i64,
         per_page: i64,
         deleted: Option<bool>,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
     /// `SqlUserStore.GetAllProfiles` (user_store.go:682) with **only** `Role` set — the shape
@@ -279,6 +280,7 @@ pub trait UserStore {
         page: i64,
         per_page: i64,
         deleted: Option<bool>,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetProfilesInChannel` (user_store.go:869) — the `in_channel` filter.
@@ -332,6 +334,7 @@ pub trait UserStore {
         channel_id: &str,
         offset: i64,
         limit: i64,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetProfilesNotInTeam` (user_store.go:1890) for nil view
@@ -342,6 +345,7 @@ pub trait UserStore {
         team_id: &str,
         offset: i64,
         limit: i64,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetEtagForProfiles` (user_store.go:826).
@@ -2105,7 +2109,9 @@ impl UserStore for SqlUserStore {
         page: i64,
         per_page: i64,
         deleted: Option<bool>,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> Result<Vec<User>, StoreError> {
+        let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
         // `usersQuery.OrderBy("Users.Username ASC").Offset(page*perPage).Limit(perPage)`, with
         // the `Inactive`/`Active` block as the only predicate — nil restrictions add no join and
         // no DISTINCT, and this route can never reach the `update_at_asc` sort or the
@@ -2149,12 +2155,25 @@ impl UserStore for SqlUserStore {
              WHERE ($3::bool IS NULL
                     OR ($3 AND u.deleteat != 0)
                     OR (NOT $3 AND u.deleteat = 0))
+               AND NOT $4::boolean
+               AND (cardinality($5::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM teammembers rtm
+                      WHERE rtm.userid = u.id
+                        AND rtm.deleteat = 0
+                        AND rtm.teamid = ANY($5::text[])))
+               AND (cardinality($6::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM channelmembers rcm
+                      WHERE rcm.userid = u.id
+                        AND rcm.channelid = ANY($6::text[])))
              ORDER BY u.username ASC
              OFFSET $1 LIMIT $2
             "#,
             offset_of(page, per_page),
             per_page,
             deleted,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_all(&self.pool)
         .await
@@ -2174,7 +2193,9 @@ impl UserStore for SqlUserStore {
         page: i64,
         per_page: i64,
         deleted: Option<bool>,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> Result<Vec<User>, StoreError> {
+        let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
         // `Join("TeamMembers tm ON ( tm.UserId = Users.Id AND tm.DeleteAt = 0 )")` plus
         // `Where("tm.TeamId = ?")`. The `tm.DeleteAt = 0` lives in the **join condition** and
         // the team id in the WHERE — moving either changes nothing here, but the join is an
@@ -2221,6 +2242,16 @@ impl UserStore for SqlUserStore {
                AND ($4::bool IS NULL
                     OR ($4 AND u.deleteat != 0)
                     OR (NOT $4 AND u.deleteat = 0))
+               AND NOT $5::boolean
+               AND (cardinality($6::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM teammembers rtm
+                      WHERE rtm.userid = u.id
+                        AND rtm.deleteat = 0
+                        AND rtm.teamid = ANY($6::text[])))
+               AND (cardinality($7::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM channelmembers rcm
+                      WHERE rcm.userid = u.id
+                        AND rcm.channelid = ANY($7::text[])))
              ORDER BY u.username ASC
              OFFSET $2 LIMIT $3
             "#,
@@ -2228,6 +2259,9 @@ impl UserStore for SqlUserStore {
             offset_of(page, per_page),
             per_page,
             deleted,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_all(&self.pool)
         .await
@@ -2476,7 +2510,9 @@ impl UserStore for SqlUserStore {
         channel_id: &str,
         offset: i64,
         limit: i64,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> Result<Vec<User>, StoreError> {
+        let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
         // An INNER join to the team and a LEFT join to the channel with `cm.UserId IS NULL` —
         // the anti-join. Both the team id and the channel id sit in **join conditions**, not in
         // the WHERE: moving `cm.ChannelId = ?` into the WHERE would turn the outer join into an
@@ -2520,6 +2556,16 @@ impl UserStore for SqlUserStore {
               LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $2)
               LEFT JOIN bots b ON b.userid = u.id
              WHERE cm.userid IS NULL
+               AND NOT $5::boolean
+               AND (cardinality($6::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM teammembers rtm
+                      WHERE rtm.userid = u.id
+                        AND rtm.deleteat = 0
+                        AND rtm.teamid = ANY($6::text[])))
+               AND (cardinality($7::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM channelmembers rcm
+                      WHERE rcm.userid = u.id
+                        AND rcm.channelid = ANY($7::text[])))
              ORDER BY u.username ASC
              OFFSET $3 LIMIT $4
             "#,
@@ -2527,6 +2573,9 @@ impl UserStore for SqlUserStore {
             channel_id,
             offset,
             limit,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_all(&self.pool)
         .await
@@ -2545,7 +2594,9 @@ impl UserStore for SqlUserStore {
         team_id: &str,
         offset: i64,
         limit: i64,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> Result<Vec<User>, StoreError> {
+        let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
         // The anti-join again, this time against `TeamMembers`. `tm.DeleteAt = 0` in the join
         // condition means a user whose membership was soft-deleted counts as *not* in the team
         // and is listed — the opposite of what the same clause does in `get_profiles_in_team`,
@@ -2588,12 +2639,25 @@ impl UserStore for SqlUserStore {
               LEFT JOIN teammembers tm ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)
               LEFT JOIN bots b ON b.userid = u.id
              WHERE tm.userid IS NULL
+               AND NOT $4::boolean
+               AND (cardinality($5::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM teammembers rtm
+                      WHERE rtm.userid = u.id
+                        AND rtm.deleteat = 0
+                        AND rtm.teamid = ANY($5::text[])))
+               AND (cardinality($6::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM channelmembers rcm
+                      WHERE rcm.userid = u.id
+                        AND rcm.channelid = ANY($6::text[])))
              ORDER BY u.username ASC
              OFFSET $2 LIMIT $3
             "#,
             team_id,
             offset,
             limit,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_all(&self.pool)
         .await
