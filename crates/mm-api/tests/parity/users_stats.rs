@@ -257,24 +257,10 @@ async fn a_caller_without_view_members_is_served() {
         return;
     }
 
-    let mut answers = Vec::new();
-    for base in [GO, RUST] {
-        let response = client
-            .get(format!("{base}/api/v4/users/stats"))
-            .header("Authorization", format!("Bearer {}", f.roleless_token))
-            .send()
-            .await
-            .expect("reachable");
-        assert_eq!(response.status(), 200, "{base}");
-        let served = response
-            .headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok())
-            == Some("rust");
-        answers.push((served, response.text().await.expect("a body")));
-    }
-    assert!(answers[1].0, "the restricted count is served here");
-    assert_eq!(answers[0].1, answers[1].1, "the same count, byte for byte");
+    // The caller's channels are the shared fixture team's defaults, whose membership moves while
+    // other suites run: bracket our answer between two of Go's (and assert it is served here).
+    let (go, ours) = fetch_both_stable(&client, &f.roleless_token, "/api/v4/users/stats").await;
+    assert_eq!(ours, go, "the same count, byte for byte");
 }
 
 /// `/users/stats/filtered` is one segment deeper and **registered now**.
