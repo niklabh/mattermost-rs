@@ -64,9 +64,9 @@ fn plain_page(page: i64, per_page: i64) -> UserPage {
 }
 
 /// Why `GetUsers` cannot answer these options here, or `None` when it can: the store query
-/// behind [`crate::App::get_users_from_profiles`] has no role filter, no `update_at_asc` sort,
-/// no `UpdatedAfter` and no view restrictions. `InTeamId`, `InChannelId` and the rest are
-/// **ignored** by Go's `GetAllProfiles`, so they are not a reason.
+/// behind [`crate::App::get_users_from_profiles`] has no role filter, no `update_at_asc` sort
+/// and no `UpdatedAfter`. `InTeamId`, `InChannelId` and the rest are **ignored** by Go's
+/// `GetAllProfiles`, so they are not a reason.
 pub fn get_users_unanswerable(options: &mm_plugin::wire::model::UserGetOptions) -> Option<&str> {
     if !options.role.is_empty() || !options.roles.is_empty() {
         Some("a role filter on GetAllProfiles (D-1030)")
@@ -74,11 +74,29 @@ pub fn get_users_unanswerable(options: &mm_plugin::wire::model::UserGetOptions) 
         Some("the update_at_asc sort on GetAllProfiles (D-1030)")
     } else if options.updated_after > 0 {
         Some("UpdatedAfter on GetAllProfiles (D-1030)")
-    } else if options.view_restrictions.is_some() {
-        Some("view restrictions on GetAllProfiles (D-1030)")
     } else {
         None
     }
+}
+
+/// A plugin's `ViewRestrictions` as Go's store receives it.
+///
+/// The options cross net/rpc as gob, and gob **omits zero values**: an empty slice arrives as
+/// nil, and a pointer to a struct whose fields are all empty arrives as a nil pointer. So a
+/// plugin that sends both lists empty reaches `GetAllProfiles` with nil restrictions — no filter,
+/// every user — and `applyViewRestrictionsFilter`'s `1 = 0` ("non-nil, both empty") is
+/// unreachable from a plugin. `None` here is that nil; one empty list is already Go's "no join".
+pub fn plugin_view_restrictions(
+    options: &mm_plugin::wire::model::UserGetOptions,
+) -> Option<crate::user::ViewUsersRestrictions> {
+    options
+        .view_restrictions
+        .as_deref()
+        .filter(|r| !(r.teams.is_empty() && r.channels.is_empty()))
+        .map(|r| crate::user::ViewUsersRestrictions {
+            teams: r.teams.clone(),
+            channels: r.channels.clone(),
+        })
 }
 
 /// Which arm of `App.SearchUsers` (app/user.go:2412) a search takes, in Go's order.
@@ -168,7 +186,13 @@ impl AppPluginApi {
             inactive: options.inactive,
             active: options.active,
         };
-        let (a, b) = self.reply_list(self.app.get_users_from_profiles(page).await, user_to_wire);
+        let restrictions = plugin_view_restrictions(&options);
+        let (a, b) = self.reply_list(
+            self.app
+                .get_users_from_profiles(page, restrictions.as_ref())
+                .await,
+            user_to_wire,
+        );
         Ok(api::Z_GetUsersReturns { a, b })
     }
 
@@ -796,10 +820,6 @@ mod tests {
                 updated_after: 1,
                 ..UserGetOptions::default()
             },
-            UserGetOptions {
-                view_restrictions: Some(Box::new(ViewUsersRestrictions::default())),
-                ..UserGetOptions::default()
-            },
         ];
         for options in refused {
             assert!(get_users_unanswerable(&options).is_some(), "{options:?}");
@@ -813,6 +833,26 @@ mod tests {
             None,
             "`UpdatedAfter > 0` — zero and below add no predicate"
         );
+    }
+
+    /// Gob drops what is empty: both lists empty is Go's nil, and one list is kept as sent.
+    #[test]
+    fn a_plugins_empty_restrictions_are_no_restrictions() {
+        let with = |teams: &[&str], channels: &[&str]| UserGetOptions {
+            view_restrictions: Some(Box::new(ViewUsersRestrictions {
+                teams: teams.iter().map(|t| (*t).to_owned()).collect(),
+                channels: channels.iter().map(|c| (*c).to_owned()).collect(),
+            })),
+            ..UserGetOptions::default()
+        };
+        assert_eq!(plugin_view_restrictions(&UserGetOptions::default()), None);
+        assert_eq!(plugin_view_restrictions(&with(&[], &[])), None);
+        let teams_only = plugin_view_restrictions(&with(&["t"], &[])).expect("kept");
+        assert_eq!(teams_only.teams, ["t"]);
+        assert!(teams_only.channels.is_empty());
+        let channels_only = plugin_view_restrictions(&with(&[], &["c"])).expect("kept");
+        assert_eq!(channels_only.channels, ["c"]);
+        assert_eq!(get_users_unanswerable(&with(&["t"], &["c"])), None);
     }
 
     /// Go's order: `WithoutTeam` first, then the channel, the not-in-channel, the not-in-team,

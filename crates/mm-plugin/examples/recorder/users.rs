@@ -21,7 +21,9 @@
 //! **in the order the host gave them**, so the order is still compared.
 
 use go_netrpc::Client;
-use mm_plugin::wire::model::{CustomStatus, Preference, Team, User, UserGetOptions, UserSearch};
+use mm_plugin::wire::model::{
+    CustomStatus, Preference, Team, User, UserGetOptions, UserSearch, ViewUsersRestrictions,
+};
 use mm_plugin::wire::plugin::*;
 use serde_json::{Value as Json, json};
 
@@ -148,6 +150,35 @@ async fn user_reads(api: &Client, input: &Inputs, out: &mut Vec<Json>) {
         &known,
     )
     .await;
+    // View restrictions, one call per shape. Both lists empty crosses gob as nil — every user.
+    let with_side = [
+        input.own.as_str(),
+        input.other.as_str(),
+        input.reader.as_str(),
+        input.side.as_str(),
+    ];
+    for (teams, channels) in [
+        (vec![input.side_team.clone()], vec![]),
+        (vec![], vec![input.own_channel.clone()]),
+        (
+            vec![input.side_team.clone()],
+            vec![input.own_channel.clone()],
+        ),
+        (vec![], vec![]),
+    ] {
+        let mut options = everyone(false, false);
+        if let Some(options) = options.as_mut() {
+            options.view_restrictions = Some(Box::new(ViewUsersRestrictions { teams, channels }));
+        }
+        call_filtered::<_, Z_GetUsersReturns>(
+            api,
+            out,
+            "GetUsers",
+            Z_GetUsersArgs { a: options },
+            &with_side,
+        )
+        .await;
+    }
     // A zero page is `LIMIT 0`. (Not nil options: Go dereferences them and the server dies.)
     let _: Option<Z_GetUsersReturns> = call(
         api,

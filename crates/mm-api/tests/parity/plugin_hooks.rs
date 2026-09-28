@@ -7664,6 +7664,31 @@ fn assert_users_answers_are_gos(calls: &[Json], hooks: &[Json]) {
     // profile scrub.
     let by_ids = own_in(&answer("GetUsersByIds", 0));
     assert_eq!(by_ids["Password"], "<hash>", "GetUsersByIds is unsanitised");
+    // `GetUsers` with view restrictions (D-1030): calls 1-3 restrict, call 4 sends both lists
+    // empty, which gob delivers to Go as nil — every known user. The three restricted answers
+    // must all succeed and at least one must leave somebody out, or they prove nothing.
+    let ids = |n: usize| -> Vec<Json> {
+        let call = calls.iter().filter(|c| c["call"] == "GetUsers").nth(n);
+        assert!(
+            call.is_some_and(|c| c.get("error").is_none()),
+            "GetUsers call {n} answers: {call:?}"
+        );
+        answer("GetUsers", n)["A"]
+            .as_array()
+            .map(|users| users.iter().map(|u| u["Id"].clone()).collect())
+            .unwrap_or_default()
+    };
+    let unrestricted = ids(4);
+    // Call 0 is the same read with no restrictions field at all (its filter omits `side`).
+    let plain = ids(0);
+    assert!(
+        !plain.is_empty() && plain.iter().all(|id| unrestricted.contains(id)),
+        "empty restrictions are no restrictions: {unrestricted:?} against {plain:?}"
+    );
+    assert!(
+        (1..=3).any(|n| ids(n).len() < unrestricted.len()),
+        "a restriction leaves somebody out"
+    );
     let listed = own_in(&answer("GetUsers", 0));
     assert!(
         listed["Password"].is_null() && listed["Email"].is_string(),

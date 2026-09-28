@@ -9823,9 +9823,11 @@ command tranche with `/hookrec fetch `.
 
 ---
 
-## D-1030 · A plugin's `GetUsers` with a role, the `update_at_asc` sort, `UpdatedAfter` or view restrictions answers not implemented
+## D-1030 · A plugin's `GetUsers` with a role, the `update_at_asc` sort or `UpdatedAfter` answers not implemented
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-23 (app/plugin_api.go:277) · **Owner** the plugin host
+**Narrowed** 2026-09-28 — view restrictions are answered (`plugin_view_restrictions`: both lists
+empty is gob's nil, so every user). Three filters remain.
 
 `UserStore::get_all_profiles` holds only the page and the active filter; Go's `GetAllProfiles`
 also applies `applyRoleFilter`, `applyMultiRoleFilters` (system roles only), `Users.UpdateAt ASC`

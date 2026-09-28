@@ -386,11 +386,15 @@ impl App {
     /// `Sanitize(map[string]bool{})` applied, as Go's store applies it — the credentials go and
     /// the profile stays.
     #[tracing::instrument(skip_all, fields(page = page.page, per_page = page.per_page))]
-    pub async fn get_users_from_profiles(&self, page: UserPage) -> AppResult<Vec<User>> {
+    pub async fn get_users_from_profiles(
+        &self,
+        page: UserPage,
+        view_restrictions: Option<&ViewUsersRestrictions>,
+    ) -> AppResult<Vec<User>> {
         let mut users = self
             .store()
             .user()
-            .get_all_profiles(page.page, page.per_page, page.deleted(), None)
+            .get_all_profiles(page.page, page.per_page, page.deleted(), view_restrictions)
             .await
             .map_err(|err| get_profiles_error("GetUsers", err))?;
         store_sanitize(&mut users);
