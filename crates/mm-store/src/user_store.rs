@@ -3,11 +3,37 @@
 
 use std::collections::BTreeMap;
 
-use mm_model::user::{User, UserUpdate};
+use mm_model::user::{User, UserUpdate, ViewUsersRestrictions};
 use mm_model::utils::{CURRENT_VERSION, StringArray, StringMap};
 use sqlx::PgPool;
 
 use crate::error::StoreError;
+
+/// The three bind values `applyViewRestrictionsFilter` (user_store.go:2162) becomes here:
+/// `(restricted to nobody, teams, channels)`.
+///
+/// `None` is Go's nil — no filter. A restriction with **both** lists empty is Go's `1 = 0`;
+/// `GetViewUsersRestrictions` always builds `[]string{}`, never nil, so that is the only way Go's
+/// non-nil-but-empty test can come out. One empty list adds no join.
+///
+/// **Two non-empty lists are an AND**: a user must be on a permitted team *and* in a permitted
+/// channel. `UserCanSeeOtherUser` takes either, so a caller can be allowed `GET /users/{id}` for a
+/// user its `POST /users/ids` leaves out — Go's inconsistency, measured and kept
+/// (`parity::view_restricted_lookups::a_restricted_callers_user_lists_are_gos`).
+///
+/// Go has two shapes. With `distinct` (every profile query) the joins sit under `DISTINCT` and
+/// are an `EXISTS` per list; without it (`Count`) the join rows multiply and a lateral per list
+/// keeps them. Both use these binds.
+fn restriction_binds(restrictions: Option<&ViewUsersRestrictions>) -> (bool, &[String], &[String]) {
+    match restrictions {
+        None => (false, &[], &[]),
+        Some(r) => (
+            r.teams.is_empty() && r.channels.is_empty(),
+            &r.teams,
+            &r.channels,
+        ),
+    }
+}
 
 /// The subset of Go's `store.UserStore` (store/store.go:448-550) that is ported.
 pub trait UserStore {
@@ -139,6 +165,7 @@ pub trait UserStore {
     fn get_profiles_by_usernames(
         &self,
         usernames: &[String],
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.Update` (user_store.go:255).
@@ -190,12 +217,12 @@ pub trait UserStore {
     /// `since` is `UserGetByIdsOpts.Since`: applied as `UpdateAt > since` **only when positive**
     /// (`options.Since > 0`), so `0` and a negative value both mean "no filter". `IsAdmin` is
     /// not a store concern — Go carries it in the same options struct but only the sanitizer
-    /// reads it. The restricted variant (`applyViewRestrictionsFilter`'s joins) is not ported;
-    /// the api layer forwards those callers.
+    /// reads it. `view_restrictions` is [`restriction_binds`]' distinct form.
     fn get_profile_by_ids(
         &self,
         ids: &[String],
         since: i64,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetChannelGroupUsers` (user_store.go:2142), projected to the user
@@ -1374,15 +1401,8 @@ impl UserStore for SqlUserStore {
         // Go's `1 = 0` for a non-nil restriction with both lists empty. Each lateral yields one row
         // per matching membership — Go's inner join, multiplicity kept — or exactly one row when
         // its list is empty, which is Go adding no join at all.
-        let (restricted_to_nobody, teams, channels): (bool, &[String], &[String]) =
-            match &options.view_restrictions {
-                None => (false, &[], &[]),
-                Some(r) => (
-                    r.teams.is_empty() && r.channels.is_empty(),
-                    &r.teams,
-                    &r.channels,
-                ),
-            };
+        let (restricted_to_nobody, teams, channels) =
+            restriction_binds(options.view_restrictions.as_ref());
         // `$6`, `ExcludeRegularUsers` with the bots, is Go's inner `JOIN Bots`: bots only.
         let count = sqlx::query_scalar!(
             r#"
@@ -1640,17 +1660,17 @@ impl UserStore for SqlUserStore {
     /// `ORDER BY Users.Username ASC` is wire surface: the answer is a JSON array and its order is
     /// the store's, not the request's.
     ///
-    /// # The restrictions filter is not here
+    /// # The restrictions filter
     ///
-    /// `applyViewRestrictionsFilter` joins `TeamMembers`/`ChannelMembers` for a caller whose
-    /// `view_members` is granted only through a team or channel scheme. The api layer forwards
-    /// every such caller to Go, so this query is always the nil-restrictions branch — the same
-    /// arrangement `get_profile_by_ids` has.
+    /// `applyViewRestrictionsFilter(query, restrictions, true)` — the joins under `DISTINCT`, so
+    /// an `EXISTS` per list; see [`restriction_binds`].
     #[tracing::instrument(skip_all, fields(count = usernames.len(), found))]
     async fn get_profiles_by_usernames(
         &self,
         usernames: &[String],
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> Result<Vec<User>, StoreError> {
+        let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
         let rows = sqlx::query_as!(
             UserRow,
             r#"
@@ -1688,9 +1708,22 @@ impl UserStore for SqlUserStore {
               FROM users u
               LEFT JOIN bots b ON b.userid = u.id
              WHERE u.username = ANY($1::text[])
+               AND NOT $2::boolean
+               AND (cardinality($3::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM teammembers rtm
+                      WHERE rtm.userid = u.id
+                        AND rtm.deleteat = 0
+                        AND rtm.teamid = ANY($3::text[])))
+               AND (cardinality($4::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM channelmembers rcm
+                      WHERE rcm.userid = u.id
+                        AND rcm.channelid = ANY($4::text[])))
              ORDER BY u.username ASC
             "#,
-            usernames
+            usernames,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_all(&self.pool)
         .await
@@ -1774,7 +1807,9 @@ impl UserStore for SqlUserStore {
         &self,
         ids: &[String],
         since: i64,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> Result<Vec<User>, StoreError> {
+        let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
         // `usersQuery.Where({"Users.Id": userIds}).OrderBy("Users.Username ASC")`, plus
         // `Where(Gt{"Users.UpdateAt": Since})` when `Since > 0`. The branch is taken here, in
         // Rust, so the SQL has one shape: a NULL parameter is "no filter".
@@ -1826,10 +1861,23 @@ impl UserStore for SqlUserStore {
               LEFT JOIN bots b ON b.userid = u.id
              WHERE u.id = ANY($1::varchar[])
                AND ($2::bigint IS NULL OR u.updateat > $2)
+               AND NOT $3::boolean
+               AND (cardinality($4::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM teammembers rtm
+                      WHERE rtm.userid = u.id
+                        AND rtm.deleteat = 0
+                        AND rtm.teamid = ANY($4::text[])))
+               AND (cardinality($5::text[]) = 0 OR EXISTS (
+                     SELECT 1 FROM channelmembers rcm
+                      WHERE rcm.userid = u.id
+                        AND rcm.channelid = ANY($5::text[])))
              ORDER BY u.username ASC
             "#,
             ids,
             since_filter,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_all(&self.pool)
         .await

@@ -334,7 +334,9 @@ async fn local_get_users(
 /// `GetViewUsersRestrictions` call, with `IsAdmin: c.IsSystemAdmin()` true.
 #[tracing::instrument(skip_all, fields(count))]
 async fn local_get_users_by_ids(State(state): State<AppState>, request: Request) -> Response {
-    match users::serve_users_by_ids(&state, &local_session(), request).await {
+    match users::serve_users_by_ids(&state, &local_session(), request, users::Restrictions::Skip)
+        .await
+    {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }

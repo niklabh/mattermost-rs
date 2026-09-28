@@ -925,7 +925,7 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         &self,
         args: api::Z_GetUsersByUsernamesArgs,
     ) -> Result<api::Z_GetUsersByUsernamesReturns, NotImplemented> {
-        let answer = match self.app.get_users_by_usernames(&args.a).await {
+        let answer = match self.app.get_users_by_usernames(&args.a, None).await {
             Ok(users) => api::Z_GetUsersByUsernamesReturns {
                 a: users
                     .into_iter()

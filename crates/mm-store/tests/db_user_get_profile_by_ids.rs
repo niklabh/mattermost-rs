@@ -112,7 +112,11 @@ async fn order_is_username_deleted_rows_are_kept_and_unknown_ids_are_absent() {
 
     // Asked for in id order, with an unknown id in the middle.
     let users = store
-        .get_profile_by_ids(&owned(&[ZED, AMY, UNKNOWN, GONE, MID, STALE, BOT, NEG]), 0)
+        .get_profile_by_ids(
+            &owned(&[ZED, AMY, UNKNOWN, GONE, MID, STALE, BOT, NEG]),
+            0,
+            None,
+        )
         .await
         .expect("query runs");
 
@@ -160,7 +164,7 @@ async fn since_filters_only_when_positive_and_is_strictly_greater() {
     // which a `!= 0` guard (`UpdateAt > -1`) would drop.
     for no_filter in [0, -1] {
         let users = store
-            .get_profile_by_ids(&all, no_filter)
+            .get_profile_by_ids(&all, no_filter, None)
             .await
             .expect("query runs");
         assert_eq!(users.len(), 7, "since={no_filter} is no filter");
@@ -170,7 +174,7 @@ async fn since_filters_only_when_positive_and_is_strictly_greater() {
 
     // Strictly greater: 2000 excludes the two rows *at* 2000 and everything below.
     let users = store
-        .get_profile_by_ids(&all, 2_000)
+        .get_profile_by_ids(&all, 2_000, None)
         .await
         .expect("query runs");
     assert_eq!(
@@ -181,13 +185,19 @@ async fn since_filters_only_when_positive_and_is_strictly_greater() {
     );
 
     // 1 is positive, so the filter applies and drops the zero- and negative-UpdateAt rows.
-    let users = store.get_profile_by_ids(&all, 1).await.expect("query runs");
+    let users = store
+        .get_profile_by_ids(&all, 1, None)
+        .await
+        .expect("query runs");
     assert_eq!(users.len(), 5);
     assert!(!ids(&users).contains(&STALE), "since=1 is a real filter");
     assert!(!ids(&users).contains(&NEG));
 
     // An empty id list is an empty answer, not an error.
-    let users = store.get_profile_by_ids(&[], 0).await.expect("query runs");
+    let users = store
+        .get_profile_by_ids(&[], 0, None)
+        .await
+        .expect("query runs");
     assert!(users.is_empty());
 
     purge(&pool).await;

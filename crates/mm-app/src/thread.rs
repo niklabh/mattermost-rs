@@ -238,7 +238,7 @@ impl App {
         let profiles = self
             .store()
             .user()
-            .get_profile_by_ids(&ids, 0)
+            .get_profile_by_ids(&ids, 0, None)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "thread participant lookup failed");

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE u.username = ANY($1::text[])\n             ORDER BY u.username ASC\n            ",
+  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE u.id = ANY($1::varchar[])\n               AND ($2::bigint IS NULL OR u.updateat > $2)\n               AND NOT $3::boolean\n               AND (cardinality($4::text[]) = 0 OR EXISTS (\n                     SELECT 1 FROM teammembers rtm\n                      WHERE rtm.userid = u.id\n                        AND rtm.deleteat = 0\n                        AND rtm.teamid = ANY($4::text[])))\n               AND (cardinality($5::text[]) = 0 OR EXISTS (\n                     SELECT 1 FROM channelmembers rcm\n                      WHERE rcm.userid = u.id\n                        AND rcm.channelid = ANY($5::text[])))\n             ORDER BY u.username ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -161,6 +161,10 @@
     ],
     "parameters": {
       "Left": [
+        "VarcharArray",
+        "Int8",
+        "Bool",
+        "TextArray",
         "TextArray"
       ]
     },
@@ -198,5 +202,5 @@
       null
     ]
   },
-  "hash": "61e9e80a5725fa07243045378fa04765d68b138d1320a8f91e867d917f3405cc"
+  "hash": "d2d450a719a1db63ee08a12e6f44c231d7bcaefebea7f6194cd9b6e34a7449c9"
 }

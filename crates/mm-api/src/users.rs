@@ -712,7 +712,9 @@ pub async fn search_users(
 /// There is no `IsValidUsername` here, on the list or on its members. A name of the wrong shape
 /// is simply a name that matches nothing, and the answer is the array without it. A request for
 /// five names can legitimately answer with two, and the caller cannot tell "no such user" from
-/// "not allowed to see them" — which is the same guarantee `getUsersByIds` gives.
+/// "not allowed to see them" — which is the same guarantee `getUsersByIds` gives: a restricted
+/// caller's query keeps only the users on its permitted teams or in its channels, asked after
+/// both 400s.
 ///
 /// # Order is the store's, not the request's
 ///
@@ -723,24 +725,12 @@ pub async fn search_users(
 ///
 /// `json.Marshal` then `w.Write`, so **no trailing newline** ([D-086]) — the opposite of
 /// `getUser` beside it, and the same as `getUsersByIds`.
-#[tracing::instrument(skip_all, fields(count, forwarded))]
+#[tracing::instrument(skip_all, fields(count))]
 pub async fn get_users_by_names(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
-    // The nil-restrictions fast path. `GetViewUsersRestrictions` is called before the fetch in
-    // Go and its non-nil branch changes the *query*; every such caller is Go's.
-    if !state
-        .app
-        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
-        .await
-    {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
-
     match serve_users_by_names(&state, &session, request).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
@@ -785,7 +775,15 @@ async fn serve_users_by_names(
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await;
 
-    let mut users = state.app.get_users_by_usernames(&usernames).await?;
+    // After both 400s and the admin check, before the fetch — Go's order.
+    let restrictions = state
+        .app
+        .view_users_restrictions(&session.0.user_id)
+        .await?;
+    let mut users = state
+        .app
+        .get_users_by_usernames(&usernames, restrictions.as_ref())
+        .await?;
     let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
     for user in &mut users {
         user.sanitize_profile(&options, is_admin);
@@ -1030,12 +1028,12 @@ fn parse_users_by_ids_request(
 /// Port of `getUsersByIds` (api4/user.go:1182) — `POST /api/v4/users/ids`, the lookup the
 /// webapp makes for every author it is about to render.
 ///
-/// # The restrictions forward comes first, before the body is read
+/// # A restricted caller gets only the users it can see
 ///
-/// Go's order is body → `since` → `GetViewUsersRestrictions` → query. Ours checks the
-/// nil-restrictions fast path (user-based `view_members`, `getUser`'s rule) **first** and
-/// forwards the whole request for a restricted caller — the body has to be intact to forward,
-/// and Go re-runs both 400 branches itself, so the observable order is unchanged.
+/// Go's order is body → `since` → `GetViewUsersRestrictions` → query, kept. For a caller without
+/// `view_members` the query keeps only users on its permitted teams or in its channels, so a guest
+/// asking for a stranger's id gets an array without it — no 403, the same silence as an unknown
+/// id. `parity::view_restricted_lookups`.
 ///
 /// # Every user is sanitised as "other", including the caller
 ///
@@ -1061,32 +1059,31 @@ fn parse_users_by_ids_request(
 /// coherence with an empty `PATCH`, which Go does invalidate on.
 ///
 /// `json.Marshal` + `w.Write`: no trailing newline ([D-086]).
-#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count, forwarded))]
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count))]
 pub async fn get_users_by_ids(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
-    if !state
-        .app
-        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
-        .await
-    {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
-
-    match serve_users_by_ids(&state, &session, request).await {
+    match serve_users_by_ids(&state, &session, request, Restrictions::Ask).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
+}
+
+/// Whether a by-ids read asks `GetViewUsersRestrictions`: `getUsersByIds` does, and
+/// `localGetUsersByIds` (api4/user_local.go:239) — whose caller is no user — never does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Restrictions {
+    Ask,
+    Skip,
 }
 
 pub(crate) async fn serve_users_by_ids(
     state: &AppState,
     session: &AuthenticatedSession,
     request: axum::extract::Request,
+    restrictions: Restrictions,
 ) -> Result<Response, ApiError> {
     let query = request.uri().query().map(str::to_owned);
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
@@ -1110,9 +1107,19 @@ pub(crate) async fn serve_users_by_ids(
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await;
 
+    // After the body and `since` 400s — Go's order.
+    let view_restrictions = match restrictions {
+        Restrictions::Ask => {
+            state
+                .app
+                .view_users_restrictions(&session.0.user_id)
+                .await?
+        }
+        Restrictions::Skip => None,
+    };
     let mut users = state
         .app
-        .get_users_by_ids(&parsed.user_ids, parsed.since)
+        .get_users_by_ids(&parsed.user_ids, parsed.since, view_restrictions.as_ref())
         .await?;
     let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
     for user in &mut users {

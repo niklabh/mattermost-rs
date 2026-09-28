@@ -11,13 +11,7 @@ use mm_store::{ChannelStore, StoreError, TeamStore, UserStore};
 
 use crate::App;
 
-/// Port of `model.ViewUsersRestrictions` (model/user.go:273): the teams and channels through which
-/// a restricted user may see other users.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ViewUsersRestrictions {
-    pub teams: Vec<String>,
-    pub channels: Vec<String>,
-}
+pub use mm_model::user::ViewUsersRestrictions;
 
 impl App {
     /// Port of `app.App.GetTotalUsersStats` (app/user.go:2369).
@@ -35,10 +29,8 @@ impl App {
     ) -> AppResult<UsersStats> {
         let options = mm_model::user_count::UserCountOptions {
             include_bot_accounts: true,
-            view_restrictions: view_restrictions.map(|r| mm_model::user::ViewUsersRestrictions {
-                teams: r.teams.clone(),
-                channels: r.channels.clone(),
-            }),
+            // `UserCountOptions` owns its restrictions, as Go's struct holds the pointer.
+            view_restrictions: view_restrictions.cloned(),
             ..Default::default()
         };
         let total_users_count = self.store().user().count(&options).await.map_err(|err| {
@@ -169,10 +161,14 @@ impl App {
     /// simply absent from the array, so a request for five names can legitimately answer with
     /// two.
     #[tracing::instrument(skip_all, fields(count = usernames.len()))]
-    pub async fn get_users_by_usernames(&self, usernames: &[String]) -> AppResult<Vec<User>> {
+    pub async fn get_users_by_usernames(
+        &self,
+        usernames: &[String],
+        view_restrictions: Option<&ViewUsersRestrictions>,
+    ) -> AppResult<Vec<User>> {
         self.store()
             .user()
-            .get_profiles_by_usernames(usernames)
+            .get_profiles_by_usernames(usernames, view_restrictions)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "profiles-by-username lookup failed");
@@ -253,15 +249,19 @@ impl App {
     /// `AppState`'s stand-ins (D-085), so the caller applies `SanitizeProfile` per user with the
     /// same map `getUser` builds. Every caller sanitises — there is no raw consumer.
     ///
-    /// `ViewRestrictions` is not a parameter: the api layer forwards any caller whose
-    /// restrictions would be non-nil, so this is always the `allowFromCache` path minus the
-    /// cache. One error branch, one id — `app.user.get_profiles.app_error`, 500 — for any store
+    /// `view_restrictions` is `options.ViewRestrictions`; Go reads its cache only when that is
+    /// nil (`allowFromCache`), and this port has no cache on either path. One error branch, one id — `app.user.get_profiles.app_error`, 500 — for any store
     /// failure; there is no not-found, an unknown id is simply absent from the list.
     #[tracing::instrument(skip_all, fields(count = ids.len(), since))]
-    pub async fn get_users_by_ids(&self, ids: &[String], since: i64) -> AppResult<Vec<User>> {
+    pub async fn get_users_by_ids(
+        &self,
+        ids: &[String],
+        since: i64,
+        view_restrictions: Option<&ViewUsersRestrictions>,
+    ) -> AppResult<Vec<User>> {
         self.store()
             .user()
-            .get_profile_by_ids(ids, since)
+            .get_profile_by_ids(ids, since, view_restrictions)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "users-by-ids lookup failed");
@@ -394,7 +394,7 @@ impl App {
     pub async fn get_users(&self, ids: &[String]) -> AppResult<Vec<User>> {
         self.store()
             .user()
-            .get_profile_by_ids(ids, 0)
+            .get_profile_by_ids(ids, 0, None)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "users lookup failed");
@@ -1592,7 +1592,7 @@ mod tests {
         let app = crate::App::new(mm_store::SqlStore::from_pool(pool));
 
         let err = app
-            .get_users_by_ids(&["y9i4er48tt8bukijy7i3u5y9ar".to_owned()], 0)
+            .get_users_by_ids(&["y9i4er48tt8bukijy7i3u5y9ar".to_owned()], 0, None)
             .await
             .expect_err("the store is unreachable");
         assert_eq!(err.status_code, 500);

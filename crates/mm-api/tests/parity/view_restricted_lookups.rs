@@ -325,3 +325,176 @@ async fn a_restricted_callers_user_count_is_gos() {
         .await
         .expect("the synthetic role is removed");
 }
+
+/// `(status, served here, body)` for a JSON POST.
+async fn post_json(
+    http: &reqwest::Client,
+    base: &str,
+    path: &str,
+    token: &str,
+    body: &serde_json::Value,
+) -> (u16, bool, String) {
+    let response = http
+        .post(format!("{base}{path}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(body)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{base} unreachable: {e}"));
+    let status = response.status().as_u16();
+    let served = response
+        .headers()
+        .get("x-mmrs-served-by")
+        .and_then(|v| v.to_str().ok())
+        == Some("rust");
+    (status, served, response.text().await.unwrap_or_default())
+}
+
+/// `POST /users/ids` and `POST /users/usernames`: a restricted caller's list keeps only the users
+/// it can see, each once, in `Username ASC` — Go reads no cache for a restricted caller, so the
+/// order is the query's on both servers and the bodies compare byte for byte.
+#[tokio::test]
+async fn a_restricted_callers_user_lists_are_gos() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team = create_team(&http, &admin, "vrb").await;
+    let away = create_team(&http, &admin, "vrbaway").await;
+    let first = create_channel_typed(&http, &admin, &team, "vrb", "O").await;
+    let second = create_channel_typed(&http, &admin, &team, "vrbsecond", "O").await;
+
+    let guest = create_plain_user(&http, &admin, &team, "vrbguest").await;
+    let granted = create_plain_user(&http, &admin, &team, "vrbgranted").await;
+    let nobody = create_plain_user(&http, &admin, &team, "vrbnobody").await;
+    // In both of the guest's channels: one row per channel before `DISTINCT`.
+    let twice = create_plain_user(&http, &admin, &team, "vrbtwice").await;
+    // On the team, in neither channel: visible only through a team grant.
+    let teammate = create_plain_user(&http, &admin, &team, "vrbmate").await;
+    // Elsewhere entirely.
+    let stranger = create_plain_user(&http, &admin, &away, "vrbstranger").await;
+    for user in [&guest.id, &granted.id, &twice.id] {
+        add_user_to_channel(&http, &admin, &first, user).await;
+        add_user_to_channel(&http, &admin, &second, user).await;
+    }
+    // A DM with the stranger each: a channel of the caller's with no team, so the stranger is in
+    // a permitted channel and on no permitted team.
+    for caller in [&guest.id, &granted.id] {
+        let (status, _, body) = post_json(
+            &http,
+            GO,
+            "/api/v4/channels/direct",
+            &admin,
+            &serde_json::json!([caller, stranger.id]),
+        )
+        .await;
+        assert_eq!(status, 201, "the admin's DM: {body}");
+    }
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after the epoch")
+        .as_millis();
+    let role_id = format!("mmrsvrb{stamp:019}");
+    let role_name = format!("mmrs_vrb_viewer_{stamp}");
+    sqlx::query(
+        "INSERT INTO roles
+            (id, name, displayname, description, createat, updateat, deleteat,
+             permissions, schememanaged, builtin, schemeid)
+         VALUES
+            ($1, $2, 'mmrs team viewer', 'written straight into the table',
+             1701355039000, 1701355040000, 0, ' view_members', false, false, NULL)",
+    )
+    .bind(&role_id)
+    .bind(&role_name)
+    .execute(&pool)
+    .await
+    .expect("the synthetic role is written");
+    for user in [&guest.id, &granted.id, &nobody.id] {
+        make_guest(&pool, user).await;
+    }
+    sqlx::query("UPDATE teammembers SET roles = $2 WHERE userid = $1")
+        .bind(&granted.id)
+        .bind(&role_name)
+        .execute(&pool)
+        .await
+        .expect("the custom team role is granted");
+    for table in ["channelmembers", "teammembers"] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE userid = $1"))
+            .bind(&nobody.id)
+            .execute(&pool)
+            .await
+            .expect("the memberships are dropped");
+    }
+    // Out of town-square and off-topic too, which joining the team put it in.
+    sqlx::query("DELETE FROM channelmembers WHERE userid = $1")
+        .bind(&teammate.id)
+        .execute(&pool)
+        .await
+        .expect("the teammate's channel memberships are dropped");
+    invalidate_go_caches(&http, &admin).await;
+
+    let everyone = [&guest, &granted, &nobody, &twice, &teammate, &stranger];
+    let ids: Vec<&str> = everyone.iter().map(|u| u.id.as_str()).collect();
+    let mut usernames = Vec::new();
+    for user in everyone {
+        usernames.push(identity(&http, &admin, &user.id).await.0);
+    }
+
+    // The ids each caller must get back. With both lists non-empty Go inner-joins **both**, so
+    // the team-granted caller sees only users on its team *and* in its channels: not the teammate
+    // (no channel), not the stranger (no team) — where `UserCanSeeOtherUser` would take either.
+    let expect = [
+        (
+            "guest",
+            &guest.token,
+            vec![&guest.id, &granted.id, &twice.id, &stranger.id],
+        ),
+        (
+            "team-granted",
+            &granted.token,
+            vec![&guest.id, &granted.id, &twice.id],
+        ),
+        ("nobody", &nobody.token, vec![]),
+    ];
+    for (caller, token, want) in expect {
+        for (route, path, body) in [
+            ("by ids", "/api/v4/users/ids", serde_json::json!(ids)),
+            (
+                "by usernames",
+                "/api/v4/users/usernames",
+                serde_json::json!(usernames),
+            ),
+        ] {
+            let case = format!("{caller}, {route}");
+            let (go_status, _, go_body) = post_json(&http, GO, path, token, &body).await;
+            let (rust_status, served, rust_body) = post_json(&http, RUST, path, token, &body).await;
+            assert_eq!(go_status, 200, "{case}: Go answered {go_body}");
+            assert_eq!(rust_status, 200, "{case}: we answered {rust_body}");
+            assert!(served, "{case}: served here");
+            let go_users: Vec<serde_json::Value> = serde_json::from_str(&go_body).expect("users");
+            let mut got: Vec<&str> = go_users
+                .iter()
+                .map(|u| u["id"].as_str().expect("an id"))
+                .collect();
+            got.sort_unstable();
+            let mut wanted: Vec<&str> = want.iter().map(|id| id.as_str()).collect();
+            wanted.sort_unstable();
+            assert_eq!(got, wanted, "{case}: Go's own answer is the fixture's");
+            assert_eq!(rust_body, go_body, "{case}: byte for byte");
+        }
+    }
+
+    for user in everyone {
+        common::delete_plain_user(&http, &admin, &user.id).await;
+    }
+    sqlx::query("DELETE FROM roles WHERE id = $1")
+        .bind(&role_id)
+        .execute(&pool)
+        .await
+        .expect("the synthetic role is removed");
+}

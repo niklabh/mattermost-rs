@@ -701,7 +701,7 @@ impl App {
         if ids.is_empty() {
             return text.to_owned();
         }
-        let users = match self.store().user().get_profile_by_ids(&ids, 0).await {
+        let users = match self.store().user().get_profile_by_ids(&ids, 0, None).await {
             Ok(users) => users,
             Err(err) => {
                 tracing::debug!(error = %err, "replaceUserIds: the profiles could not be read");

@@ -258,7 +258,7 @@ impl App {
         if let Some(rest) = clean_channel_name.strip_prefix('@') {
             if rest.contains(',') {
                 let usernames: Vec<String> = rest.split(',').map(str::to_owned).collect();
-                let users = self.get_users_by_usernames(&usernames).await?;
+                let users = self.get_users_by_usernames(&usernames, None).await?;
                 let user_ids: Vec<String> = users.into_iter().map(|user| user.id).collect();
                 let channel = self.get_group_channel(&user_ids).await?;
                 return Ok(InFilterChannel::Found(Box::new(channel)));
@@ -303,7 +303,7 @@ impl App {
         let users = self
             .store()
             .user()
-            .get_profile_by_ids(user_ids, 0)
+            .get_profile_by_ids(user_ids, 0, None)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "group member profile lookup failed");

@@ -678,7 +678,7 @@ impl App {
         other_user_id: &str,
     ) -> AppResult<Option<ChannelCreate>> {
         let users = self
-            .get_users_by_ids(&[user_id.to_owned(), other_user_id.to_owned()], 0)
+            .get_users_by_ids(&[user_id.to_owned(), other_user_id.to_owned()], 0, None)
             .await?;
         let session_user_id = session.map(|session| session.user_id.as_str());
         for user in users.iter().filter(|user| user.is_bot) {
@@ -781,7 +781,7 @@ impl App {
         let mut users = self
             .store()
             .user()
-            .get_profile_by_ids(&ids, 0)
+            .get_profile_by_ids(&ids, 0, None)
             .await
             .map_err(|err| invalid_direct_user(&err.to_string()))?;
 
@@ -1030,7 +1030,7 @@ impl App {
         let users = self
             .store()
             .user()
-            .get_profile_by_ids(user_ids, 0)
+            .get_profile_by_ids(user_ids, 0, None)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "group member profile lookup failed");

@@ -247,7 +247,7 @@ impl App {
         let users = self
             .store
             .user()
-            .get_profile_by_ids(user_ids, 0)
+            .get_profile_by_ids(user_ids, 0, None)
             .await
             .map_err(NonGroupFilterError::Profiles)?;
 
