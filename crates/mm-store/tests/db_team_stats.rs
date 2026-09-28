@@ -115,8 +115,12 @@ async fn total_counts_deactivated_users_and_active_does_not() {
     purge(&pool).await;
     seed(&pool).await;
 
-    let total = get_total_member_count(&pool, TEAM).await.expect("counts");
-    let active = get_active_member_count(&pool, TEAM).await.expect("counts");
+    let total = get_total_member_count(&pool, TEAM, None)
+        .await
+        .expect("counts");
+    let active = get_active_member_count(&pool, TEAM, None)
+        .await
+        .expect("counts");
 
     assert_eq!(
         total, 3,
@@ -146,13 +150,13 @@ async fn a_missing_team_counts_zero_in_both() {
 
     let missing = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
     assert_eq!(
-        get_total_member_count(&pool, missing)
+        get_total_member_count(&pool, missing, None)
             .await
             .expect("counts"),
         0
     );
     assert_eq!(
-        get_active_member_count(&pool, missing)
+        get_active_member_count(&pool, missing, None)
             .await
             .expect("counts"),
         0

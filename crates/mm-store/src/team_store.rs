@@ -16,10 +16,12 @@ use mm_model::channel_member::ChannelUnread;
 use mm_model::team::Team;
 use mm_model::team_member::TeamMember;
 use mm_model::team_search::TeamSearch;
+use mm_model::user::ViewUsersRestrictions;
 use mm_model::utils::StringMap;
 use sqlx::PgPool;
 
 use crate::error::StoreError;
+use crate::user_store::restriction_binds;
 
 /// `model.TeamGuestRoleId` (role.go:392).
 pub const TEAM_GUEST_ROLE_ID: &str = "team_guest";
@@ -197,43 +199,43 @@ pub trait TeamStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<TeamMember, StoreError>> + Send;
 
-    /// Port of `SqlTeamStore.GetMembers` (team_store.go:1063), restrictions-free — the
-    /// `ViewRestrictions` half of `TeamMembersGetOptions` is dropped for the same reason as
-    /// [`TeamStore::get_total_member_count`]'s parameter: the one route calling this forwards
-    /// any restricted caller to Go.
+    /// Port of `SqlTeamStore.GetMembers` (team_store.go:1063); `view_restrictions` is
+    /// `TeamMembersGetOptions.ViewRestrictions` — see [`get_members`].
     fn get_members(
         &self,
         team_id: &str,
         offset: i64,
         limit: i64,
         options: &TeamMembersGetOptions,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<Vec<TeamMember>, StoreError>> + Send;
 
-    /// Port of `SqlTeamStore.GetMembersByIds` (team_store.go:1156), restrictions-free: the
-    /// living memberships of a named set of users in one team, unpaginated and unordered.
+    /// Port of `SqlTeamStore.GetMembersByIds` (team_store.go:1156): the living memberships of
+    /// a named set of users in one team, unpaginated and unordered, restricted as Go restricts.
     fn get_members_by_ids(
         &self,
         team_id: &str,
         user_ids: &[String],
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<Vec<TeamMember>, StoreError>> + Send;
 
-    /// Port of `SqlTeamStore.GetTotalMemberCount` (team_store.go:1106), restrictions-free.
+    /// Port of `SqlTeamStore.GetTotalMemberCount` (team_store.go:1106).
     ///
-    /// Go's second parameter is a `*model.ViewUsersRestrictions` that splices extra joins into
-    /// the query. It is dropped here rather than accepted and ignored: the one route that calls
-    /// this (`getTeamStats`) **forwards to Go** whenever the caller's restrictions would be
-    /// non-nil, so no caller of this port can ever hold one — same reasoning as the dropped
-    /// `allowFromCache` parameters.
+    /// `applyTeamMemberViewRestrictionsFilterForStats` joins without `DISTINCT`, but the count
+    /// is `count(DISTINCT TeamMembers.UserId)`, so the joins cannot multiply it: an `EXISTS` per
+    /// list is the same number.
     fn get_total_member_count(
         &self,
         team_id: &str,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
-    /// Port of `SqlTeamStore.GetActiveMemberCount` (team_store.go:1130), restrictions-free —
-    /// see [`TeamStore::get_total_member_count`].
+    /// Port of `SqlTeamStore.GetActiveMemberCount` (team_store.go:1130) — see
+    /// [`TeamStore::get_total_member_count`].
     fn get_active_member_count(
         &self,
         team_id: &str,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
     /// Port of `SqlTeamStore.GetChannelUnreadsForAllTeams` (team_store.go:1231).
@@ -540,8 +542,17 @@ impl TeamStore for SqlTeamStore {
         offset: i64,
         limit: i64,
         options: &TeamMembersGetOptions,
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> Result<Vec<TeamMember>, StoreError> {
-        get_members(&self.pool, team_id, offset, limit, options).await
+        get_members(
+            &self.pool,
+            team_id,
+            offset,
+            limit,
+            options,
+            view_restrictions,
+        )
+        .await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id, asked = user_ids.len()))]
@@ -549,18 +560,27 @@ impl TeamStore for SqlTeamStore {
         &self,
         team_id: &str,
         user_ids: &[String],
+        view_restrictions: Option<&ViewUsersRestrictions>,
     ) -> Result<Vec<TeamMember>, StoreError> {
-        get_members_by_ids(&self.pool, team_id, user_ids).await
+        get_members_by_ids(&self.pool, team_id, user_ids, view_restrictions).await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id))]
-    async fn get_total_member_count(&self, team_id: &str) -> Result<i64, StoreError> {
-        get_total_member_count(&self.pool, team_id).await
+    async fn get_total_member_count(
+        &self,
+        team_id: &str,
+        view_restrictions: Option<&ViewUsersRestrictions>,
+    ) -> Result<i64, StoreError> {
+        get_total_member_count(&self.pool, team_id, view_restrictions).await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id))]
-    async fn get_active_member_count(&self, team_id: &str) -> Result<i64, StoreError> {
-        get_active_member_count(&self.pool, team_id).await
+    async fn get_active_member_count(
+        &self,
+        team_id: &str,
+        view_restrictions: Option<&ViewUsersRestrictions>,
+    ) -> Result<i64, StoreError> {
+        get_active_member_count(&self.pool, team_id, view_restrictions).await
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, exclude_team_id = %exclude_team_id, found))]
@@ -860,8 +880,13 @@ pub async fn get_common_team_ids_for_multiple_users(
 /// that one extra predicate is the entire difference from [`get_active_member_count`]. A
 /// soft-deleted membership row therefore counts in *neither* number, while a deactivated user's
 /// surviving row counts in this one only.
-#[tracing::instrument(skip(pool), fields(team_id = %team_id))]
-pub async fn get_total_member_count(pool: &PgPool, team_id: &str) -> Result<i64, StoreError> {
+#[tracing::instrument(skip(pool, view_restrictions), fields(team_id = %team_id))]
+pub async fn get_total_member_count(
+    pool: &PgPool,
+    team_id: &str,
+    view_restrictions: Option<&ViewUsersRestrictions>,
+) -> Result<i64, StoreError> {
+    let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
     sqlx::query_scalar!(
         r#"
         SELECT count(DISTINCT teammembers.userid) AS "count!"
@@ -869,8 +894,21 @@ pub async fn get_total_member_count(pool: &PgPool, team_id: &str) -> Result<i64,
          WHERE teammembers.deleteat = 0
            AND teammembers.userid = users.id
            AND teammembers.teamid = $1
+           AND NOT $2::boolean
+           AND (cardinality($3::text[]) = 0 OR EXISTS (
+                 SELECT 1 FROM teammembers rtm
+                  WHERE rtm.userid = users.id
+                    AND rtm.deleteat = 0
+                    AND rtm.teamid = ANY($3::text[])))
+           AND (cardinality($4::text[]) = 0 OR EXISTS (
+                 SELECT 1 FROM channelmembers rcm
+                  WHERE rcm.userid = users.id
+                    AND rcm.channelid = ANY($4::text[])))
         "#,
-        team_id
+        team_id,
+        restricted_to_nobody,
+        teams,
+        channels,
     )
     .fetch_one(pool)
     .await
@@ -884,8 +922,13 @@ pub async fn get_total_member_count(pool: &PgPool, team_id: &str) -> Result<i64,
 ///
 /// [`get_total_member_count`]'s query plus `Users.DeleteAt = 0`. Go's error context is the same
 /// string in both functions ("failed to count TeamMembers"), reproduced rather than improved.
-#[tracing::instrument(skip(pool), fields(team_id = %team_id))]
-pub async fn get_active_member_count(pool: &PgPool, team_id: &str) -> Result<i64, StoreError> {
+#[tracing::instrument(skip(pool, view_restrictions), fields(team_id = %team_id))]
+pub async fn get_active_member_count(
+    pool: &PgPool,
+    team_id: &str,
+    view_restrictions: Option<&ViewUsersRestrictions>,
+) -> Result<i64, StoreError> {
+    let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
     sqlx::query_scalar!(
         r#"
         SELECT count(DISTINCT teammembers.userid) AS "count!"
@@ -894,8 +937,21 @@ pub async fn get_active_member_count(pool: &PgPool, team_id: &str) -> Result<i64
            AND teammembers.userid = users.id
            AND users.deleteat = 0
            AND teammembers.teamid = $1
+           AND NOT $2::boolean
+           AND (cardinality($3::text[]) = 0 OR EXISTS (
+                 SELECT 1 FROM teammembers rtm
+                  WHERE rtm.userid = users.id
+                    AND rtm.deleteat = 0
+                    AND rtm.teamid = ANY($3::text[])))
+           AND (cardinality($4::text[]) = 0 OR EXISTS (
+                 SELECT 1 FROM channelmembers rcm
+                  WHERE rcm.userid = users.id
+                    AND rcm.channelid = ANY($4::text[])))
         "#,
-        team_id
+        team_id,
+        restricted_to_nobody,
+        teams,
+        channels,
     )
     .fetch_one(pool)
     .await
@@ -1478,7 +1534,7 @@ pub async fn get_member(
     Ok(team_member_from_row(row))
 }
 
-/// Port of `SqlTeamStore.GetMembers` (team_store.go:1063), restrictions-free.
+/// Port of `SqlTeamStore.GetMembers` (team_store.go:1063).
 ///
 /// Four of Go's decisions ride along, and the first is the opposite of its channel twin:
 ///
@@ -1493,17 +1549,33 @@ pub async fn get_member(
 ///   That third shape is heap order, which both servers share but neither promises.
 /// - **`DeleteAt = 0` on the membership, always** — a departed member never appears in the
 ///   list, though [`get_member`] still serves the row singly.
+/// - `view_restrictions` is `applyTeamMemberViewRestrictionsFilter`: an `EXISTS` per list
+///   ([`restriction_binds`]), and a refusal for `sort=Username` — see the body.
 /// - `exclude_deleted_users` adds `Users.DeleteAt = 0`. Go LEFT JOINs `Users` only when the
 ///   sort or the flag needs it; joining it unconditionally is result-equivalent (`Users.Id` is
 ///   the primary key, so the LEFT JOIN neither multiplies nor drops rows) and keeps one query.
-#[tracing::instrument(skip(pool), fields(team_id = %team_id, offset, limit, found))]
+#[tracing::instrument(skip(pool, view_restrictions), fields(team_id = %team_id, offset, limit, found))]
 pub async fn get_members(
     pool: &PgPool,
     team_id: &str,
     offset: i64,
     limit: i64,
     options: &TeamMembersGetOptions,
+    view_restrictions: Option<&ViewUsersRestrictions>,
 ) -> Result<Vec<TeamMember>, StoreError> {
+    let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
+    // `applyTeamMemberViewRestrictionsFilter` ends in `.Distinct()`, and Go's `ORDER BY
+    // Username` names a column its select list lacks — which Postgres refuses under `DISTINCT`
+    // ("for SELECT DISTINCT, ORDER BY expressions must appear in select list"). So a restricted
+    // caller's `sort=Username` is Go's 500, measured. Both lists empty returns at `1 = 0`
+    // *before* the `.Distinct()`, so that caller sorts fine and gets `[]`. Refused here rather
+    // than sent, because the statement below is not `DISTINCT` and Postgres would accept it.
+    if view_restrictions.is_some() && !restricted_to_nobody && options.sort == "Username" {
+        return Err(StoreError::Argument {
+            entity: "TeamMember",
+            detail: "for SELECT DISTINCT, ORDER BY expressions must appear in select list",
+        });
+    }
     let rows = sqlx::query_as!(
         TeamMemberRow,
         r#"
@@ -1525,6 +1597,16 @@ pub async fn get_members(
          WHERE tm.teamid = $1
            AND tm.deleteat = 0
            AND (NOT $4::boolean OR u.deleteat = 0)
+           AND NOT $6::boolean
+           AND (cardinality($7::text[]) = 0 OR EXISTS (
+                 SELECT 1 FROM teammembers rtm
+                  WHERE rtm.userid = tm.userid
+                    AND rtm.deleteat = 0
+                    AND rtm.teamid = ANY($7::text[])))
+           AND (cardinality($8::text[]) = 0 OR EXISTS (
+                 SELECT 1 FROM channelmembers rcm
+                  WHERE rcm.userid = tm.userid
+                    AND rcm.channelid = ANY($8::text[])))
          ORDER BY CASE WHEN $5::text = '' THEN tm.userid END,
                   CASE WHEN $5::text = 'Username' THEN u.username END
          LIMIT $3
@@ -1534,7 +1616,10 @@ pub async fn get_members(
         offset,
         limit,
         options.exclude_deleted_users,
-        options.sort
+        options.sort,
+        restricted_to_nobody,
+        teams,
+        channels,
     )
     .fetch_all(pool)
     .await
@@ -1565,15 +1650,14 @@ pub async fn get_members(
 ///   silently empty 200.
 /// - **No `ORDER BY`** — heap order, like the channel twin.
 ///
-/// `restrictions` is dropped rather than ported. `applyTeamMemberViewRestrictionsFilter` needs
-/// the caller's team-and-channel filter, and the api4 route forwards any caller that has one —
-/// see `App::view_users_restrictions`. A parameter no caller of this port can set is a lie
-/// at the call site, the same rule that dropped `allowFromCache`.
-#[tracing::instrument(skip(pool, user_ids), fields(team_id = %team_id, asked = user_ids.len(), found))]
+/// `view_restrictions` is `applyTeamMemberViewRestrictionsFilter`: joins under `DISTINCT`, so
+/// an `EXISTS` per list ([`restriction_binds`]).
+#[tracing::instrument(skip(pool, user_ids, view_restrictions), fields(team_id = %team_id, asked = user_ids.len(), found))]
 pub async fn get_members_by_ids(
     pool: &PgPool,
     team_id: &str,
     user_ids: &[String],
+    view_restrictions: Option<&ViewUsersRestrictions>,
 ) -> Result<Vec<TeamMember>, StoreError> {
     if user_ids.is_empty() {
         return Err(StoreError::Argument {
@@ -1581,6 +1665,7 @@ pub async fn get_members_by_ids(
             detail: "invalid list of user ids",
         });
     }
+    let (restricted_to_nobody, teams, channels) = restriction_binds(view_restrictions);
 
     let rows = sqlx::query_as!(
         TeamMemberRow,
@@ -1602,9 +1687,22 @@ pub async fn get_members_by_ids(
          WHERE tm.teamid = $1
            AND tm.userid = ANY($2::text[])
            AND tm.deleteat = 0
+           AND NOT $3::boolean
+           AND (cardinality($4::text[]) = 0 OR EXISTS (
+                 SELECT 1 FROM teammembers rtm
+                  WHERE rtm.userid = tm.userid
+                    AND rtm.deleteat = 0
+                    AND rtm.teamid = ANY($4::text[])))
+           AND (cardinality($5::text[]) = 0 OR EXISTS (
+                 SELECT 1 FROM channelmembers rcm
+                  WHERE rcm.userid = tm.userid
+                    AND rcm.channelid = ANY($5::text[])))
         "#,
         team_id,
-        user_ids
+        user_ids,
+        restricted_to_nobody,
+        teams,
+        channels,
     )
     .fetch_all(pool)
     .await

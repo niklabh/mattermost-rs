@@ -634,7 +634,7 @@ impl App {
                 let count = self
                     .store()
                     .team()
-                    .get_active_member_count(&team.id)
+                    .get_active_member_count(&team.id, None)
                     .await
                     .map_err(|err| {
                         tracing::error!(error = %err, "active member count failed");

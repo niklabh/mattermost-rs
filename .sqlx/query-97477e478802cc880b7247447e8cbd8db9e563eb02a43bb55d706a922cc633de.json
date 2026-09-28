@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT tm.teamid,\n               tm.userid,\n               tm.roles,\n               tm.deleteat,\n               tm.schemeuser,\n               tm.schemeadmin,\n               tm.schemeguest,\n               tm.createat,\n               ts.defaultteamguestrole,\n               ts.defaultteamuserrole,\n               ts.defaultteamadminrole\n          FROM teammembers tm\n          LEFT JOIN teams t ON tm.teamid = t.id\n          LEFT JOIN schemes ts ON t.schemeid = ts.id\n          LEFT JOIN users u ON tm.userid = u.id\n         WHERE tm.teamid = $1\n           AND tm.deleteat = 0\n           AND (NOT $4::boolean OR u.deleteat = 0)\n         ORDER BY CASE WHEN $5::text = '' THEN tm.userid END,\n                  CASE WHEN $5::text = 'Username' THEN u.username END\n         LIMIT $3\n        OFFSET $2\n        ",
+  "query": "\n        SELECT tm.teamid,\n               tm.userid,\n               tm.roles,\n               tm.deleteat,\n               tm.schemeuser,\n               tm.schemeadmin,\n               tm.schemeguest,\n               tm.createat,\n               ts.defaultteamguestrole,\n               ts.defaultteamuserrole,\n               ts.defaultteamadminrole\n          FROM teammembers tm\n          LEFT JOIN teams t ON tm.teamid = t.id\n          LEFT JOIN schemes ts ON t.schemeid = ts.id\n         WHERE tm.teamid = $1\n           AND tm.userid = ANY($2::text[])\n           AND tm.deleteat = 0\n           AND NOT $3::boolean\n           AND (cardinality($4::text[]) = 0 OR EXISTS (\n                 SELECT 1 FROM teammembers rtm\n                  WHERE rtm.userid = tm.userid\n                    AND rtm.deleteat = 0\n                    AND rtm.teamid = ANY($4::text[])))\n           AND (cardinality($5::text[]) = 0 OR EXISTS (\n                 SELECT 1 FROM channelmembers rcm\n                  WHERE rcm.userid = tm.userid\n                    AND rcm.channelid = ANY($5::text[])))\n        ",
   "describe": {
     "columns": [
       {
@@ -62,10 +62,10 @@
     "parameters": {
       "Left": [
         "Text",
-        "Int8",
-        "Int8",
+        "TextArray",
         "Bool",
-        "Text"
+        "TextArray",
+        "TextArray"
       ]
     },
     "nullable": [
@@ -82,5 +82,5 @@
       true
     ]
   },
-  "hash": "a1818246c16cec73f3969f76ce574d8984e64e3d84bf5f457b9ba0c87b82af0c"
+  "hash": "97477e478802cc880b7247447e8cbd8db9e563eb02a43bb55d706a922cc633de"
 }

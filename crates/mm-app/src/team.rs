@@ -220,10 +220,11 @@ impl App {
         offset: i64,
         limit: i64,
         options: &TeamMembersGetOptions,
+        view_restrictions: Option<&crate::user::ViewUsersRestrictions>,
     ) -> AppResult<Vec<TeamMember>> {
         self.store()
             .team()
-            .get_members(team_id, offset, limit, options)
+            .get_members(team_id, offset, limit, options, view_restrictions)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "team members lookup failed");
@@ -237,7 +238,7 @@ impl App {
             })
     }
 
-    /// Port of `app.App.GetTeamMembersByIds` (team.go:1135), restrictions-free — the route
+    /// Port of `app.App.GetTeamMembersByIds` (team.go:1135) — the route
     /// forwards any caller that has a `ViewUsersRestrictions`, the same rule as
     /// [`App::get_team_stats`].
     ///
@@ -252,11 +253,12 @@ impl App {
         &self,
         team_id: &str,
         user_ids: &[String],
+        view_restrictions: Option<&crate::user::ViewUsersRestrictions>,
     ) -> AppResult<Vec<TeamMember>> {
         let members = self
             .store()
             .team()
-            .get_members_by_ids(team_id, user_ids)
+            .get_members_by_ids(team_id, user_ids, view_restrictions)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "team members by ids lookup failed");
@@ -272,8 +274,7 @@ impl App {
         Ok(members)
     }
 
-    /// Port of `app.App.GetTeamStats` (team.go:2234), restrictions-free — the caller forwards
-    /// any restricted request to Go, so this port never sees a `ViewUsersRestrictions`.
+    /// Port of `app.App.GetTeamStats` (team.go:2234).
     ///
     /// Go launches both counts on goroutines and then reads the **total**'s channel first, so
     /// when both fail the total's error is the one reported. Sequential awaits preserve exactly
@@ -282,11 +283,15 @@ impl App {
     /// `app.team.get_active_member_count.app_error` — and the first is also the id
     /// `GetChannelGuestCount` borrows in `channel.rs`, so three call sites now share it.
     #[tracing::instrument(skip_all, fields(team_id = %team_id))]
-    pub async fn get_team_stats(&self, team_id: &str) -> AppResult<mm_model::stats::TeamStats> {
+    pub async fn get_team_stats(
+        &self,
+        team_id: &str,
+        view_restrictions: Option<&crate::user::ViewUsersRestrictions>,
+    ) -> AppResult<mm_model::stats::TeamStats> {
         let total_member_count = self
             .store()
             .team()
-            .get_total_member_count(team_id)
+            .get_total_member_count(team_id, view_restrictions)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "total member count failed");
@@ -302,7 +307,7 @@ impl App {
         let active_member_count = self
             .store()
             .team()
-            .get_active_member_count(team_id)
+            .get_active_member_count(team_id, view_restrictions)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "active member count failed");
@@ -1014,7 +1019,7 @@ mod tests {
     #[tokio::test]
     async fn a_broken_stats_lookup_reports_the_total_counts_error_first() {
         let err = unreachable_app()
-            .get_team_stats("tttttttttttttttttttttttttt")
+            .get_team_stats("tttttttttttttttttttttttttt", None)
             .await
             .expect_err("the store is unreachable");
         assert_eq!(err.status_code, 500);
@@ -1069,6 +1074,7 @@ mod tests {
                 0,
                 60,
                 &TeamMembersGetOptions::default(),
+                None,
             )
             .await
             .expect_err("the store is unreachable");

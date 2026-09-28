@@ -452,24 +452,21 @@ pub async fn get_team(
 ///    caller the gate admits (an admin, via system roles) and a 403 for everyone else. The
 ///    opposite of `getChannelStats`, whose gate's own channel lookup made the same request a
 ///    403 even for the admin; the difference is which checker each handler calls, not a policy.
-/// 4. `GetViewUsersRestrictions`: Go builds view restrictions unless the caller holds
-///    system-wide `view_members`, which the default `system_user` role grants — so restrictions
-///    are nil for every caller in this deployment. **The restricted case is forwarded whole**
-///    rather than ported: it needs user-based team checks and dynamically-spliced restriction
-///    joins, and Go re-runs the id check and the gate itself, so ordering holds by construction.
-///    Same Strangler-inside-a-route pattern as the content-reviewer flags.
+/// 4. `GetViewUsersRestrictions`: nil unless the caller lacks system-wide `view_members`; a
+///    restricted caller's two counts keep only members on its permitted teams and in its
+///    channels ([`mm_store::TeamStore::get_total_member_count`]).
+///    `parity::view_restricted_lookups`.
 /// 5. Two counts, total then active — the app layer carries Go's error precedence.
 ///
 /// # Wire format
 ///
 /// `json.NewEncoder(w).Encode(stats)` — trailing newline ([D-086]). Three keys, no `omitempty`,
 /// fixture-pinned in `mm-model/src/stats.rs`.
-#[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded))]
+#[tracing::instrument(skip_all, fields(team_id = %team_id))]
 pub async fn get_team_stats(
     State(state): State<AppState>,
     Path(team_id): Path<String>,
     session: AuthenticatedSession,
-    request: axum::extract::Request,
 ) -> Response {
     if let Err(err) = require_id(&team_id, "team_id") {
         return err.into_response();
@@ -487,23 +484,16 @@ pub async fn get_team_stats(
         return get_team_denial(&session.0).into_response();
     }
 
-    // `GetViewUsersRestrictions` returns nil iff the caller holds system-wide `view_members` —
-    // the check is user-based (the row's roles, not the session's). Anything else would need
-    // the whole restrictions machinery, and Go owns that answer.
-    if !state
+    let restrictions = match state.app.view_users_restrictions(&session.0.user_id).await {
+        Ok(restrictions) => restrictions,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let stats = match state
         .app
-        .has_permission_to(
-            &session.0.user_id,
-            &mm_model::permission::PERMISSION_VIEW_MEMBERS,
-        )
+        .get_team_stats(&team_id, restrictions.as_ref())
         .await
     {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
-
-    let stats = match state.app.get_team_stats(&team_id).await {
         Ok(stats) => stats,
         Err(err) => return ApiError::from(err).into_response(),
     };
@@ -818,34 +808,6 @@ fn validate_team_and_user_ids(team_id: &str, user_id: &str) -> Result<(), ApiErr
     Ok(())
 }
 
-/// Go's `UserCanSeeOtherUser` (app/user.go:2710) as every ported route serves it: **self is
-/// visible without a query**, and anyone else is visible on the nil-restrictions fast path —
-/// user-based `view_members`, the default `system_user` grant. A caller holding neither takes
-/// the restricted remainder, which this server forwards. Returned as a three-way answer so the
-/// self short-circuit is pinned in-process: Go never computes restrictions for self, and a port
-/// that did would issue role reads on the commonest request.
-#[derive(Debug, PartialEq, Eq)]
-enum Visibility {
-    Visible,
-    Forward,
-}
-
-async fn user_visibility<F, Fut>(
-    session_user_id: &str,
-    target_user_id: &str,
-    has_view_members: F,
-) -> Visibility
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = bool>,
-{
-    if session_user_id == target_user_id || has_view_members().await {
-        Visibility::Visible
-    } else {
-        Visibility::Forward
-    }
-}
-
 /// Port of `getTeamMember` (api4/team.go:792), reached as
 /// `GET /api/v4/teams/{team_id}/members/{user_id}`.
 ///
@@ -856,9 +818,8 @@ where
 /// 2. `SessionHasPermissionToTeam(view_team)` → 403 naming `view_team`. **Before** the
 ///    visibility question and before any fetch: a non-member learns nothing about who else is
 ///    in the team, not even whether the user exists.
-/// 3. `UserCanSeeOtherUser` — see [`user_visibility`]; the restricted remainder forwards whole,
-///    and Go re-runs steps 1–2 itself, so ordering holds by construction. A `false` answer would
-///    be a 403 naming `view_members`; it is unreachable on the fast path and lives in Go.
+/// 3. `UserCanSeeOtherUser`: an error is itself (`c.Err = appErr`), a `false` the 403 naming
+///    `view_members` — before the fetch, so a guest cannot probe another team's membership.
 /// 4. `GetTeamMember` — 404 `app.team.get_member.missing.app_error` when there is no row,
 ///    including for a **well-formed team id that matches nothing**: Go never fetches the team,
 ///    and the admin's system roles pass the gate, so the admin gets this 404 where a plain user
@@ -871,12 +832,11 @@ where
 /// # Wire format
 ///
 /// `json.NewEncoder(w).Encode(team)` — trailing newline ([D-086]).
-#[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, forwarded))]
+#[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id))]
 pub async fn get_team_member(
     State(state): State<AppState>,
     Path((team_id, user_id)): Path<(String, String)>,
     session: AuthenticatedSession,
-    request: axum::extract::Request,
 ) -> Response {
     let user_id = if user_id == ME {
         session.0.user_id.clone()
@@ -900,21 +860,21 @@ pub async fn get_team_member(
         return get_team_denial(&session.0).into_response();
     }
 
-    let visibility = user_visibility(&session.0.user_id, &user_id, || async {
-        state
-            .app
-            .has_permission_to(
-                &session.0.user_id,
-                &mm_model::permission::PERMISSION_VIEW_MEMBERS,
-            )
-            .await
-    })
-    .await;
-    if visibility == Visibility::Forward {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
+    match state
+        .app
+        .user_can_see_other_user(&session.0.user_id, &user_id)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            return ApiError::from(make_permission_error(
+                &session.0,
+                &[&mm_model::permission::PERMISSION_VIEW_MEMBERS],
+            ))
+            .into_response();
+        }
+        Err(err) => return ApiError::from(err).into_response(),
     }
-    tracing::Span::current().record("forwarded", false);
 
     let mut member = match state.app.get_team_member(&team_id, &user_id).await {
         Ok(member) => member,
@@ -992,8 +952,9 @@ fn team_members_options(query: Option<&str>) -> TeamMembersGetOptions {
 /// 2. `SessionHasPermissionToTeam(view_team)` → 403 naming `view_team`. **The team is never
 ///    fetched**, so — exactly as `getTeamStats` — a well-formed id that matches nothing is an
 ///    empty `[]` for a caller the gate admits and a 403 for everyone else.
-/// 3. `GetViewUsersRestrictions`: nil iff the caller holds user-based `view_members`; the
-///    restricted case is forwarded whole, same as `getTeamStats` and `getUser`.
+/// 3. `GetViewUsersRestrictions`, applied by the store. **A restricted caller's `sort=Username`
+///    is Go's 500**: the filter turns the select `DISTINCT`, and Postgres refuses an `ORDER BY`
+///    column the select list lacks — see [`mm_store::team_store::get_members`].
 /// 4. `GetTeamMembers(page × per_page, per_page, options)` — the shared parser, with one
 ///    difference from `getChannelMembers` that lives in the store: **`per_page=0` is an empty
 ///    list here**, not the whole team, because `SqlTeamStore.GetMembers` emits `LIMIT 0`
@@ -1006,13 +967,12 @@ fn team_members_options(query: Option<&str>) -> TeamMembersGetOptions {
 ///
 /// `json.Marshal` + `w.Write` (team.go:868) — **no trailing newline**, unlike `getTeamMember`
 /// two functions up and unlike `getChannelMembers` ([D-086]). An empty page is `[]`.
-#[tracing::instrument(skip_all, fields(team_id = %team_id, page, per_page, forwarded))]
+#[tracing::instrument(skip_all, fields(team_id = %team_id, page, per_page))]
 pub async fn get_team_members(
     State(state): State<AppState>,
     Path(team_id): Path<String>,
     axum::extract::RawQuery(query): axum::extract::RawQuery,
     session: AuthenticatedSession,
-    request: axum::extract::Request,
 ) -> Response {
     let page = crate::channels::parse_page(query.as_deref());
     let per_page = crate::channels::parse_per_page(query.as_deref());
@@ -1037,22 +997,20 @@ pub async fn get_team_members(
         return get_team_denial(&session.0).into_response();
     }
 
-    if !state
-        .app
-        .has_permission_to(
-            &session.0.user_id,
-            &mm_model::permission::PERMISSION_VIEW_MEMBERS,
-        )
-        .await
-    {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
+    let restrictions = match state.app.view_users_restrictions(&session.0.user_id).await {
+        Ok(restrictions) => restrictions,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
 
     let mut members = match state
         .app
-        .get_team_members(&team_id, page.wrapping_mul(per_page), per_page, &options)
+        .get_team_members(
+            &team_id,
+            page.wrapping_mul(per_page),
+            per_page,
+            &options,
+            restrictions.as_ref(),
+        )
         .await
     {
         Ok(members) => members,
@@ -1567,11 +1525,7 @@ fn serialised_team_listing<T: serde::Serialize>(
 ///
 /// 1. `RequireTeamId`, then `SortedArrayFromJSON` and the empty check naming `user_ids`.
 /// 2. `SessionHasPermissionToTeam(view_team)` → 403 naming `view_team`, **after** both 400s.
-/// 3. `GetViewUsersRestrictions` — nil iff the caller holds user-based `view_members`; a
-///    restricted caller is forwarded whole, the same rule as `getTeamStats`, `getTeamMembers`
-///    and `getUsersByIds`. The forward happens **first** here, before the body is read, because
-///    forwarding needs the body intact; Go re-runs both 400s and the gate itself, so nothing
-///    observable moves.
+/// 3. `GetViewUsersRestrictions`, after the gate, applied by the store.
 /// 4. `SanitizeRoleData` over every element unless the caller holds `manage_team_roles` — the
 ///    same mid-list blanking as the paginated sibling, `delete_at: -1` on every row but the
 ///    caller's own.
@@ -1582,26 +1536,13 @@ fn serialised_team_listing<T: serde::Serialize>(
 /// [`get_team_members`] and diverging from its channel counterpart
 /// `mm_api::channels::get_channel_members_by_ids`, which encodes. Two handlers with the same
 /// request shape and a one-byte difference in the reply; [D-086].
-#[tracing::instrument(skip_all, fields(team_id = %team_id, asked, forwarded))]
+#[tracing::instrument(skip_all, fields(team_id = %team_id, asked))]
 pub async fn get_team_members_by_ids(
     State(state): State<AppState>,
     Path(team_id): Path<String>,
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
-    if !state
-        .app
-        .has_permission_to(
-            &session.0.user_id,
-            &mm_model::permission::PERMISSION_VIEW_MEMBERS,
-        )
-        .await
-    {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
-
     match serve_team_members_by_ids(&state, &team_id, &session, request).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
@@ -1628,9 +1569,13 @@ async fn serve_team_members_by_ids(
         return Err(get_team_denial(&session.0));
     }
 
+    let restrictions = state
+        .app
+        .view_users_restrictions(&session.0.user_id)
+        .await?;
     let mut members = state
         .app
-        .get_team_members_by_ids(team_id, &user_ids)
+        .get_team_members_by_ids(team_id, &user_ids, restrictions.as_ref())
         .await?;
 
     let can_manage_roles = state
@@ -2796,10 +2741,10 @@ mod tests {
 
     use super::team_privacy_from_body;
     use super::{
-        AllTeamsDenial, TeamMembersGetOptions, Visibility, all_teams_opts, get_team_denial,
+        AllTeamsDenial, TeamMembersGetOptions, all_teams_opts, get_team_denial,
         segment_matches_team_name_mux, team_by_name_denied, team_is_public, team_members_options,
         team_name_is_shadowed_by_team_id_route, team_unread_denied, team_view_denied,
-        user_visibility, validate_team_and_user_ids, wants_collapsed_threads,
+        validate_team_and_user_ids, wants_collapsed_threads,
     };
     use super::{TeamSearchDenial, TeamSearchPlan, team_search_plan};
 
@@ -3446,32 +3391,6 @@ mod tests {
             Some("user_id".to_owned())
         );
         assert!(validate_team_and_user_ids(ME, "aaaaaaaaaaaaaaaaaaaaaaaaaa").is_ok());
-    }
-
-    /// Self is visible without consulting `view_members` — Go returns before computing
-    /// restrictions, so the closure must never be polled.
-    #[tokio::test]
-    async fn asking_about_oneself_never_polls_view_members() {
-        let visibility = user_visibility(ME, ME, || async {
-            panic!("view_members must not run for self")
-        })
-        .await;
-        assert_eq!(visibility, Visibility::Visible);
-    }
-
-    /// Anyone else rides the fast path when the caller holds `view_members`, and forwards when
-    /// not — the restricted remainder is Go's.
-    #[tokio::test]
-    async fn asking_about_another_user_takes_the_view_members_fast_path() {
-        let other = "aaaaaaaaaaaaaaaaaaaaaaaaaa";
-        assert_eq!(
-            user_visibility(ME, other, || async { true }).await,
-            Visibility::Visible
-        );
-        assert_eq!(
-            user_visibility(ME, other, || async { false }).await,
-            Visibility::Forward
-        );
     }
 
     /// `sort` passes through raw — `username` is not `Username` — and the flag is Go's

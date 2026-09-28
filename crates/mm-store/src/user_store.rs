@@ -24,7 +24,9 @@ use crate::error::StoreError;
 /// Go has two shapes. With `distinct` (every profile query) the joins sit under `DISTINCT` and
 /// are an `EXISTS` per list; without it (`Count`) the join rows multiply and a lateral per list
 /// keeps them. Both use these binds.
-fn restriction_binds(restrictions: Option<&ViewUsersRestrictions>) -> (bool, &[String], &[String]) {
+pub(crate) fn restriction_binds(
+    restrictions: Option<&ViewUsersRestrictions>,
+) -> (bool, &[String], &[String]) {
     match restrictions {
         None => (false, &[], &[]),
         Some(r) => (

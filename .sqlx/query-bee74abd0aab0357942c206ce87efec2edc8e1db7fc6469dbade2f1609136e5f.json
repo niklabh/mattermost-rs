@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(DISTINCT teammembers.userid) AS \"count!\"\n          FROM teammembers, users\n         WHERE teammembers.deleteat = 0\n           AND teammembers.userid = users.id\n           AND users.deleteat = 0\n           AND teammembers.teamid = $1\n           AND NOT $2::boolean\n           AND (cardinality($3::text[]) = 0 OR EXISTS (\n                 SELECT 1 FROM teammembers rtm\n                  WHERE rtm.userid = users.id\n                    AND rtm.deleteat = 0\n                    AND rtm.teamid = ANY($3::text[])))\n           AND (cardinality($4::text[]) = 0 OR EXISTS (\n                 SELECT 1 FROM channelmembers rcm\n                  WHERE rcm.userid = users.id\n                    AND rcm.channelid = ANY($4::text[])))\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bee74abd0aab0357942c206ce87efec2edc8e1db7fc6469dbade2f1609136e5f"
+}

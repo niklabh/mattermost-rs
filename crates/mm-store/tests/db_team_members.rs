@@ -145,7 +145,7 @@ async fn the_member_reads_match_gos_sql() {
 
     // Default sort: by UserId, departed member excluded, deactivated user included, other team's
     // rows absent.
-    let default = get_members(&pool, TEAM, 0, 60, &TeamMembersGetOptions::default())
+    let default = get_members(&pool, TEAM, 0, 60, &TeamMembersGetOptions::default(), None)
         .await
         .expect("lists");
     assert_eq!(
@@ -171,6 +171,7 @@ async fn the_member_reads_match_gos_sql() {
             sort: mm_model::team_member::USERNAME.to_owned(),
             exclude_deleted_users: false,
         },
+        None,
     )
     .await
     .expect("lists");
@@ -186,6 +187,7 @@ async fn the_member_reads_match_gos_sql() {
             sort: String::new(),
             exclude_deleted_users: true,
         },
+        None,
     )
     .await
     .expect("lists");
@@ -201,6 +203,7 @@ async fn the_member_reads_match_gos_sql() {
             sort: mm_model::team_member::USERNAME.to_owned(),
             exclude_deleted_users: true,
         },
+        None,
     )
     .await
     .expect("lists");
@@ -217,6 +220,7 @@ async fn the_member_reads_match_gos_sql() {
             sort: "username".to_owned(),
             exclude_deleted_users: false,
         },
+        None,
     )
     .await
     .expect("lists");
@@ -225,14 +229,14 @@ async fn the_member_reads_match_gos_sql() {
     assert_eq!(unsorted, vec![USER_A, USER_B, USER_C]);
 
     // Pagination: LIMIT is unguarded, so 0 means zero rows (Go emits `LIMIT 0`); offset pages.
-    let none = get_members(&pool, TEAM, 0, 0, &TeamMembersGetOptions::default())
+    let none = get_members(&pool, TEAM, 0, 0, &TeamMembersGetOptions::default(), None)
         .await
         .expect("lists");
     assert!(
         none.is_empty(),
         "LIMIT 0 is an empty page here, unlike the channel store"
     );
-    let page_two = get_members(&pool, TEAM, 2, 2, &TeamMembersGetOptions::default())
+    let page_two = get_members(&pool, TEAM, 2, 2, &TeamMembersGetOptions::default(), None)
         .await
         .expect("lists");
     assert_eq!(
@@ -240,7 +244,7 @@ async fn the_member_reads_match_gos_sql() {
         vec![USER_C],
         "offset 2, limit 2 of three rows"
     );
-    let page_past_end = get_members(&pool, TEAM, 10, 2, &TeamMembersGetOptions::default())
+    let page_past_end = get_members(&pool, TEAM, 10, 2, &TeamMembersGetOptions::default(), None)
         .await
         .expect("lists");
     assert!(page_past_end.is_empty());
@@ -252,6 +256,7 @@ async fn the_member_reads_match_gos_sql() {
         0,
         60,
         &TeamMembersGetOptions::default(),
+        None,
     )
     .await
     .expect("lists");
@@ -298,6 +303,7 @@ async fn the_member_reads_match_gos_sql() {
             USER_B.to_owned(),
             USER_DEPARTED.to_owned(),
         ],
+        None,
     )
     .await
     .expect("the query runs");
@@ -307,7 +313,7 @@ async fn the_member_reads_match_gos_sql() {
 
     // The `TeamId` predicate: `USER_A` is a member of `OTHER_TEAM` too, and asking this team for
     // it must not bring that membership along.
-    let scoped = get_members_by_ids(&pool, TEAM, std::slice::from_ref(&USER_A.to_owned()))
+    let scoped = get_members_by_ids(&pool, TEAM, std::slice::from_ref(&USER_A.to_owned()), None)
         .await
         .expect("the query runs");
     assert_eq!(ids(&scoped), vec![USER_A]);
@@ -316,17 +322,23 @@ async fn the_member_reads_match_gos_sql() {
     // **No `Users.DeleteAt` filter at all.** `USER_C` is a deactivated user with a living
     // membership and it is returned — the paginated sibling only hides it when
     // `exclude_deleted_users` is set, and this query has no such option to set.
-    let deactivated = get_members_by_ids(&pool, TEAM, std::slice::from_ref(&USER_C.to_owned()))
-        .await
-        .expect("the query runs");
+    let deactivated =
+        get_members_by_ids(&pool, TEAM, std::slice::from_ref(&USER_C.to_owned()), None)
+            .await
+            .expect("the query runs");
     assert_eq!(ids(&deactivated), vec![USER_C]);
 
     // An id that names nobody is silently absent, and a list of only such ids is an empty
     // result rather than a miss — unlike `GetPublicChannelsByIdsForTeam`, whose zero rows are a
     // `NotFound` the app layer turns into a 404.
-    let unmatched = get_members_by_ids(&pool, TEAM, &["mmrstmuser000000000000none".to_owned()])
-        .await
-        .expect("the query runs");
+    let unmatched = get_members_by_ids(
+        &pool,
+        TEAM,
+        &["mmrstmuser000000000000none".to_owned()],
+        None,
+    )
+    .await
+    .expect("the query runs");
     assert!(unmatched.is_empty(), "{:?}", ids(&unmatched));
 
     // **The guard the REST route can never reach.** `getTeamMembersByIds` answers
@@ -335,7 +347,7 @@ async fn the_member_reads_match_gos_sql() {
     // raises a bare `errors.New` here, which its app layer wraps into a **500**, not a 400; the
     // point of keeping it is that an empty slice would otherwise be `= ANY('{}')` and a silently
     // empty success.
-    let empty = get_members_by_ids(&pool, TEAM, &[])
+    let empty = get_members_by_ids(&pool, TEAM, &[], None)
         .await
         .expect_err("an empty id list is an error, not an empty answer");
     assert!(

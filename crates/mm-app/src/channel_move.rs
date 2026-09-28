@@ -146,7 +146,9 @@ impl App {
             .map(|member| member.user_id.clone())
             .collect();
 
-        let team_members = self.get_team_members_by_ids(&team.id, &member_ids).await?;
+        let team_members = self
+            .get_team_members_by_ids(&team.id, &member_ids, None)
+            .await?;
         if team_members.len() == channel_members.len() {
             return Ok(MemberWrite::Done(()));
         }
@@ -207,7 +209,9 @@ impl App {
                 .iter()
                 .map(|member| member.user_id.clone())
                 .collect();
-            let team_members = self.get_team_members_by_ids(&team.id, &member_ids).await?;
+            let team_members = self
+                .get_team_members_by_ids(&team.id, &member_ids, None)
+                .await?;
             if team_members.len() != channel_members.len() {
                 let in_team: std::collections::HashSet<&str> = team_members
                     .iter()

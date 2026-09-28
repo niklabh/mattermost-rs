@@ -620,6 +620,7 @@ impl AppPluginApi {
                 args.b.saturating_mul(args.c),
                 args.c,
                 &TeamMembersGetOptions::default(),
+                None,
             )
             .await;
         let (a, b) = self.reply_list(result, team_member_to_wire);
@@ -705,7 +706,7 @@ impl AppPluginApi {
         &self,
         args: api::Z_GetTeamStatsArgs,
     ) -> Result<api::Z_GetTeamStatsReturns, NotImplemented> {
-        let (a, b) = self.reply(self.app.get_team_stats(&args.a).await, |s| {
+        let (a, b) = self.reply(self.app.get_team_stats(&args.a, None).await, |s| {
             team_stats_to_wire(&s)
         });
         Ok(api::Z_GetTeamStatsReturns { a, b })

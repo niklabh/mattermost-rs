@@ -569,6 +569,9 @@ async fn a_restricted_callers_searches_and_lists_are_gos() {
     // "in any channel" differ on this user alone: every other member with a channel shares
     // town-square with the callers, and the teammate has none.
     let hidden = create_plain_user(&http, &admin, &team, "vrqhidden").await;
+    // A guest on the team in no channel: both lists empty, yet `view_team` passes — the one
+    // caller who reaches Go's `1 = 0` through a team route.
+    let lonely = create_plain_user(&http, &admin, &team, "vrqlonely").await;
     for user in [&guest.id, &granted.id, &inside.id, &leaver.id] {
         add_user_to_channel(&http, &admin, &first, user).await;
     }
@@ -606,7 +609,7 @@ async fn a_restricted_callers_searches_and_lists_are_gos() {
     .execute(&pool)
     .await
     .expect("the synthetic role is written");
-    for user in [&guest.id, &granted.id, &nobody.id] {
+    for user in [&guest.id, &granted.id, &nobody.id, &lonely.id] {
         make_guest(&pool, user).await;
     }
     sqlx::query("UPDATE teammembers SET roles = $2 WHERE userid = $1")
@@ -622,7 +625,7 @@ async fn a_restricted_callers_searches_and_lists_are_gos() {
             .await
             .expect("the memberships are dropped");
     }
-    for user in [&teammate.id, &hidden.id] {
+    for user in [&teammate.id, &hidden.id, &lonely.id] {
         sqlx::query("DELETE FROM channelmembers WHERE userid = $1")
             .bind(user)
             .execute(&pool)
@@ -655,10 +658,29 @@ async fn a_restricted_callers_searches_and_lists_are_gos() {
         // The callers' own team: `view_team` on another would make this arm a 403 for all three.
         format!("/api/v4/users?not_in_team={team}&per_page=200"),
     ];
+    // The team routes, each a different store query under the same filter.
+    let team_reads = [
+        format!("/api/v4/teams/{team}/stats"),
+        format!("/api/v4/teams/{team}/members?per_page=200"),
+        format!("/api/v4/teams/{team}/members?per_page=200&sort=Username"),
+        format!("/api/v4/teams/{team}/members/{}", inside.id),
+        format!("/api/v4/teams/{team}/members/{}", hidden.id),
+        format!("/api/v4/teams/{team}/members/{}", teammate.id),
+    ];
+    let member_ids = serde_json::json!([
+        guest.id,
+        granted.id,
+        inside.id,
+        outside.id,
+        teammate.id,
+        hidden.id,
+        leaver.id
+    ]);
     for (caller, token) in [
         ("guest", &guest.token),
         ("team-granted", &granted.token),
         ("nobody", &nobody.token),
+        ("lonely", &lonely.token),
     ] {
         for body in &searches {
             let case = format!("{caller}, search {body}");
@@ -735,6 +757,64 @@ async fn a_restricted_callers_searches_and_lists_are_gos() {
                 );
             }
         }
+        for path in &team_reads {
+            let case = format!("{caller}, {path}");
+            let (go_status, _, go_body) = get(&http, GO, path, token).await;
+            let (rust_status, served, rust_body) = get(&http, RUST, path, token).await;
+            assert_eq!(
+                rust_status, go_status,
+                "{case}: Go {go_body}, we {rust_body}"
+            );
+            assert!(served, "{case}: served here");
+            if go_status == 200 {
+                assert_eq!(rust_body, go_body, "{case}: byte for byte");
+            } else {
+                assert_error_bodies_match_except_known_gaps(
+                    go_body.as_bytes(),
+                    rust_body.as_bytes(),
+                    &case,
+                );
+            }
+            if path.ends_with("sort=Username") {
+                // `1 = 0` returns before `.Distinct()`, so only the lonely caller sorts.
+                let want = if caller == "lonely" {
+                    200
+                } else if caller == "nobody" {
+                    403
+                } else {
+                    500
+                };
+                assert_eq!(go_status, want, "{case}: Go's own answer");
+            }
+        }
+        {
+            let case = format!("{caller}, members by ids");
+            let path = format!("/api/v4/teams/{team}/members/ids");
+            let (go_status, _, go_body) = post_json(&http, GO, &path, token, &member_ids).await;
+            let (rust_status, served, rust_body) =
+                post_json(&http, RUST, &path, token, &member_ids).await;
+            assert_eq!(
+                rust_status, go_status,
+                "{case}: Go {go_body}, we {rust_body}"
+            );
+            assert!(served, "{case}: served here");
+            if go_status == 200 {
+                // Heap order on both servers (no `ORDER BY`): compare as sets.
+                let sorted = |body: &str| {
+                    let mut rows: Vec<serde_json::Value> =
+                        serde_json::from_str(body).expect("members");
+                    rows.sort_by(|a, b| a["user_id"].as_str().cmp(&b["user_id"].as_str()));
+                    rows
+                };
+                assert_eq!(sorted(&rust_body), sorted(&go_body), "{case}");
+            } else {
+                assert_error_bodies_match_except_known_gaps(
+                    go_body.as_bytes(),
+                    rust_body.as_bytes(),
+                    &case,
+                );
+            }
+        }
         for path in &autocompletes {
             let case = format!("{caller}, {path}");
             let (go_status, _, go_body) = get(&http, GO, path, token).await;
@@ -766,6 +846,7 @@ async fn a_restricted_callers_searches_and_lists_are_gos() {
         &stranger.id,
         &leaver.id,
         &hidden.id,
+        &lonely.id,
     ] {
         common::delete_plain_user(&http, &admin, user).await;
     }
