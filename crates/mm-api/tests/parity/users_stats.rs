@@ -12,11 +12,11 @@
 //! suite checks all three against a query written straight against the shared database, because
 //! comparing two servers that are wrong in the same way proves nothing about the predicates.
 //!
-//! # The restricted caller is forwarded
+//! # The restricted caller is served
 //!
-//! A caller without `view_members` sends Go off to build a team-and-channel filter. `system_user`
-//! grants that permission, so no account a REST call can create reaches the branch; the suite
-//! makes one by writing a role name nothing defines, and asserts we hand the request to Go.
+//! A caller without `view_members` gets Go's team-and-channel filter. `system_user` grants that
+//! permission, so the suite makes one by writing a role name nothing defines and asserts the count
+//! is served here and equals Go's. The filter's multiplication is `parity::view_restricted_lookups`.
 
 use crate::common;
 
@@ -54,6 +54,9 @@ async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
             // account without changing what the session was minted with, which is exactly the
             // distinction `GetViewUsersRestrictions` turns on.
             let has_db = set_user_roles(&roleless.id, "mmrs_role_that_does_not_exist").await;
+            // Go reads the roles through its user cache, which the SQL write does not reach:
+            // without this, Go answers the stale `system_user` caller's unrestricted count.
+            common::invalidate_go_caches(client, token).await;
 
             Fixture {
                 plain_token: plain.token,
@@ -241,10 +244,9 @@ async fn deleted_at(user_id: &str) -> Option<i64> {
         .ok()
 }
 
-/// The forward: a caller holding no permissions at all takes Go's restricted branch, which this
-/// port does not reproduce.
+/// A caller holding no permissions at all takes Go's restricted branch, and it is ours.
 #[tokio::test]
-async fn a_caller_without_view_members_is_forwarded() {
+async fn a_caller_without_view_members_is_served() {
     if !stack_enabled() {
         return;
     }
@@ -255,38 +257,24 @@ async fn a_caller_without_view_members_is_forwarded() {
         return;
     }
 
-    let response = client
-        .get(format!("{RUST}/api/v4/users/stats"))
-        .header("Authorization", format!("Bearer {}", f.roleless_token))
-        .send()
-        .await
-        .expect("reachable");
-    assert_eq!(response.status(), 200);
-    assert_eq!(
-        response
+    let mut answers = Vec::new();
+    for base in [GO, RUST] {
+        let response = client
+            .get(format!("{base}/api/v4/users/stats"))
+            .header("Authorization", format!("Bearer {}", f.roleless_token))
+            .send()
+            .await
+            .expect("reachable");
+        assert_eq!(response.status(), 200, "{base}");
+        let served = response
             .headers()
             .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "the view-restriction filter is unported, so this request belongs upstream"
-    );
-
-    // And an ordinary user is **not** forwarded, or the assertion above would hold for a port
-    // that forwarded everything.
-    let served = client
-        .get(format!("{RUST}/api/v4/users/stats"))
-        .header("Authorization", format!("Bearer {}", f.plain_token))
-        .send()
-        .await
-        .expect("reachable");
-    assert_eq!(
-        served
-            .headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("rust"),
-        "system_user grants view_members, so the ordinary case is ours"
-    );
+            .and_then(|v| v.to_str().ok())
+            == Some("rust");
+        answers.push((served, response.text().await.expect("a body")));
+    }
+    assert!(answers[1].0, "the restricted count is served here");
+    assert_eq!(answers[0].1, answers[1].1, "the same count, byte for byte");
 }
 
 /// `/users/stats/filtered` is one segment deeper and **registered now**.

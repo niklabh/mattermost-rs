@@ -11,20 +11,6 @@ use mm_store::{ChannelStore, StoreError, TeamStore, UserStore};
 
 use crate::App;
 
-/// What `GetViewUsersRestrictions` (app/user.go:2756) decided, without the lists.
-///
-/// Go returns `nil` for a caller holding `view_members` and otherwise a
-/// `*model.ViewUsersRestrictions` naming the teams and channels the caller may see members
-/// through. This port computes the **decision** and not the lists, because every query that
-/// consumes them is unported — see [`App::get_view_users_restrictions`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewUsersRestriction {
-    /// Go's `nil`: no filter is applied to any user query.
-    None,
-    /// Go builds a list here. `mm_api::users` forwards the request instead.
-    Restricted,
-}
-
 /// Port of `model.ViewUsersRestrictions` (model/user.go:273): the teams and channels through which
 /// a restricted user may see other users.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -34,62 +20,37 @@ pub struct ViewUsersRestrictions {
 }
 
 impl App {
-    /// Port of `app.App.GetViewUsersRestrictions` (app/user.go:2756), narrowed to its verdict.
-    ///
-    /// # The restricted branch is unreachable on a stock server, and that is a fact about roles
-    ///
-    /// `system_user` — the role every account carries — grants `view_members` outright
-    /// (model/role.go:1179), so `HasPermissionTo` answers `true` and Go returns `nil` before it
-    /// touches a store. The only built-in role *without* it is `system_guest`, and guest accounts
-    /// are licensed. A deployment that edits `system_user` through the roles API can reach the
-    /// other branch; nothing else can.
-    ///
-    /// # The lists
-    ///
-    /// Callers that only branch on the verdict use this; the ones that need the teams and
-    /// channels — `UserCanSeeOtherUser`, and through it the websocket's guest rule — use
-    /// [`App::view_users_restrictions`].
-    ///
-    /// Note the permission is checked against the **user's own stored roles**
-    /// (`HasPermissionTo`), not the session's — so a session minted with narrower roles than the
-    /// account holds still sees the unrestricted answer.
-    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
-    pub async fn get_view_users_restrictions(&self, user_id: &str) -> ViewUsersRestriction {
-        if self
-            .has_permission_to(user_id, &PERMISSION_VIEW_MEMBERS)
-            .await
-        {
-            ViewUsersRestriction::None
-        } else {
-            ViewUsersRestriction::Restricted
-        }
-    }
-
-    /// Port of `app.App.GetTotalUsersStats` (app/user.go:2369) for nil view restrictions.
+    /// Port of `app.App.GetTotalUsersStats` (app/user.go:2369).
     ///
     /// One store call wrapped in one error id. The `UsersStats` around the number exists because
     /// it is a response body — `{"total_users_count":N}` — not because Go needed a type.
     ///
     /// **Bots are counted.** `IncludeBotAccounts: true` is a literal in Go's options struct, so
-    /// this number is larger than any member list on a server with plugins installed. See
-    /// [`mm_store::UserStore::count_total_users`].
-    #[tracing::instrument(skip(self))]
-    pub async fn get_total_users_stats(&self) -> AppResult<UsersStats> {
-        let total_users_count = self
-            .store()
-            .user()
-            .count_total_users()
-            .await
-            .map_err(|err| {
-                tracing::error!(error = %err, "user count failed");
-                AppError::boxed(
-                    "GetTotalUsersStats",
-                    "app.user.get_total_users_count.app_error",
-                    None,
-                    String::new(),
-                    500,
-                )
-            })?;
+    /// this number is larger than any member list on a server with plugins installed. A
+    /// restricted caller's count multiplies — see [`mm_store::UserStore::count`].
+    #[tracing::instrument(skip_all)]
+    pub async fn get_total_users_stats(
+        &self,
+        view_restrictions: Option<&ViewUsersRestrictions>,
+    ) -> AppResult<UsersStats> {
+        let options = mm_model::user_count::UserCountOptions {
+            include_bot_accounts: true,
+            view_restrictions: view_restrictions.map(|r| mm_model::user::ViewUsersRestrictions {
+                teams: r.teams.clone(),
+                channels: r.channels.clone(),
+            }),
+            ..Default::default()
+        };
+        let total_users_count = self.store().user().count(&options).await.map_err(|err| {
+            tracing::error!(error = %err, "user count failed");
+            AppError::boxed(
+                "GetTotalUsersStats",
+                "app.user.get_total_users_count.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
 
         Ok(UsersStats { total_users_count })
     }
@@ -1214,8 +1175,11 @@ impl App {
     /// Port of `app.App.GetViewUsersRestrictions` (app/user.go:2756) in full — `None` for a
     /// caller holding `view_members`, and otherwise the two lists: the caller's teams (deleted
     /// ones excluded) **in which it holds `view_members`**, and every channel it is a member of,
-    /// **archived channels included**. [`App::get_view_users_restrictions`] is the same gate
-    /// without the lists.
+    /// **archived channels included**.
+    ///
+    /// The gate reads the **user's own stored roles** (`HasPermissionTo`), not the session's — so
+    /// a session minted with narrower roles than the account holds still gets `None`. Every stock
+    /// account but a guest holds `view_members` through `system_user` (model/role.go:1179).
     #[tracing::instrument(skip(self), fields(user_id = %user_id))]
     pub async fn view_users_restrictions(
         &self,

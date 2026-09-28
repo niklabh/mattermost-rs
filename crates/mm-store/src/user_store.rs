@@ -50,16 +50,17 @@ pub trait UserStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
-    /// Port of `SqlUserStore.Count` (user_store.go:1471) for the **one** options shape reachable
-    /// today: `UserCountOptions{IncludeBotAccounts: true}` with nil view restrictions, which is
-    /// what `App.GetTotalUsersStats` passes.
-    ///
-    /// Takes no parameters on purpose. Go builds this query from ten option fields and every one
-    /// of the other nine is at its zero value here; a parameter with one reachable value is a
-    /// field with no reader, and the two branches it would gate — the `Bots` anti-join and the
-    /// view-restriction joins — are unported for the reasons `count_total_users` and
-    /// `mm_app::App::get_view_users_restrictions` give.
     /// Port of `SqlUserStore.Count` (user_store.go:1471) — the filtered count.
+    ///
+    /// # View restrictions multiply, they do not filter
+    ///
+    /// `applyViewRestrictionsFilter(query, restrictions, false)` (user_store.go:2162) adds two
+    /// **inner joins with no `DISTINCT`** under a `COUNT(*)`, so a user is counted once per
+    /// (permitted team they are on) × (permitted channel they are in). A restricted caller's
+    /// `/users/stats` is therefore larger than the number of people it can see — Go's number,
+    /// reproduced. An empty list adds no join, and both lists empty is Go's `1 = 0`: nobody.
+    /// `roles`, `channel_roles` and `team_roles` are not read here; the one route that sets them
+    /// forwards the request.
     fn count(
         &self,
         options: &mm_model::user_count::UserCountOptions,
@@ -96,10 +97,6 @@ pub trait UserStore {
     /// accounts (`DeleteAt > 0`) that are **not bots** — the `LEFT JOIN Bots … IS NULL` half is
     /// what keeps a deactivated bot out of the "inactive users" figure.
     fn analytics_get_inactive_users_count(
-        &self,
-    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
-
-    fn count_total_users(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
@@ -1373,6 +1370,19 @@ impl UserStore for SqlUserStore {
                 detail: "query with IncludeBotAccounts=false and excludeRegularUsers=true always return 0",
             });
         }
+        // `applyViewRestrictionsFilter`: `$8`/`$9` are the permitted teams and channels, `$7` is
+        // Go's `1 = 0` for a non-nil restriction with both lists empty. Each lateral yields one row
+        // per matching membership — Go's inner join, multiplicity kept — or exactly one row when
+        // its list is empty, which is Go adding no join at all.
+        let (restricted_to_nobody, teams, channels): (bool, &[String], &[String]) =
+            match &options.view_restrictions {
+                None => (false, &[], &[]),
+                Some(r) => (
+                    r.teams.is_empty() && r.channels.is_empty(),
+                    &r.teams,
+                    &r.channels,
+                ),
+            };
         // `$6`, `ExcludeRegularUsers` with the bots, is Go's inner `JOIN Bots`: bots only.
         let count = sqlx::query_scalar!(
             r#"
@@ -1382,12 +1392,28 @@ impl UserStore for SqlUserStore {
               LEFT JOIN teammembers tm
                 ON (tm.userid = u.id AND tm.teamid = $4 AND tm.deleteat = 0)
               LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $5)
+             CROSS JOIN LATERAL (
+                    SELECT 1 FROM teammembers rtm
+                     WHERE rtm.userid = u.id
+                       AND rtm.deleteat = 0
+                       AND rtm.teamid = ANY($8::text[])
+                    UNION ALL
+                    SELECT 1 WHERE cardinality($8::text[]) = 0
+                   ) AS rt
+             CROSS JOIN LATERAL (
+                    SELECT 1 FROM channelmembers rcm
+                     WHERE rcm.userid = u.id
+                       AND rcm.channelid = ANY($9::text[])
+                    UNION ALL
+                    SELECT 1 WHERE cardinality($9::text[]) = 0
+                   ) AS rc
              WHERE ($1 OR u.deleteat = 0)
                AND ($2 OR u.remoteid = '' OR u.remoteid IS NULL)
                AND ($3 OR b.userid IS NULL)
                AND (NOT $6 OR b.userid IS NOT NULL)
                AND ($4 = '' OR tm.userid IS NOT NULL)
                AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)
+               AND NOT $7
             "#,
             options.include_deleted,
             options.include_remote_users,
@@ -1395,6 +1421,9 @@ impl UserStore for SqlUserStore {
             options.team_id,
             options.channel_id,
             options.exclude_regular_users,
+            restricted_to_nobody,
+            teams,
+            channels,
         )
         .fetch_one(&self.pool)
         .await
@@ -1418,27 +1447,6 @@ impl UserStore for SqlUserStore {
                AND (u.remoteid = '' OR u.remoteid IS NULL)
                AND b.userid IS NULL
                AND u.roles ILIKE '%system_admin%'
-            "#
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|source| StoreError::Db {
-            context: "failed to count Users".to_owned(),
-            source,
-        })?;
-
-        tracing::Span::current().record("count", count);
-        Ok(count)
-    }
-
-    #[tracing::instrument(skip_all, fields(count))]
-    async fn count_total_users(&self) -> Result<i64, StoreError> {
-        let count = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) AS "count!"
-              FROM users
-             WHERE users.deleteat = 0
-               AND (users.remoteid = '' OR users.remoteid IS NULL)
             "#
         )
         .fetch_one(&self.pool)

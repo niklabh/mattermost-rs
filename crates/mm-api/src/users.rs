@@ -8,7 +8,7 @@ use axum::extract::{Path, Request, State};
 use axum::http::header::{ETAG, IF_NONE_MATCH};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use mm_app::user::{UserPage, ViewUsersRestriction};
+use mm_app::user::UserPage;
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL,
     PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,
@@ -2175,46 +2175,29 @@ pub async fn get_known_users(
 /// deactivated and remote users, so this number is larger than any member list on a server with
 /// plugins installed and smaller than the raw `Users` table on one with deactivated accounts.
 ///
-/// # The restricted caller is forwarded
+/// # A restricted caller's count multiplies
 ///
-/// A caller without `view_members` sends Go off to build a team-and-channel filter and apply it
-/// as two inner joins — which, without `DISTINCT`, counts a user once per matching (team,
-/// channel) pair. None of that is ported: `system_user` grants `view_members`, so the branch is
-/// unreachable on a stock server, and shipping unreachable SQL is the thing this project exists
-/// to avoid. The request is forwarded instead, so a deployment that has edited `system_user`
-/// still gets Go's answer. See [`mm_app::App::get_view_users_restrictions`].
+/// A caller without `view_members` — a guest, or anyone once `system_user` is edited — gets
+/// Go's team-and-channel filter, two inner joins without `DISTINCT`: a user counts once per
+/// matching (team, channel) pair. See [`mm_store::UserStore::count`]. A failure building the
+/// restrictions is its own error, before the count.
 ///
 /// # Wire format
 ///
 /// `json.NewEncoder(w).Encode(stats)` — trailing newline. There is no etag and no `Cache-Control`.
-#[tracing::instrument(skip_all, fields(forwarded))]
+#[tracing::instrument(skip_all)]
 pub async fn get_total_users_stats(
     State(state): State<AppState>,
     session: AuthenticatedSession,
-    request: axum::extract::Request,
-) -> Response {
-    match state
+) -> Result<Response, ApiError> {
+    let restrictions = state
         .app
-        .get_view_users_restrictions(&session.0.user_id)
-        .await
-    {
-        ViewUsersRestriction::None => {
-            tracing::Span::current().record("forwarded", false);
-        }
-        ViewUsersRestriction::Restricted => {
-            tracing::Span::current().record("forwarded", true);
-            return crate::proxy::forward_to_go(State(state), request).await;
-        }
-    }
-
-    match serve_total_users_stats(&state).await {
-        Ok(response) => response,
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn serve_total_users_stats(state: &AppState) -> Result<Response, ApiError> {
-    let stats = state.app.get_total_users_stats().await?;
+        .view_users_restrictions(&session.0.user_id)
+        .await?;
+    let stats = state
+        .app
+        .get_total_users_stats(restrictions.as_ref())
+        .await?;
 
     let mut body = serde_json::to_vec(&stats).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise UsersStats");

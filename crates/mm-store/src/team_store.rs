@@ -1567,7 +1567,7 @@ pub async fn get_members(
 ///
 /// `restrictions` is dropped rather than ported. `applyTeamMemberViewRestrictionsFilter` needs
 /// the caller's team-and-channel filter, and the api4 route forwards any caller that has one —
-/// see `App::get_view_users_restrictions`. A parameter no caller of this port can set is a lie
+/// see `App::view_users_restrictions`. A parameter no caller of this port can set is a lie
 /// at the call site, the same rule that dropped `allowFromCache`.
 #[tracing::instrument(skip(pool, user_ids), fields(team_id = %team_id, asked = user_ids.len(), found))]
 pub async fn get_members_by_ids(
