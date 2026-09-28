@@ -9,6 +9,93 @@ use sqlx::PgPool;
 
 use crate::error::StoreError;
 
+/// `applyMultiRoleFilters` (user_store.go:729) resolved into bind values, so one static query can
+/// carry Go's seven-way switch: `(any predicate, system_user equalities, system-role ILIKE
+/// patterns, channel roles, team roles)`.
+///
+/// Only the names Go's `switch` lists produce a predicate — any other name, a team role in the
+/// system list included, adds **nothing**, and when nothing is added there is no filter at all:
+/// Go's `if len(sqOr) > 0`. `system_user` alone is an equality ("only a system_user"); the other
+/// system roles are `ILIKE lower('%role%')`, unescaped, so `_` is LIKE's wildcard as in Go.
+struct RoleFilterBinds {
+    any: bool,
+    system_equals: Vec<String>,
+    system_patterns: Vec<String>,
+    channel_roles: Vec<String>,
+    team_roles: Vec<String>,
+}
+
+fn role_filter_binds(
+    roles: &[String],
+    channel_roles: &[String],
+    team_roles: &[String],
+) -> RoleFilterBinds {
+    use mm_model::role::{
+        CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID,
+        SHARED_CHANNEL_MANAGER_ROLE_ID, SYSTEM_ADMIN_ROLE_ID, SYSTEM_CUSTOM_GROUP_ADMIN_ROLE_ID,
+        SYSTEM_GUEST_ROLE_ID, SYSTEM_MANAGER_ROLE_ID, SYSTEM_READ_ONLY_ADMIN_ROLE_ID,
+        SYSTEM_USER_MANAGER_ROLE_ID, SYSTEM_USER_ROLE_ID, TEAM_ADMIN_ROLE_ID, TEAM_GUEST_ROLE_ID,
+        TEAM_USER_ROLE_ID,
+    };
+    const WILDCARD: [&str; 7] = [
+        SYSTEM_GUEST_ROLE_ID,
+        SYSTEM_ADMIN_ROLE_ID,
+        SYSTEM_USER_MANAGER_ROLE_ID,
+        SYSTEM_READ_ONLY_ADMIN_ROLE_ID,
+        SYSTEM_MANAGER_ROLE_ID,
+        SYSTEM_CUSTOM_GROUP_ADMIN_ROLE_ID,
+        SHARED_CHANNEL_MANAGER_ROLE_ID,
+    ];
+    // `len(systemRoles) > 0 && systemRoles[0] != ""`, and the same guard on the other two.
+    let guarded = |list: &[String]| list.first().is_some_and(|first| !first.is_empty());
+    let mut binds = RoleFilterBinds {
+        any: false,
+        system_equals: Vec::new(),
+        system_patterns: Vec::new(),
+        channel_roles: Vec::new(),
+        team_roles: Vec::new(),
+    };
+    if guarded(roles) {
+        for role in roles {
+            if role == SYSTEM_USER_ROLE_ID {
+                binds.system_equals.push(role.clone());
+            } else if WILDCARD.contains(&role.as_str()) {
+                binds
+                    .system_patterns
+                    .push(format!("%{role}%").to_lowercase());
+            }
+        }
+    }
+    if guarded(channel_roles) {
+        binds.channel_roles = channel_roles
+            .iter()
+            .filter(|r| {
+                [
+                    CHANNEL_ADMIN_ROLE_ID,
+                    CHANNEL_USER_ROLE_ID,
+                    CHANNEL_GUEST_ROLE_ID,
+                ]
+                .contains(&r.as_str())
+            })
+            .cloned()
+            .collect();
+    }
+    if guarded(team_roles) {
+        binds.team_roles = team_roles
+            .iter()
+            .filter(|r| {
+                [TEAM_ADMIN_ROLE_ID, TEAM_USER_ROLE_ID, TEAM_GUEST_ROLE_ID].contains(&r.as_str())
+            })
+            .cloned()
+            .collect();
+    }
+    binds.any = !(binds.system_equals.is_empty()
+        && binds.system_patterns.is_empty()
+        && binds.channel_roles.is_empty()
+        && binds.team_roles.is_empty());
+    binds
+}
+
 /// The three bind values `applyViewRestrictionsFilter` (user_store.go:2162) becomes here:
 /// `(restricted to nobody, teams, channels)`.
 ///
@@ -87,8 +174,8 @@ pub trait UserStore {
     /// (permitted team they are on) × (permitted channel they are in). A restricted caller's
     /// `/users/stats` is therefore larger than the number of people it can see — Go's number,
     /// reproduced. An empty list adds no join, and both lists empty is Go's `1 = 0`: nobody.
-    /// `roles`, `channel_roles` and `team_roles` are not read here; the one route that sets them
-    /// forwards the request.
+    /// `roles`, `channel_roles` and `team_roles` are `applyMultiRoleFilters` — see
+    /// [`role_filter_binds`], and the body for the alias Go may not have joined.
     fn count(
         &self,
         options: &mm_model::user_count::UserCountOptions,
@@ -1412,6 +1499,22 @@ impl UserStore for SqlUserStore {
         // its list is empty, which is Go adding no join at all.
         let (restricted_to_nobody, teams, channels) =
             restriction_binds(options.view_restrictions.as_ref());
+        let roles = role_filter_binds(&options.roles, &options.channel_roles, &options.team_roles);
+        // Go joins `TeamMembers AS tm` only for a team and `ChannelMembers AS cm` only for a
+        // channel *without* a team (the `else if`), and the role predicates name those aliases
+        // unconditionally. A predicate on an alias Go did not join is Postgres's "missing
+        // FROM-clause entry" — a failed query, and a 500 — which this statement, joining both
+        // always, would not reproduce by itself.
+        let cm_joined = options.team_id.is_empty() && !options.channel_id.is_empty();
+        let tm_joined = !options.team_id.is_empty();
+        if (!roles.channel_roles.is_empty() && !cm_joined)
+            || (!roles.team_roles.is_empty() && !tm_joined)
+        {
+            return Err(StoreError::Argument {
+                entity: "Count",
+                detail: "missing FROM-clause entry for a role filter's table alias",
+            });
+        }
         // `$6`, `ExcludeRegularUsers` with the bots, is Go's inner `JOIN Bots`: bots only.
         let count = sqlx::query_scalar!(
             r#"
@@ -1443,6 +1546,20 @@ impl UserStore for SqlUserStore {
                AND ($4 = '' OR tm.userid IS NOT NULL)
                AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)
                AND NOT $7
+               AND (NOT $10::boolean
+                    OR u.roles = ANY($11::text[])
+                    OR EXISTS (SELECT 1 FROM unnest($12::text[]) AS p(pattern)
+                                WHERE u.roles ILIKE p.pattern)
+                    OR ('channel_admin' = ANY($13::text[]) AND cm.schemeadmin = true
+                        AND u.roles NOT ILIKE '%system_admin%')
+                    OR ('channel_user' = ANY($13::text[]) AND cm.schemeuser = true
+                        AND cm.schemeadmin = false AND u.roles NOT ILIKE '%system_admin%')
+                    OR ('channel_guest' = ANY($13::text[]) AND cm.schemeguest = true)
+                    OR ('team_admin' = ANY($14::text[]) AND tm.schemeadmin = true
+                        AND u.roles NOT ILIKE '%system_admin%')
+                    OR ('team_user' = ANY($14::text[]) AND tm.schemeuser = true
+                        AND tm.schemeadmin = false AND u.roles NOT ILIKE '%system_admin%')
+                    OR ('team_guest' = ANY($14::text[]) AND tm.schemeguest = true))
             "#,
             options.include_deleted,
             options.include_remote_users,
@@ -1453,6 +1570,11 @@ impl UserStore for SqlUserStore {
             restricted_to_nobody,
             teams,
             channels,
+            roles.any,
+            &roles.system_equals,
+            &roles.system_patterns,
+            &roles.channel_roles,
+            &roles.team_roles,
         )
         .fetch_one(&self.pool)
         .await

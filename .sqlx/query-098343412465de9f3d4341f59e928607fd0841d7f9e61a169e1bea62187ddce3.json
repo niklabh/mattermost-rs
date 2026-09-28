@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) AS \"count!\"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n              LEFT JOIN teammembers tm\n                ON (tm.userid = u.id AND tm.teamid = $4 AND tm.deleteat = 0)\n              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $5)\n             CROSS JOIN LATERAL (\n                    SELECT 1 FROM teammembers rtm\n                     WHERE rtm.userid = u.id\n                       AND rtm.deleteat = 0\n                       AND rtm.teamid = ANY($8::text[])\n                    UNION ALL\n                    SELECT 1 WHERE cardinality($8::text[]) = 0\n                   ) AS rt\n             CROSS JOIN LATERAL (\n                    SELECT 1 FROM channelmembers rcm\n                     WHERE rcm.userid = u.id\n                       AND rcm.channelid = ANY($9::text[])\n                    UNION ALL\n                    SELECT 1 WHERE cardinality($9::text[]) = 0\n                   ) AS rc\n             WHERE ($1 OR u.deleteat = 0)\n               AND ($2 OR u.remoteid = '' OR u.remoteid IS NULL)\n               AND ($3 OR b.userid IS NULL)\n               AND (NOT $6 OR b.userid IS NOT NULL)\n               AND ($4 = '' OR tm.userid IS NOT NULL)\n               AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)\n               AND NOT $7\n               AND (NOT $10::boolean\n                    OR u.roles = ANY($11::text[])\n                    OR EXISTS (SELECT 1 FROM unnest($12::text[]) AS p(pattern)\n                                WHERE u.roles ILIKE p.pattern)\n                    OR ('channel_admin' = ANY($13::text[]) AND cm.schemeadmin = true\n                        AND u.roles NOT ILIKE '%system_admin%')\n                    OR ('channel_user' = ANY($13::text[]) AND cm.schemeuser = true\n                        AND cm.schemeadmin = false AND u.roles NOT ILIKE '%system_admin%')\n                    OR ('channel_guest' = ANY($13::text[]) AND cm.schemeguest = true)\n                    OR ('team_admin' = ANY($14::text[]) AND tm.schemeadmin = true\n                        AND u.roles NOT ILIKE '%system_admin%')\n                    OR ('team_user' = ANY($14::text[]) AND tm.schemeuser = true\n                        AND tm.schemeadmin = false AND u.roles NOT ILIKE '%system_admin%')\n                    OR ('team_guest' = ANY($14::text[]) AND tm.schemeguest = true))\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool",
+        "TextArray",
+        "TextArray",
+        "Bool",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "098343412465de9f3d4341f59e928607fd0841d7f9e61a169e1bea62187ddce3"
+}

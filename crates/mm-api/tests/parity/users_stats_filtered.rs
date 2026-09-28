@@ -237,35 +237,146 @@ async fn a_plain_caller_is_refused() {
     assert_eq!(go["id"], "api.context.permissions.app_error");
 }
 
-/// The role parameters are Go's, at any value — including the empty string.
+/// The role filters (`applyMultiRoleFilters`), each asked of both servers. A fresh team holds one
+/// member per scheme flag, made by SQL, plus a `system_user_manager`; the creating admin is a
+/// team and channel admin whose `system_admin` role the admin predicates must exclude. Every
+/// query is compared, the 400s and whatever Go answers for `channel_roles` beside a team — an
+/// alias Go never joined — included.
 #[tokio::test]
-async fn the_role_parameters_are_forwarded() {
+async fn the_role_filters_answer_as_go_does() {
     if !stack_enabled() {
         return;
     }
+    let Some(pool) = common::fixture_pool().await else {
+        return;
+    };
     let client = client();
     let token = go_minted_token(&client).await;
     let _ = fixture(&client, &token).await;
-
-    for query in [
-        "roles=system_admin",
-        "roles=",
-        "channel_roles=channel_user",
-        "team_roles=team_user",
+    let team = create_team(&client, &token, "filtroles").await;
+    let channel = create_channel_typed(&client, &token, &team, "filtroles", "O").await;
+    let admin = create_plain_user(&client, &token, &team, "filtrolesadmin").await;
+    let guest = create_plain_user(&client, &token, &team, "filtrolesguest").await;
+    let member = create_plain_user(&client, &token, &team, "filtrolesmember").await;
+    let manager = create_plain_user(&client, &token, &team, "filtrolesmanager").await;
+    for user in [&admin.id, &guest.id, &member.id] {
+        common::add_user_to_channel(&client, &token, &channel, user).await;
+    }
+    for (statement, user) in [
+        (
+            "UPDATE teammembers SET schemeadmin = true WHERE userid = $1",
+            &admin.id,
+        ),
+        (
+            "UPDATE channelmembers SET schemeadmin = true WHERE userid = $1",
+            &admin.id,
+        ),
+        (
+            "UPDATE teammembers SET schemeuser = false, schemeguest = true WHERE userid = $1",
+            &guest.id,
+        ),
+        (
+            "UPDATE channelmembers SET schemeuser = false, schemeguest = true WHERE userid = $1",
+            &guest.id,
+        ),
+        (
+            "UPDATE users SET roles = 'system_guest' WHERE id = $1",
+            &guest.id,
+        ),
+        (
+            "UPDATE users SET roles = 'system_user system_user_manager' WHERE id = $1",
+            &manager.id,
+        ),
     ] {
-        let rs = client
-            .get(format!("{RUST}{PATH}?{query}"))
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
+        sqlx::query(statement)
+            .bind(user)
+            .execute(&pool)
             .await
-            .expect("we answer");
-        assert_eq!(
-            rs.headers()
-                .get("x-mmrs-served-by")
-                .and_then(|v| v.to_str().ok()),
-            Some("go"),
-            "?{query} must be forwarded"
-        );
+            .expect("the role fixture is written");
+    }
+    common::invalidate_go_caches(&client, &token).await;
+
+    let queries = [
+        "roles=system_admin".to_owned(),
+        "roles=system_user".to_owned(),
+        "roles=system_user_manager".to_owned(),
+        "roles=system_guest,system_admin".to_owned(),
+        // A team role in the system list is outside Go's switch: no predicate, no filter.
+        "roles=team_admin".to_owned(),
+        // The same two questions scoped to the fresh team, which no other suite writes to — a
+        // whole-table count moves between two reads in the concurrent run.
+        format!("in_team={team}"),
+        format!("in_team={team}&roles=team_admin"),
+        format!("in_team={team}&channel_roles=channel_admin"),
+        "roles=".to_owned(),
+        "roles=Bad-Role".to_owned(),
+        format!("in_team={team}&team_roles=team_admin"),
+        format!("in_team={team}&team_roles=team_user"),
+        format!("in_team={team}&team_roles=team_guest"),
+        format!("in_team={team}&team_roles=team_user,team_guest"),
+        format!("in_team={team}&team_roles=Bad-Role"),
+        format!("in_team={team}&roles=system_user_manager"),
+        // Without `in_team` the parameter is never read.
+        "team_roles=team_admin".to_owned(),
+        format!("in_channel={channel}&channel_roles=channel_admin"),
+        format!("in_channel={channel}&channel_roles=channel_user"),
+        format!("in_channel={channel}&channel_roles=channel_guest"),
+        format!("in_channel={channel}&channel_roles=Bad-Role"),
+        format!("in_team={team}&in_channel={channel}&channel_roles=channel_user"),
+    ];
+    let mut answers = Vec::new();
+    for query in &queries {
+        let path = format!("{PATH}?{query}");
+        let ((go_status, go_body), (rs_status, rs_body)) =
+            fetch_both_raw(&client, &token, &path).await;
+        assert_eq!(rs_status, go_status, "{path}: Go {go_body:?}");
+        if go_status == 200 {
+            answers.push((query.clone(), count(&client, &token, query).await));
+        } else {
+            assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, &path);
+            answers.push((query.clone(), -i64::from(go_status)));
+        }
+    }
+    let answer = |q: &str| {
+        answers
+            .iter()
+            .find(|(query, _)| query == q)
+            .map(|(_, n)| *n)
+            .expect("asked")
+    };
+    // The fixture's shape, read off Go's answers so a degenerate fixture cannot pass silently.
+    assert_eq!(
+        answer(&format!("in_team={team}&team_roles=team_admin")),
+        1,
+        "the admin is excluded"
+    );
+    assert_eq!(answer(&format!("in_team={team}&team_roles=team_guest")), 1);
+    assert_eq!(
+        answer(&format!("in_team={team}&roles=system_user_manager")),
+        1
+    );
+    assert_eq!(answer("roles=Bad-Role"), -400);
+    assert_eq!(
+        answer(&format!(
+            "in_team={team}&in_channel={channel}&channel_roles=channel_user"
+        )),
+        -500,
+        "`cm` is not joined when a team is named"
+    );
+    let whole_team = answer(&format!("in_team={team}"));
+    assert_eq!(
+        answer(&format!("in_team={team}&roles=team_admin")),
+        whole_team,
+        "no predicate is no filter"
+    );
+    assert_eq!(
+        answer(&format!("in_team={team}&channel_roles=channel_admin")),
+        whole_team,
+        "never read without a channel"
+    );
+
+    for user in [&admin.id, &guest.id, &member.id, &manager.id] {
+        delete_plain_user(&client, &token, user).await;
     }
 }
 

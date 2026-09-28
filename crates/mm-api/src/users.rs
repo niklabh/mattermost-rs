@@ -389,13 +389,20 @@ pub async fn get_user_by_username(
     }
 }
 
-/// The `getFilteredUsersStats` query parameters that add a role filter, and are therefore Go's.
-///
-/// `applyMultiRoleFilters` (user_store.go) turns each into a join and an `IN` list, and
-/// `CleanRoleNames` validates them first — a 400 this port would have to reproduce exactly. A
-/// request carrying any of them is forwarded whole, at any value, including the empty string that
-/// Go itself treats as absent.
-const FILTERED_STATS_FORWARDED_PARAMS: &[&str] = &["roles", "channel_roles", "team_roles"];
+/// `CleanRoleNames(strings.Split(value, ","))` for one of `getFilteredUsersStats`' role
+/// parameters, answering the parameter-named 400 Go's `SetInvalidParam` gives on a bad name.
+/// Go reads the list only when the value is non-empty, so an absent or empty parameter is `[]`.
+#[allow(clippy::result_large_err)]
+fn filtered_stats_roles(value: &str, param: &str) -> Result<Vec<String>, ApiError> {
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+    let parts: Vec<String> = value.split(',').map(str::to_owned).collect();
+    match mm_model::role::clean_role_names(&parts) {
+        (cleaned, true) => Ok(cleaned.unwrap_or_default()),
+        (_, false) => Err(ApiError::invalid_param(param)),
+    }
+}
 
 /// Port of `getFilteredUsersStats` (api4/user.go:1042) —
 /// `GET /api/v4/users/stats/filtered`.
@@ -419,25 +426,50 @@ const FILTERED_STATS_FORWARDED_PARAMS: &[&str] = &["roles", "channel_roles", "te
 /// The store's `else if` (user_store.go:1497) means a request naming both filters on the team
 /// alone. Measured: the two together return the team's count, not the intersection.
 ///
+/// # Role filters
+///
+/// `roles`, `channel_roles` (read only with `in_channel`) and `team_roles` (only with `in_team`)
+/// are `applyMultiRoleFilters` — see `mm_store::UserStore::count`. Unlike `getUsers`, names are
+/// only syntax-checked, not looked up, and a name outside Go's switch filters nothing. With
+/// both `in_team` and `in_channel`, `channel_roles` names an alias Go never joined: its 500.
+/// `parity::users_stats_filtered`.
+///
 /// # Wire format
 ///
 /// `json.NewEncoder(w).Encode(stats)` — a **trailing newline**, unlike the unfiltered
 /// `/users/stats` beside it, which uses `w.Write`.
-#[tracing::instrument(skip_all, fields(forwarded))]
+#[tracing::instrument(skip_all)]
 pub async fn get_filtered_users_stats(
     State(state): State<AppState>,
     axum::extract::RawQuery(query): axum::extract::RawQuery,
     session: AuthenticatedSession,
-    request: axum::extract::Request,
 ) -> Response {
-    if FILTERED_STATS_FORWARDED_PARAMS
-        .iter()
-        .any(|name| query_first(query.as_deref(), name).is_some())
-    {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
+    let param = |name: &str| query_first(query.as_deref(), name).unwrap_or_default();
+    let team_id = param("in_team");
+    let channel_id = param("in_channel");
+
+    // Go's order: `roles`, then `channel_roles` only with a channel, then `team_roles` only with
+    // a team — each a 400 naming Go's own spelling, all before the permission check.
+    let roles = match filtered_stats_roles(&param("roles"), "roles") {
+        Ok(roles) => roles,
+        Err(err) => return err.into_response(),
+    };
+    let channel_roles = if channel_id.is_empty() {
+        Vec::new()
+    } else {
+        match filtered_stats_roles(&param("channel_roles"), "channelRoles") {
+            Ok(roles) => roles,
+            Err(err) => return err.into_response(),
+        }
+    };
+    let team_roles = if team_id.is_empty() {
+        Vec::new()
+    } else {
+        match filtered_stats_roles(&param("team_roles"), "teamRoles") {
+            Ok(roles) => roles,
+            Err(err) => return err.into_response(),
+        }
+    };
 
     if !state
         .app
@@ -465,8 +497,11 @@ pub async fn get_filtered_users_stats(
         include_deleted: flag("include_deleted"),
         include_bot_accounts: flag("include_bots"),
         include_remote_users: flag("include_remote_users"),
-        team_id: query_first(query.as_deref(), "in_team").unwrap_or_default(),
-        channel_id: query_first(query.as_deref(), "in_channel").unwrap_or_default(),
+        team_id,
+        channel_id,
+        roles,
+        channel_roles,
+        team_roles,
         ..mm_model::user_count::UserCountOptions::default()
     };
 
